@@ -2,7 +2,7 @@
 
 A browser-only 2D fighting game. Pick a fighting style and pose for sixteen photos on a phone, the phone turns them into a sprite fighter locally, sends it to a laptop over WebRTC, and two people fight with controllers or a shared keyboard. No accounts, no backend storage: fighters live in each browser's IndexedDB. See [PLAN.md](PLAN.md) for the design.
 
-## Run it
+## Run it 
 
 ```sh
 npm install
