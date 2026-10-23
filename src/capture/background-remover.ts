@@ -23,16 +23,28 @@ export interface MatteDebug {
  * person, then only what's connected to the skeleton is kept (matting.ts).
  * Runs on WebGPU where the browser has it, otherwise on WASM (much slower).
  */
+/** iPhone, or iPad (which reports itself as a Mac with touch). Every iOS browser is Safari's engine underneath. */
+function isIOS(): boolean {
+  if (typeof navigator === "undefined") return false;
+  return /iPhone|iPad|iPod/.test(navigator.userAgent) || (navigator.userAgent.includes("Macintosh") && navigator.maxTouchPoints > 1);
+}
+
 export class BackgroundRemover {
   private constructor(private readonly ort: Ort, private readonly session: InferenceSession, readonly backend: MattingBackend) {}
 
-  /** `onProgress` reports the model download (instant from the model cache on later visits), `onWasmProgress` ONNX Runtime's binary. */
-  static async create(onProgress?: DownloadProgress, onWasmProgress?: DownloadProgress): Promise<BackgroundRemover> {
-    const [ort, wasm, model] = await Promise.all([
+  /**
+   * `onProgress` reports the model download (instant from the model cache on later visits), `onWasmProgress` ONNX Runtime's binary.
+   * Downloads start at once; the session is only built once `after` settles, so it doesn't land on top of
+   * the pose models being built (memory peaks then, and iOS kills tabs that go over).
+   */
+  static async create(onProgress?: DownloadProgress, onWasmProgress?: DownloadProgress, after?: Promise<unknown>): Promise<BackgroundRemover> {
+    const [ort, wasm, downloaded] = await Promise.all([
       import("onnxruntime-web"),
       loadModelBytes(ORT_WASM_URL, onWasmProgress),
       loadModelBytes(MATTING_MODEL_URL, onProgress),
+      after?.catch(() => undefined),
     ]);
+    let model: Uint8Array | null = downloaded;
     // The loader comes from the CDN; the binary from the model cache (it was downloaded with progress).
     ort.env.wasm.wasmPaths = ORT_RUNTIME_BASE;
     ort.env.wasm.wasmBinary = wasm;
@@ -40,11 +52,17 @@ export class BackgroundRemover {
     let lastError: unknown;
     for (const backend of backends) {
       try {
+        // Gone if WebGPU got as far as its first run before failing: the model cache has it.
+        model ??= await loadModelBytes(MATTING_MODEL_URL);
         const session = await ort.InferenceSession.create(model, { executionProviders: [backend], graphOptimizationLevel: "all" });
+        // ORT has its own copies now: let the downloaded bytes go before anything else allocates.
+        model = null;
+        ort.env.wasm.wasmBinary = undefined;
         const remover = new BackgroundRemover(ort, session, backend);
         // The first WebGPU run compiles shaders (seconds): do it while loading, not on the first snapshot.
-        // On WASM a run costs as much as a real one, so don't.
-        if (backend === "webgpu") await remover.infer(new Float32Array(3 * MODEL_SIZE * MODEL_SIZE));
+        // On WASM a run costs as much as a real one, so don't. Nor on iOS, where a 1024² run on top of
+        // everything loading is what pushes the tab over its memory limit: the first snapshot is slower there.
+        if (backend === "webgpu" && !isIOS()) await remover.infer(new Float32Array(3 * MODEL_SIZE * MODEL_SIZE));
         console.info(`[matting] ISNet on ${backend}`);
         return remover;
       } catch (err) {

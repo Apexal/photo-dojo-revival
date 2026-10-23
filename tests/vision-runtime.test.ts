@@ -30,6 +30,19 @@ describe("model downloads", () => {
     expect(seen.at(-1)).toEqual([1000, 1000]);
   });
 
+  it("returns exactly the bytes sent when Content-Length is missing or wrong", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => streamed([100, 200, 700], false)));
+    expect((await loadModelBytes("https://example.test/a")).length).toBe(1000);
+    const short = streamed([100, 200]);
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(short.body, { headers: { "content-length": "250" } })));
+    expect((await loadModelBytes("https://example.test/b")).length).toBe(300);
+    const long = streamed([100, 200]);
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(long.body, { headers: { "content-length": "500" } })));
+    const bytes = await loadModelBytes("https://example.test/c");
+    expect(bytes.length).toBe(300);
+    expect(bytes.every((b) => b === 7)).toBe(true);
+  });
+
   it("uses the model cache when it has the file", async () => {
     const store = new Map<string, Response>();
     vi.stubGlobal("caches", {

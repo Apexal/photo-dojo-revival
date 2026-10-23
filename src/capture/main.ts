@@ -464,10 +464,12 @@ class CaptureApp {
     this.modelsPromise ??= (async () => {
       // Estimated sizes until the real ones arrive, so the bar moves evenly. Each model is read once, by what uses it.
       const downloads = new DownloadTracker({ wasm: 13.5e6, pose: 30.7e6, ort: 28.3e6, matting: 178.6e6 }, (f) => this.setLoadProgress(f));
+      // Everything downloads at once, but the matting session is built after the pose models: building both together was too much memory for iPhones.
+      const pose = this.tracker ? Promise.resolve(this.tracker) : PoseTracker.create(downloads.reporter("pose"), downloads.reporter("wasm"));
       const [, tracker, remover] = await Promise.all([
         this.camera.isRunning ? Promise.resolve() : this.camera.start("environment"),
-        this.tracker ?? PoseTracker.create(downloads.reporter("pose"), downloads.reporter("wasm")),
-        this.remover ?? BackgroundRemover.create(downloads.reporter("matting"), downloads.reporter("ort")),
+        pose,
+        this.remover ?? BackgroundRemover.create(downloads.reporter("matting"), downloads.reporter("ort"), pose),
       ]);
       this.setLoadProgress(1);
       this.tracker = tracker;

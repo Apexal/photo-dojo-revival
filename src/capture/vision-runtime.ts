@@ -69,22 +69,23 @@ async function readWithProgress(response: Response, onProgress?: DownloadProgres
     return bytes;
   }
   const reader = response.body.getReader();
-  const chunks: Uint8Array[] = [];
+  // Filled in place (grown only if Content-Length was wrong), so a big model isn't held twice while it's assembled.
+  let buffer = new Uint8Array(total);
   let loaded = 0;
   onProgress?.(0, total);
   for (;;) {
     const { done, value } = await reader.read();
     if (done) break;
-    chunks.push(value);
+    if (loaded + value.length > buffer.length) {
+      const grown = new Uint8Array(Math.max(buffer.length * 2, loaded + value.length));
+      grown.set(buffer.subarray(0, loaded));
+      buffer = grown;
+    }
+    buffer.set(value, loaded);
     loaded += value.length;
     onProgress?.(loaded, Math.max(total, loaded));
   }
-  const bytes = new Uint8Array(loaded);
-  let at = 0;
-  for (const c of chunks) {
-    bytes.set(c, at);
-    at += c.length;
-  }
+  const bytes = loaded === buffer.length ? buffer : buffer.slice(0, loaded);
   onProgress?.(loaded, loaded);
   return bytes;
 }
