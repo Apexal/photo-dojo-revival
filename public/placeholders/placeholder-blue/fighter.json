@@ -1,6 +1,7 @@
 {
  "fighterId": "placeholder-blue",
  "name": "Blue Stick",
+ "archetype": "grappler",
  "thumbnail": "thumbnail.png",
  "poses": {
   "idle": {
@@ -1570,6 +1571,181 @@
      "visibility": 0.95
     }
    ]
+  },
+  "signature": {
+   "file": "signature.png",
+   "anchorPoint": {
+    "x": 256,
+    "y": 480
+   },
+   "landmarks": [
+    {
+     "x": 344.38,
+     "y": 155.98,
+     "visibility": 0.95
+    },
+    {
+     "x": 341.16,
+     "y": 152.16,
+     "visibility": 0.95
+    },
+    {
+     "x": 339.44,
+     "y": 150.74,
+     "visibility": 0.95
+    },
+    {
+     "x": 337.49,
+     "y": 150.29,
+     "visibility": 0.95
+    },
+    {
+     "x": 342.06,
+     "y": 148.26,
+     "visibility": 0.95
+    },
+    {
+     "x": 340.34,
+     "y": 146.84,
+     "visibility": 0.95
+    },
+    {
+     "x": 338.39,
+     "y": 146.39,
+     "visibility": 0.95
+    },
+    {
+     "x": 322.95,
+     "y": 151.04,
+     "visibility": 0.95
+    },
+    {
+     "x": 326.84,
+     "y": 151.94,
+     "visibility": 0.95
+    },
+    {
+     "x": 338.24,
+     "y": 164.83,
+     "visibility": 0.95
+    },
+    {
+     "x": 339.13,
+     "y": 160.93,
+     "visibility": 0.95
+    },
+    {
+     "x": 314.88,
+     "y": 190.97,
+     "visibility": 0.95
+    },
+    {
+     "x": 324.88,
+     "y": 190.97,
+     "visibility": 0.95
+    },
+    {
+     "x": 375.64,
+     "y": 216.76,
+     "visibility": 0.95
+    },
+    {
+     "x": 387.65,
+     "y": 211.37,
+     "visibility": 0.95
+    },
+    {
+     "x": 426.94,
+     "y": 184.7,
+     "visibility": 0.95
+    },
+    {
+     "x": 438.96,
+     "y": 179.31,
+     "visibility": 0.95
+    },
+    {
+     "x": 438.39,
+     "y": 182.26,
+     "visibility": 0.95
+    },
+    {
+     "x": 450.41,
+     "y": 176.87,
+     "visibility": 0.95
+    },
+    {
+     "x": 438.82,
+     "y": 177.28,
+     "visibility": 0.95
+    },
+    {
+     "x": 450.83,
+     "y": 171.89,
+     "visibility": 0.95
+    },
+    {
+     "x": 430.23,
+     "y": 176.75,
+     "visibility": 0.95
+    },
+    {
+     "x": 442.25,
+     "y": 171.36,
+     "visibility": 0.95
+    },
+    {
+     "x": 299.58,
+     "y": 299.9,
+     "visibility": 0.95
+    },
+    {
+     "x": 309.58,
+     "y": 299.9,
+     "visibility": 0.95
+    },
+    {
+     "x": 275.93,
+     "y": 382.38,
+     "visibility": 0.95
+    },
+    {
+     "x": 320.03,
+     "y": 385.06,
+     "visibility": 0.95
+    },
+    {
+     "x": 225.49,
+     "y": 451.79,
+     "visibility": 0.95
+    },
+    {
+     "x": 286.51,
+     "y": 464.04,
+     "visibility": 0.95
+    },
+    {
+     "x": 215.49,
+     "y": 451.94,
+     "visibility": 0.95
+    },
+    {
+     "x": 276.8,
+     "y": 466.44,
+     "visibility": 0.95
+    },
+    {
+     "x": 238.59,
+     "y": 471.19,
+     "visibility": 0.95
+    },
+    {
+     "x": 303.63,
+     "y": 480,
+     "visibility": 0.95
+    }
+   ],
+   "attackSide": "right"
   },
   "handshake": {
    "file": "handshake.png",

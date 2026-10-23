@@ -9,7 +9,8 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { LANDMARK, POSE_IDS, SPRITE_CANVAS_SIZE, THUMBNAIL_SIZE, type NormalizedLandmark } from "../src/shared/fighter-model";
 import { anchorTargetFor, midHip, midShoulder } from "../src/shared/pose-geometry";
-import { HEAD_RADIUS_PX, STICK_BONUS_POSES, buildStickFigureLandmarks, headCenter } from "../src/shared/stick-figure";
+import { HEAD_RADIUS_PX, STICK_BONUS_POSES, buildStickFigureLandmarks, headCenter, stickPoseParams } from "../src/shared/stick-figure";
+import type { ArchetypeId } from "../src/shared/archetypes";
 import type { PoseId } from "../src/shared/fighter-model";
 import { encodePng, encodeWav } from "./lib/png";
 
@@ -93,28 +94,30 @@ function downscale(img: Uint8Array, from: number, to: number): Uint8Array {
   return out;
 }
 
-const FIGHTERS = [
-  { id: "placeholder-red", name: "Red Stick", body: [214, 64, 52] as RGB, accent: [250, 210, 60] as RGB },
-  { id: "placeholder-blue", name: "Blue Stick", body: [52, 112, 214] as RGB, accent: [240, 240, 240] as RGB },
-  { id: "placeholder-green", name: "Green Stick", body: [56, 168, 84] as RGB, accent: [250, 140, 40] as RGB },
-  { id: "placeholder-purple", name: "Purple Stick", body: [150, 74, 204] as RGB, accent: [110, 230, 225] as RGB },
+// One of each archetype, so the title demo and the CPU show off every signature move.
+const FIGHTERS: { id: string; name: string; archetype: ArchetypeId; body: RGB; accent: RGB }[] = [
+  { id: "placeholder-red", name: "Red Stick", archetype: "brawler", body: [214, 64, 52], accent: [250, 210, 60] },
+  { id: "placeholder-blue", name: "Blue Stick", archetype: "grappler", body: [52, 112, 214], accent: [240, 240, 240] },
+  { id: "placeholder-green", name: "Green Stick", archetype: "guardian", body: [56, 168, 84], accent: [250, 140, 40] },
+  { id: "placeholder-purple", name: "Purple Stick", archetype: "acrobat", body: [150, 74, 204], accent: [110, 230, 225] },
 ];
+const round = (n: number) => Math.round(n * 100) / 100;
+const hasAttackSide = (poseId: PoseId) => poseId === "punch" || poseId === "kick" || poseId === "signature" || poseId === "handshake";
 
 for (const f of FIGHTERS) {
   const dir = join(OUT, "placeholders", f.id);
   mkdirSync(dir, { recursive: true });
   const poses: Record<string, unknown> = {};
   for (const poseId of POSE_IDS) {
-    const landmarks = buildStickFigureLandmarks(poseId);
+    const landmarks = buildStickFigureLandmarks(poseId, stickPoseParams(poseId, f.archetype));
     const img = rasterize(stickShapes(landmarks, f.body, f.accent), [25, 20, 30]);
     writeFileSync(join(dir, `${poseId}.png`), encodePng(S, S, img));
     if (poseId === "idle") writeFileSync(join(dir, "thumbnail.png"), encodePng(THUMBNAIL_SIZE, THUMBNAIL_SIZE, downscale(img, S, THUMBNAIL_SIZE)));
-    const round = (n: number) => Math.round(n * 100) / 100;
     poses[poseId] = {
       file: `${poseId}.png`,
       anchorPoint: anchorTargetFor(poseId),
       landmarks: landmarks.map((l) => ({ x: round(l.x), y: round(l.y), visibility: l.visibility })),
-      ...(poseId === "punch" || poseId === "kick" || poseId === "handshake" ? { attackSide: "right" } : {}),
+      ...(hasAttackSide(poseId) ? { attackSide: "right" } : {}),
     };
   }
   const variants: Record<string, unknown[]> = {};
@@ -122,15 +125,14 @@ for (const f of FIGHTERS) {
     const poseId = key.split("-")[0] as PoseId;
     const landmarks = buildStickFigureLandmarks(poseId, params);
     writeFileSync(join(dir, `${key}.png`), encodePng(S, S, rasterize(stickShapes(landmarks, f.body, f.accent), [25, 20, 30])));
-    const round = (n: number) => Math.round(n * 100) / 100;
     (variants[poseId] ??= []).push({
       file: `${key}.png`,
       anchorPoint: anchorTargetFor(poseId),
       landmarks: landmarks.map((l) => ({ x: round(l.x), y: round(l.y), visibility: l.visibility })),
-      ...(poseId === "punch" || poseId === "kick" || poseId === "handshake" ? { attackSide: "right" } : {}),
+      ...(hasAttackSide(poseId) ? { attackSide: "right" } : {}),
     });
   }
-  writeFileSync(join(dir, "fighter.json"), JSON.stringify({ fighterId: f.id, name: f.name, thumbnail: "thumbnail.png", poses, variants }, null, 1));
+  writeFileSync(join(dir, "fighter.json"), JSON.stringify({ fighterId: f.id, name: f.name, archetype: f.archetype, thumbnail: "thumbnail.png", poses, variants }, null, 1));
   console.log("wrote", dir);
 }
 

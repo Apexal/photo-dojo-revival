@@ -7,6 +7,7 @@ import {
   POSE_IDS,
   type PoseId,
 } from "./fighter-model";
+import type { ArchetypeId } from "./archetypes";
 import type { FighterGeometry, PoseGeometry } from "./frame-data";
 import { anchorTargetFor, computeAnchor } from "./pose-geometry";
 
@@ -30,7 +31,8 @@ const T = CANONICAL_TORSO_LENGTH_PX;
 const BONE = { upperArm: 0.6 * T, forearm: 0.55 * T, thigh: 0.78 * T, shin: 0.78 * T, neck: 0.36 * T };
 const DEPTH = 5; // far-side (left) joints sit slightly behind in a side view
 
-export const STICK_POSES: Record<PoseId, StickPoseParams> = {
+/** The main poses; the signature pose's skeleton depends on the archetype (STICK_SIGNATURE_POSES). */
+export const STICK_POSES: Record<Exclude<PoseId, "signature">, StickPoseParams> = {
   idle: {
     torsoLean: 5, headTilt: 5,
     // Fists by the chin: a guard held out front would make every fighter hittable from far away.
@@ -86,6 +88,39 @@ export const STICK_POSES: Record<PoseId, StickPoseParams> = {
   },
 };
 
+/** Each archetype's signature pose (the "signature" capture). */
+export const STICK_SIGNATURE_POSES: Record<ArchetypeId, StickPoseParams> = {
+  // Shoulder charge: leaning hard into the lead shoulder, arm tucked, lunging.
+  brawler: {
+    torsoLean: 28, headTilt: 10,
+    arms: { right: { swing: 25, bend: 55 }, left: { swing: 40, bend: 60 } },
+    legs: { right: { swing: 40, bend: 145 }, left: { swing: -12, bend: 170 } },
+  },
+  // Bear hug: both arms out wide at chest height, rounded to wrap someone up.
+  grappler: {
+    torsoLean: 8, headTilt: 5,
+    arms: { right: { swing: 80, bend: 130 }, left: { swing: 75, bend: 125 } },
+    legs: { right: { swing: 15, bend: 150 }, left: { swing: -8, bend: 160 } },
+  },
+  // Parry: lead palm up and out like a stop sign, rear fist guarding the chin.
+  guardian: {
+    torsoLean: 0, headTilt: 5,
+    arms: { right: { swing: 105, bend: 115 }, left: { swing: 30, bend: 45 } },
+    legs: { right: { swing: 14, bend: 155 }, left: { swing: -8, bend: 168 } },
+  },
+  // Flying knee: lead knee driven up high, shin folded, arms swung back.
+  acrobat: {
+    torsoLean: -5, headTilt: 0,
+    arms: { right: { swing: -40, bend: 150 }, left: { swing: 45, bend: 80 } },
+    legs: { right: { swing: 110, bend: 60 }, left: { swing: -5, bend: 170 } },
+  },
+};
+
+/** The skeleton for a pose; the signature pose needs to know whose it is. */
+export function stickPoseParams(poseId: PoseId, archetype: ArchetypeId): StickPoseParams {
+  return poseId === "signature" ? STICK_SIGNATURE_POSES[archetype] : STICK_POSES[poseId];
+}
+
 interface Vec { x: number; y: number }
 const add = (a: Vec, b: Vec, k = 1): Vec => ({ x: a.x + b.x * k, y: a.y + b.y * k });
 const rad = (deg: number) => (deg * Math.PI) / 180;
@@ -133,8 +168,11 @@ export const STICK_BONUS_POSES: Record<string, StickPoseParams> = {
   },
 };
 
-/** Landmarks for a pose, with the anchor placed exactly where sprite normalization would put it. */
-export function buildStickFigureLandmarks(poseId: PoseId, params: StickPoseParams = STICK_POSES[poseId]): NormalizedLandmark[] {
+/**
+ * Landmarks for a pose, with the anchor placed exactly where sprite normalization would put it.
+ * The signature pose defaults to the brawler's; pass `params` for another archetype's.
+ */
+export function buildStickFigureLandmarks(poseId: PoseId, params: StickPoseParams = stickPoseParams(poseId, "brawler")): NormalizedLandmark[] {
   const lm: NormalizedLandmark[] = Array.from({ length: LANDMARK_COUNT }, () => ({ x: 0, y: 0, visibility: 0.95 }));
   const set = (i: number, p: Vec) => { lm[i] = { x: p.x, y: p.y, visibility: 0.95 }; };
 
@@ -231,14 +269,14 @@ export function stickFigureSvgPath(landmarks: NormalizedLandmark[]): string {
 }
 
 /** Geometry for a stick-figure fighter, as the simulation sees it (main poses and their second versions). */
-export function stickFigureGeometry(): FighterGeometry {
+export function stickFigureGeometry(archetype: ArchetypeId = "brawler"): FighterGeometry {
   const poses = Object.fromEntries(
-    POSE_IDS.map((poseId) => [poseId, { landmarks: buildStickFigureLandmarks(poseId), anchorPoint: anchorTargetFor(poseId) }]),
+    POSE_IDS.map((poseId) => [poseId, { landmarks: buildStickFigureLandmarks(poseId, stickPoseParams(poseId, archetype)), anchorPoint: anchorTargetFor(poseId) }]),
   ) as Record<PoseId, PoseGeometry>;
   const variants: Partial<Record<PoseId, PoseGeometry[]>> = {};
   for (const [key, params] of Object.entries(STICK_BONUS_POSES)) {
     const poseId = key.split("-")[0] as PoseId;
     (variants[poseId] ??= []).push({ landmarks: buildStickFigureLandmarks(poseId, params), anchorPoint: anchorTargetFor(poseId) });
   }
-  return { ...poses, variants };
+  return { ...poses, variants, archetype };
 }

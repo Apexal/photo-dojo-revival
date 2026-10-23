@@ -1,6 +1,7 @@
 {
  "fighterId": "placeholder-purple",
  "name": "Purple Stick",
+ "archetype": "acrobat",
  "thumbnail": "thumbnail.png",
  "poses": {
   "idle": {
@@ -1570,6 +1571,181 @@
      "visibility": 0.95
     }
    ]
+  },
+  "signature": {
+   "file": "signature.png",
+   "anchorPoint": {
+    "x": 256,
+    "y": 480
+   },
+   "landmarks": [
+    {
+     "x": 278.8,
+     "y": 147.58,
+     "visibility": 0.95
+    },
+    {
+     "x": 274.55,
+     "y": 144.94,
+     "visibility": 0.95
+    },
+    {
+     "x": 272.47,
+     "y": 144.12,
+     "visibility": 0.95
+    },
+    {
+     "x": 270.48,
+     "y": 144.29,
+     "visibility": 0.95
+    },
+    {
+     "x": 274.2,
+     "y": 140.95,
+     "visibility": 0.95
+    },
+    {
+     "x": 272.13,
+     "y": 140.13,
+     "visibility": 0.95
+    },
+    {
+     "x": 270.13,
+     "y": 140.31,
+     "visibility": 0.95
+    },
+    {
+     "x": 256.88,
+     "y": 149.5,
+     "visibility": 0.95
+    },
+    {
+     "x": 260.87,
+     "y": 149.15,
+     "visibility": 0.95
+    },
+    {
+     "x": 275.69,
+     "y": 157.89,
+     "visibility": 0.95
+    },
+    {
+     "x": 275.34,
+     "y": 153.91,
+     "visibility": 0.95
+    },
+    {
+     "x": 261.31,
+     "y": 188.42,
+     "visibility": 0.95
+    },
+    {
+     "x": 271.31,
+     "y": 188.42,
+     "visibility": 0.95
+    },
+    {
+     "x": 311.87,
+     "y": 230.85,
+     "visibility": 0.95
+    },
+    {
+     "x": 233.46,
+     "y": 242.49,
+     "visibility": 0.95
+    },
+    {
+     "x": 342.12,
+     "y": 178.45,
+     "visibility": 0.95
+    },
+    {
+     "x": 228.18,
+     "y": 302.76,
+     "visibility": 0.95
+    },
+    {
+     "x": 351.08,
+     "y": 170.93,
+     "visibility": 0.95
+    },
+    {
+     "x": 223.24,
+     "y": 313.37,
+     "visibility": 0.95
+    },
+    {
+     "x": 349.12,
+     "y": 166.33,
+     "visibility": 0.95
+    },
+    {
+     "x": 226.96,
+     "y": 316.7,
+     "visibility": 0.95
+    },
+    {
+     "x": 341.29,
+     "y": 169.89,
+     "visibility": 0.95
+    },
+    {
+     "x": 232.55,
+     "y": 310.17,
+     "visibility": 0.95
+    },
+    {
+     "x": 270.9,
+     "y": 298,
+     "visibility": 0.95
+    },
+    {
+     "x": 280.9,
+     "y": 298,
+     "visibility": 0.95
+    },
+    {
+     "x": 270.9,
+     "y": 383.8,
+     "visibility": 0.95
+    },
+    {
+     "x": 358.66,
+     "y": 261.74,
+     "visibility": 0.95
+    },
+    {
+     "x": 256,
+     "y": 468.3,
+     "visibility": 0.95
+    },
+    {
+     "x": 351.18,
+     "y": 347.22,
+     "visibility": 0.95
+    },
+    {
+     "x": 247.08,
+     "y": 472.82,
+     "visibility": 0.95
+    },
+    {
+     "x": 342.69,
+     "y": 352.5,
+     "visibility": 0.95
+    },
+    {
+     "x": 276.28,
+     "y": 480,
+     "visibility": 0.95
+    },
+    {
+     "x": 372.4,
+     "y": 357.1,
+     "visibility": 0.95
+    }
+   ],
+   "attackSide": "right"
   },
   "handshake": {
    "file": "handshake.png",

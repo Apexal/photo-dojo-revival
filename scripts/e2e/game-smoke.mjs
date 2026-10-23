@@ -132,7 +132,7 @@ try {
   await game.waitForTimeout(1200); // let the move previews animate
   await game.screenshot({ path: `${OUT}/03b-controls.png` });
   const cards = await game.evaluate(() => window.photoDojo.scene.getScene("controls").cards.length);
-  check(cards === 16, `controls screen shows 8 move previews per player (${cards})`);
+  check(cards === 18, `controls screen shows 9 move previews per player, the signature move last (${cards})`);
   step("pre-match controls screen with move previews");
   await game.keyboard.press("j"); // P1 ready
   await game.waitForTimeout(100);
@@ -364,10 +364,10 @@ try {
   // Capture draft: five poses in, reload the page, resume at pose 6.
   const inject = (keys) => cap.evaluate(async (keys) => {
     const { loadPlaceholderFighter } = await import("/src/game/fighter-library.ts");
-    const { CAPTURE_TARGETS } = await import("/src/shared/pose-definitions.ts");
-    const f = await loadPlaceholderFighter("placeholder-red", "/");
+    const { captureTargetsFor } = await import("/src/shared/pose-definitions.ts");
+    const f = await loadPlaceholderFighter("placeholder-red", "/"); // a brawler
     const app = window.photoDojoCapture;
-    for (const t of CAPTURE_TARGETS.filter((t) => keys.includes(t.key))) {
+    for (const t of captureTargetsFor(f.archetype).filter((t) => keys.includes(t.key))) {
       const pose = t.variant ? f.poseVariants[t.poseId][t.variant - 1] : f.poses[t.poseId];
       const bmp = await createImageBitmap(pose.imageBlob);
       const image = new OffscreenCanvas(512, 512);
@@ -385,21 +385,22 @@ try {
   await inject(["idle", "idle-2", "walk", "block", "crouch"]);
   await cap.reload();
   await cap.getByText("Pick up where you left off?").waitFor({ timeout: 10000 });
-  check((await cap.textContent(".resume")).includes("5 of 15"), "resume card shows progress");
+  check((await cap.textContent(".resume")).includes("5 of 16"), "resume card shows progress");
   await cap.getByText("Resume", { exact: true }).click();
   await cap.getByText("Start camera").click();
-  await cap.waitForFunction(() => document.querySelector("[data-hud=step]")?.textContent?.startsWith("6 / 15"), null, { timeout: 60000 });
-  step("draft survived a reload: resumed at pose 6 / 15");
+  await cap.waitForFunction(() => document.querySelector("[data-hud=step]")?.textContent?.startsWith("6 / 16"), null, { timeout: 60000 });
+  step("draft survived a reload: resumed at pose 6 / 16");
 
   // Fill in the rest and drive the remaining capture UI.
-  await inject(["punch", "punch-2", "kick", "kick-2", "jump", "hurt", "hurt-2", "win", "win-2", "handshake"]);
+  await inject(["punch", "punch-2", "kick", "kick-2", "jump", "hurt", "hurt-2", "win", "win-2", "signature", "handshake"]);
   await cap.evaluate(() => {
     const app = window.photoDojoCapture;
     app.stopLive();
-    app.flow = { ...app.flow, screen: { name: "review" } };
+    app.flow = { ...app.flow, archetype: "brawler", screen: { name: "review" } };
     app.render();
   });
-  check((await cap.locator(".strip img").count()) === 15, "review strip shows all 15 poses");
+  check((await cap.locator(".strip img").count()) === 16, "review strip shows all 16 poses");
+  check((await cap.getByText("Style: Brawler · change").count()) === 1, "review shows the fighting style");
   await cap.getByText("Looks good").click();
   await cap.getByText("Battle cry").waitFor();
   await cap.getByText("Skip this one").click();

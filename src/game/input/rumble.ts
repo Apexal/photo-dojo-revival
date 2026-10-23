@@ -4,7 +4,7 @@ import type { PlayerIndex } from "../../simulation/round-rules";
 /** One rumble: duration in ms, motor strengths 0..1 (strong = low-frequency, weak = high-frequency). */
 export interface Rumble { duration: number; strong: number; weak: number }
 
-const HEAVY_ATTACKS = new Set(["kick", "lowKick", "jumpKick", "uppercut"]);
+const HEAVY_ATTACKS = new Set(["kick", "lowKick", "jumpKick", "uppercut", "charge", "flyingKnee"]);
 
 /**
  * What a fight event feels like on each player's controller (null: nothing).
@@ -22,6 +22,8 @@ export function rumbleFor(event: FightEvent, player: PlayerIndex): Rumble | null
       if (event.attacker === player && !event.blocked) return { duration: 100, strong: heavy ? 0.4 : 0.3, weak: 0.45 };
       return null;
     }
+    case "parry":
+      return event.player === player ? { duration: 90, strong: 0.2, weak: 0.7 } : { duration: 160, strong: 0.6, weak: 0.3 };
     case "grab":
       return { duration: 100, strong: 0.35, weak: 0.4 };
     case "throw":

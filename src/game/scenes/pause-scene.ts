@@ -1,5 +1,5 @@
 import Phaser from "phaser";
-import { MOVE_GUIDE, controlLabels, deviceName } from "../input/control-labels";
+import { controlLabels, deviceName, moveGuide } from "../input/control-labels";
 import { isPlayerInput } from "../input/input-descriptor";
 import { MenuInput } from "../input/menu-input";
 import { getOptions } from "../options";
@@ -70,16 +70,16 @@ export class PauseScene extends Phaser.Scene {
     this.controls.forEach((o) => o.destroy());
     this.controls = [];
     if (!show) return;
-    const { inputs, names } = this.fight.playerInfo;
+    const { inputs, fighters } = this.fight.playerInfo;
     inputs.forEach((input, p) => {
       if (!isPlayerInput(input)) return;
       const x = p === 0 ? 120 : GAME_WIDTH / 2 + 60;
       const labels = controlLabels(input, p === 0 ? "left" : "right");
-      const lines = MOVE_GUIDE.map((m) => `${m.name.padEnd(10)} ${m.how(labels)}`).join("\n");
+      const lines = moveGuide(fighters[p].archetype).map((m) => `${m.name.padEnd(16)} ${m.how(labels)}`).join("\n");
       this.controls.push(
-        this.add.text(x, 110, `P${p + 1} · ${names[p]}`, { fontSize: "28px", fontStyle: "bold", color: PLAYER_CSS[p] }),
+        this.add.text(x, 110, `P${p + 1} · ${fighters[p].name}`, { fontSize: "28px", fontStyle: "bold", color: PLAYER_CSS[p] }),
         this.add.text(x, 148, deviceName(input), { fontSize: "17px", color: "#c9c3b8" }),
-        this.add.text(x, 190, lines, { fontSize: "22px", color: "#f3efe6", fontFamily: "monospace", lineSpacing: 10 }),
+        this.add.text(x, 186, lines, { fontSize: "21px", color: "#f3efe6", fontFamily: "monospace", lineSpacing: 8 }),
       );
     });
     this.controls.push(

@@ -4,7 +4,8 @@ import { PoseTweener, breathingStance, interpolateLandmarks, sidesFlipped, swapS
 import { LANDMARK, SPRITE_CANVAS_SIZE, type NormalizedLandmark, type PoseId } from "../src/shared/fighter-model";
 import { ATTACKS, poseForAction, tweenAtFrame } from "../src/shared/frame-data";
 import { anchorTargetFor } from "../src/shared/pose-geometry";
-import { buildStickFigureLandmarks } from "../src/shared/stick-figure";
+import { buildStickFigureLandmarks, stickPoseParams } from "../src/shared/stick-figure";
+import { ARCHETYPE_IDS, type ArchetypeId } from "../src/shared/archetypes";
 import { allTweens, frameOf, tweenOf } from "../src/simulation/fight-simulation";
 import { createFighterState, type FighterState } from "../src/simulation/fighter-state-machine";
 
@@ -36,8 +37,8 @@ function stickMask(landmarks: NormalizedLandmark[]): AlphaMask {
   return { width: S, height: S, data };
 }
 
-function stickSource(frame: FrameRef): TweenSource {
-  const landmarks = buildStickFigureLandmarks(frame.poseId);
+function stickSource(frame: FrameRef, archetype: ArchetypeId = "brawler"): TweenSource {
+  const landmarks = buildStickFigureLandmarks(frame.poseId, stickPoseParams(frame.poseId, archetype));
   return { mask: stickMask(landmarks), landmarks, anchor: anchorTargetFor(frame.poseId) };
 }
 
@@ -65,7 +66,7 @@ describe("tween entries in the frame data", () => {
   });
 
   it("lists every pair that can play, once", () => {
-    const pairs = allTweens().map((t) => `${t.from.poseId}#${t.from.variant}>${t.to.poseId}#${t.to.variant}`);
+    const pairs = allTweens("brawler").map((t) => `${t.from.poseId}#${t.from.variant}>${t.to.poseId}#${t.to.variant}`);
     expect(new Set(pairs).size).toBe(pairs.length);
     expect(pairs).toEqual(expect.arrayContaining(["idle#0>punch#0", "punch#0>idle#0", "idle#0>kick#0", "kick#0>idle#0", "punch#1>idle#0", "idle#0>kick#1", "kick#1>idle#0"]));
   });
@@ -102,7 +103,10 @@ describe("pose tweener", () => {
     ({ x: uvs[2 * i] * SPRITE_CANVAS_SIZE - anchorTargetFor(poseId).x, y: uvs[2 * i + 1] * SPRITE_CANVAS_SIZE - anchorTargetFor(poseId).y }));
 
   it("builds every tween the moves use", () => {
-    for (const tween of allTweens()) expect(tweener.prepare(tween)).toBe(true);
+    for (const archetype of ARCHETYPE_IDS) {
+      const own = new PoseTweener((frame) => stickSource(frame, archetype));
+      for (const tween of allTweens(archetype)) expect(own.prepare(tween), `${archetype}: ${JSON.stringify(tween)}`).toBe(true);
+    }
   });
 
   it("warps both captures onto the in-between skeleton and cross-fades them", () => {

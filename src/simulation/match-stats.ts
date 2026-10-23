@@ -14,7 +14,7 @@ export interface PlayerStats {
   hits: number;
   /** Their attacks the opponent blocked. */
   blockedByOpponent: number;
-  /** The opponent's attacks they blocked. */
+  /** The opponent's attacks they blocked (or parried). */
   blocks: number;
   throws: number;
   /** The opponent's throws they broke. */
@@ -120,6 +120,11 @@ export class MatchStatsTracker {
           attacker.favoriteMove = [...counts].sort((a, b) => b[1] - a[1])[0][0];
           break;
         }
+        case "parry":
+          this.players[ev.attacker].blockedByOpponent++;
+          this.players[ev.player].blocks++;
+          this.combo.blocked(ev.attacker);
+          break;
         case "throw":
           this.players[ev.attacker].throws++;
           break;

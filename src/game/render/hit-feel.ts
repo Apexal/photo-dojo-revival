@@ -53,10 +53,10 @@ export function fallPose(s: FighterState): { tilt: number; bounce: number } | nu
   }
 }
 
-export type HitMarkerKind = "hit" | "ko" | "block" | "throw" | "dust";
+export type HitMarkerKind = "hit" | "ko" | "block" | "parry" | "throw" | "dust";
 
 /** Each kind has its own symbol, so it reads at a glance whatever the colour. */
-export type HitMarkerShape = "burst" | "bigBurst" | "shield" | "chevrons" | "dust";
+export type HitMarkerShape = "burst" | "bigBurst" | "shield" | "flash" | "chevrons" | "dust";
 
 export interface HitMarkerStyle {
   shape: HitMarkerShape;
@@ -73,6 +73,8 @@ export const HIT_MARKER_STYLES: Record<HitMarkerKind, HitMarkerStyle> = {
   hit: { shape: "burst", radius: 34 },
   ko: { shape: "bigBurst", radius: 54 },
   block: { shape: "shield", radius: 32 },
+  /** A parry: a double ring with rays, in the parrying fighter's colour. */
+  parry: { shape: "flash", radius: 50 },
   throw: { shape: "chevrons", radius: 40 },
   /** Not a hit: where a knocked-down fighter lands. Grey, whoever's it is. */
   dust: { shape: "dust", radius: 46 },

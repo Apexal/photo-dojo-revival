@@ -1,3 +1,4 @@
+import { ARCHETYPES, type ArchetypeId } from "../../shared/archetypes";
 import type { FighterAction } from "../../shared/frame-data";
 import type { PlayerInputDescriptor } from "./input-descriptor";
 import { actionKeyLabel } from "./key-bindings";
@@ -30,7 +31,7 @@ export interface MoveGuide {
   how: (b: ButtonLabels) => string;
 }
 
-/** The move cards on the pre-match screen, in order. */
+/** The shared moves, in the order the pre-match screen shows them. */
 export const MOVE_GUIDE: readonly MoveGuide[] = [
   { name: "Walk", action: "walk", how: (b) => `${b.back} / ${b.forward}` },
   { name: "Jump", action: "jump", how: (b) => b.up },
@@ -41,6 +42,12 @@ export const MOVE_GUIDE: readonly MoveGuide[] = [
   { name: "Low kick", action: "lowKick", how: (b) => `${b.down} + ${b.kick}` },
   { name: "Throw", action: "throw", how: (b) => `${b.punch} + ${b.kick}` },
 ];
+
+/** A fighter's moves: the shared ones, then their archetype's signature. */
+export function moveGuide(archetype: ArchetypeId): MoveGuide[] {
+  const { move, moveName } = ARCHETYPES[archetype];
+  return [...MOVE_GUIDE, { name: moveName, action: move, how: (b) => `${b.down} + ${b.punch} + ${b.kick}` }];
+}
 
 export const deviceName = (input: PlayerInputDescriptor) =>
   input.kind === "pad" ? `Gamepad ${input.index + 1}` : input.layout === "p1" ? "Keyboard (left side)" : "Keyboard (right side)";

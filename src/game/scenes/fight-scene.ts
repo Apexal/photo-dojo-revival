@@ -1,6 +1,6 @@
 import Phaser from "phaser";
 import { ATTACKS, frameGeometry, groundAnchorFor, type FighterGeometry } from "../../shared/frame-data";
-import { LANDMARK, type PoseId, type SoundId } from "../../shared/fighter-model";
+import { LANDMARK, type Fighter, type PoseId, type SoundId } from "../../shared/fighter-model";
 import { setSetting } from "../../shared/fighter-storage";
 import { FightSimulation, frameOf, type FightState } from "../../simulation/fight-simulation";
 import { currentAttackPhase, isAttack, type FighterState } from "../../simulation/fighter-state-machine";
@@ -34,7 +34,7 @@ import { CalloutTracker, calloutText, type Callout } from "../../simulation/call
 import { stopMenuMusic } from "../menu-music";
 import { controlLabels } from "../input/control-labels";
 import { markPlayed } from "../played-fighters";
-import { NUDGES, TUTORIAL_STEPS, Tutorial, type TutorialEvent } from "../tutorial";
+import { NUDGES, Tutorial, type TutorialEvent } from "../tutorial";
 import type { SeriesKind } from "../series";
 
 export interface FightSceneData {
@@ -138,7 +138,7 @@ export class FightScene extends Phaser.Scene {
     this.replay = null;
     this.replayDone = false;
     this.rumbles = [new RumbleScheduler(), new RumbleScheduler()];
-    this.tutorial = data.tutorial ? new Tutorial() : null;
+    this.tutorial = data.tutorial ? new Tutorial(data.entries[0].fighter.archetype) : null;
   }
 
   preload(): void {
@@ -301,7 +301,7 @@ export class FightScene extends Phaser.Scene {
   private handleTutorial(events: TutorialEvent[]): void {
     for (const ev of events) {
       switch (ev.type) {
-        case "step": this.dummy?.setBehavior(TUTORIAL_STEPS[ev.index].dummy); break;
+        case "step": this.dummy?.setBehavior(this.tutorial!.steps[ev.index].dummy); break;
         case "progress":
           this.playEffect("tick", 0.6);
           this.nudgeUntil = 0;
@@ -460,8 +460,8 @@ export class FightScene extends Phaser.Scene {
     return this.setup.series;
   }
 
-  get playerInfo(): { inputs: [PlayerInputDescriptor, InputDescriptor]; names: [string, string] } {
-    return { inputs: this.setup.inputs, names: [this.setup.entries[0].fighter.name, this.setup.entries[1].fighter.name] };
+  get playerInfo(): { inputs: [PlayerInputDescriptor, InputDescriptor]; fighters: [Fighter, Fighter] } {
+    return { inputs: this.setup.inputs, fighters: [this.setup.entries[0].fighter, this.setup.entries[1].fighter] };
   }
 
   get disconnectedPlayer(): PlayerIndex | null {
@@ -694,9 +694,18 @@ export class FightScene extends Phaser.Scene {
           const dir = state.fighters[ev.defender].position.x >= state.fighters[ev.attacker].position.x ? 1 : -1;
           this.markers.add(ev.blocked ? "block" : ko ? "ko" : "hit", ev.attacker, at.x, at.y, state.frame, dir);
           if (!ev.blocked) this.cameraImpact(ko ? "ko" : "hit");
-          this.playEffect(ev.blocked ? "block" : "hit", ATTACKS[ev.attack].limb === "leg" ? 0.9 : 0.7);
+          const heavy = ATTACKS[ev.attack].limb !== "arm";
+          this.playEffect(ev.blocked ? "block" : "hit", heavy ? 0.9 : 0.7);
           if (!ev.blocked) this.play(ev.defender, "hurt");
-          if (ATTACKS[ev.attack].limb === "leg" && !ev.blocked) this.shake(90, 2);
+          if (heavy && !ev.blocked) this.shake(90, 2);
+          break;
+        }
+        case "parry": {
+          const at = worldToScreen(ev.at);
+          const dir = state.fighters[ev.attacker].position.x >= state.fighters[ev.player].position.x ? 1 : -1;
+          this.markers.add("parry", ev.player, at.x, at.y, state.frame, dir);
+          this.playEffect("block", 1);
+          if (!options.replay) this.banner("PARRY!", 600);
           break;
         }
         case "grab": this.play(ev.attacker, "attack", 0.6); break;

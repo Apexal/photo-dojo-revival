@@ -1,3 +1,4 @@
+import { ARCHETYPES, type ArchetypeId } from "../shared/archetypes";
 import {
   ATTACKS,
   bodyBoxFor,
@@ -5,10 +6,13 @@ import {
   groundAnchorFor,
   hitboxFor,
   BLOCK_LENIENCY_FRAMES,
+  GRABS,
   guardBlocks,
   INPUT_BUFFER_FRAMES,
+  isGrab,
   KNOCKDOWN,
-  THROW,
+  PARRY,
+  parryActiveAt,
   hurtboxesFor,
   idleSwayAt,
   poseForAction,
@@ -19,7 +23,10 @@ import {
   whiffsOverCrouch,
   type AttackId,
   type Box,
+  type FighterAction,
   type FighterGeometry,
+  type FrameRef,
+  type GrabId,
   type PoseGeometry,
 } from "../shared/frame-data";
 import type { PoseId } from "../shared/fighter-model";
@@ -69,9 +76,11 @@ export type FightEvent =
   | { type: "attackActive"; player: PlayerIndex; attack: AttackId }
   /** `at`: where it landed (world space), for the hit marker. */
   | { type: "hit"; attacker: PlayerIndex; defender: PlayerIndex; attack: AttackId; blocked: boolean; damage: number; at: { x: number; y: number } }
-  | { type: "grab"; attacker: PlayerIndex; defender: PlayerIndex }
-  | { type: "throw"; attacker: PlayerIndex; defender: PlayerIndex; damage: number }
+  | { type: "grab"; attacker: PlayerIndex; defender: PlayerIndex; grab: GrabId }
+  | { type: "throw"; attacker: PlayerIndex; defender: PlayerIndex; grab: GrabId; damage: number }
   | { type: "throwTech"; attacker: PlayerIndex; defender: PlayerIndex }
+  /** `player` parried `attacker`'s strike; `at`: where it would have landed. */
+  | { type: "parry"; player: PlayerIndex; attacker: PlayerIndex; attack: AttackId; at: { x: number; y: number } }
   | { type: "taunt"; player: PlayerIndex }
   | { type: "ko"; player: PlayerIndex }
   /** Sent flying by a throw or a hit in the air; `landed` when they (or a KO'd fighter) hit the floor. */
@@ -99,7 +108,7 @@ export function poseOf(state: FighterState): PoseId {
 }
 
 /** The pose shown this frame and which captured version of it. */
-export function frameOf(state: FighterState): { poseId: PoseId; variant: number } {
+export function frameOf(state: FighterState): FrameRef {
   const poseId = poseOf(state);
   // Uppercut / low kick show the second punch / kick captures on their active frames.
   if (isAttack(state.action)) {
@@ -109,7 +118,7 @@ export function frameOf(state: FighterState): { poseId: PoseId; variant: number 
   return { poseId, variant: poseId === variantPoseFor(state.action) ? state.variant : 0 };
 }
 
-export interface FrameTween { from: { poseId: PoseId; variant: number }; to: { poseId: PoseId; variant: number }; t: number }
+export interface FrameTween { from: FrameRef; to: FrameRef; t: number }
 
 /**
  * The tween to draw this frame instead of frameOf's capture, or null for a hard
@@ -133,10 +142,14 @@ export function idleSwayOf(state: FighterState): FrameTween | null {
   return { from: { poseId: "idle", variant: 0 }, to: { poseId: "idle", variant: 1 }, t: idleSwayAt(state.actionFrame) };
 }
 
-/** Every from/to pair a move can tween between (t is that pair's first frame), to build meshes before the fight. */
-export function allTweens(): FrameTween[] {
+/**
+ * Every from/to pair a fighter's moves can tween between (t is that pair's first
+ * frame), to build meshes before the fight: the shared moves and the archetype's signature.
+ */
+export function allTweens(archetype: ArchetypeId): FrameTween[] {
   const found = new Map<string, FrameTween>();
-  for (const action of ["punch", "kick", "uppercut", "lowKick", "jumpKick", "throw"] as const) {
+  const actions: FighterAction[] = ["punch", "kick", "uppercut", "lowKick", "jumpKick", "throw", ARCHETYPES[archetype].move];
+  for (const action of actions) {
     const frames = sequenceFor(action)!.reduce((sum, e) => sum + e.frames, 0);
     for (let actionFrame = 0; actionFrame < frames; actionFrame++) {
       const tween = tweenOf({ ...createFighterState(0, 1, MAX_HEALTH), action, actionFrame });
@@ -201,7 +214,7 @@ export function placementOf(geometry: FighterGeometry, state: FighterState): Pla
  * alternates (hurt, KO, win/taunt) are cosmetic: a random reaction mustn't
  * change whether the next attack connects.
  */
-export function hurtFrameOf(state: FighterState): { poseId: PoseId; variant: number } {
+export function hurtFrameOf(state: FighterState): FrameRef {
   if (state.action === "walk") return { poseId: "idle", variant: 0 };
   const frame = frameOf(state);
   return variantPoseFor(state.action) === null ? frame : { ...frame, variant: 0 };
@@ -226,7 +239,7 @@ export function hurtboxesOf(geometry: FighterGeometry, state: FighterState): { b
   const frame = hurtFrameOf(state);
   return {
     // Knocked down or KO'd: nothing to hit.
-    boxes: isUntouchable(state) ? [] : hurtboxesFor(frameGeometry(geometry, frame.poseId, frame.variant), frame),
+    boxes: isUntouchable(state) ? [] : hurtboxesFor(frameGeometry(geometry, frame.poseId, frame.variant), frame, geometry.archetype),
     placement: { position: state.position, facing: state.facing, anchor: groundAnchorFor(geometry, frame.poseId, frame.variant) },
   };
 }
@@ -401,6 +414,7 @@ export class FightSimulation {
         pressed: pressed(i),
         opponent: prev.fighters[1 - i],
         controllable,
+        archetype: this.geometry[i].archetype,
       }),
     ) as [FighterState, FighterState];
     if (controllable) fighters = this.resolveGrabs(fighters, events);
@@ -492,27 +506,29 @@ export class FightSimulation {
     return at.y < headHitLineY(this.geometry[player], defender) ? 1 : 0;
   }
 
-  /** On a throw's active frame: grab a throwable opponent within range. */
+  /** On a grab's active frame: catch a throwable opponent within range. */
   private resolveThrows(fighters: [FighterState, FighterState], events: FightEvent[]): [FighterState, FighterState] {
     const next: [FighterState, FighterState] = [fighters[0], fighters[1]];
     for (const a of [0, 1] as const) {
       const attacker = fighters[a];
-      if (attacker.action !== "throw" || attacker.hasHit || attacker.actionFrame !== THROW.startup) continue;
+      if (!isGrab(attacker.action)) continue;
+      const grab = GRABS[attacker.action];
+      if (attacker.hasHit || attacker.actionFrame !== grab.startup) continue;
       const d = (1 - a) as PlayerIndex;
       if (!isThrowable(fighters[d])) continue;
       const ab = worldBoxesOf(this.geometry[a], attacker).bodyBox;
       const db = worldBoxesOf(this.geometry[d], fighters[d]).bodyBox;
       const gap = Math.max(db.x - (ab.x + ab.width), ab.x - (db.x + db.width));
-      if (gap > THROW.range) continue;
+      if (gap > grab.range) continue;
       next[a] = { ...attacker, hasHit: true };
-      next[d] = this.withVariant(d, { ...fighters[d], action: "grabbed", actionFrame: 0, stunFrames: THROW.techWindow, velocity: { x: 0, y: 0 } });
+      next[d] = this.withVariant(d, { ...fighters[d], action: "grabbed", actionFrame: 0, stunFrames: grab.holdFrames, velocity: { x: 0, y: 0 } });
       this.buffers[d] = { punch: 0, kick: 0 }; // only presses during the grab count as a tech
-      events.push({ type: "grab", attacker: a, defender: d });
+      events.push({ type: "grab", attacker: a, defender: d, grab: attacker.action });
     }
     return next;
   }
 
-  /** A grabbed fighter breaks free with punch + kick during the tech window; otherwise the throw lands. */
+  /** A grabbed fighter breaks free with punch + kick while held (if the grab allows it); otherwise the throw lands. */
   private resolveGrabs(fighters: [FighterState, FighterState], events: FightEvent[]): [FighterState, FighterState] {
     const next: [FighterState, FighterState] = [fighters[0], fighters[1]];
     for (const d of [0, 1] as const) {
@@ -520,8 +536,11 @@ export class FightSimulation {
       if (grabbed.action !== "grabbed") continue;
       const a = (1 - d) as PlayerIndex;
       const thrower = fighters[a];
+      // The thrower is still in the grab that caught them (a grab's recovery outlasts the hold).
+      const grabId: GrabId = thrower.action === "bearHug" ? "bearHug" : "throw";
+      const grab = GRABS[grabId];
       const away = (Math.sign(grabbed.position.x - thrower.position.x) || thrower.facing) as 1 | -1;
-      if (this.buffers[d].punch > 0 && this.buffers[d].kick > 0) {
+      if (grab.techable && this.buffers[d].punch > 0 && this.buffers[d].kick > 0) {
         // Tech: both back to neutral, a little apart.
         this.buffers[d] = { punch: 0, kick: 0 };
         next[d] = { ...grabbed, action: "idle", actionFrame: 0, stunFrames: 0, position: { ...grabbed.position, x: clampToStage(grabbed.position.x + away * 40) } };
@@ -530,15 +549,15 @@ export class FightSimulation {
         continue;
       }
       if (grabbed.actionFrame < grabbed.stunFrames) continue;
-      const health = Math.max(this.practice ? 1 : 0, grabbed.health - THROW.damage);
-      const lands = clampToStage(grabbed.position.x + away * THROW.throwDistance);
-      const remainder = away * THROW.throwDistance - (lands - grabbed.position.x);
+      const health = Math.max(this.practice ? 1 : 0, grabbed.health - grab.damage);
+      const lands = clampToStage(grabbed.position.x + away * grab.throwDistance);
+      const remainder = away * grab.throwDistance - (lands - grabbed.position.x);
       // Flung, not teleported: the sideways speed is aimed so they land `throwDistance` away.
       const thrown = knockDown({ ...grabbed, health, variant: 0, hitstopFrames: HITSTOP_FRAMES + 2 }, away, (lands - grabbed.position.x) / airFrames(KNOCKDOWN.launch.y));
       next[d] = health <= 0 ? { ...thrown, action: "ko" } : thrown;
       if (health > 0) events.push({ type: "knockdown", player: d });
       next[a] = { ...thrower, hitstopFrames: HITSTOP_FRAMES + 2, position: { ...thrower.position, x: clampToStage(thrower.position.x - remainder) } };
-      events.push({ type: "throw", attacker: a, defender: d, damage: grabbed.health - health });
+      events.push({ type: "throw", attacker: a, defender: d, grab: grabId, damage: grabbed.health - health });
       if (health <= 0) events.push({ type: "ko", player: d });
     }
     return next;
@@ -566,6 +585,13 @@ export class FightSimulation {
     for (const { attacker: a, attack, at } of hits) {
       const d = (1 - a) as PlayerIndex;
       const defender = next[d];
+      if (defender.action === "parry" && parryActiveAt(defender.actionFrame)) {
+        // Caught: no damage; the parrying fighter is free at once, the attacker staggers.
+        next[d] = { ...defender, action: "idle", actionFrame: 0, hasHit: false };
+        next[a] = { ...next[a], action: "parried", actionFrame: 0, stunFrames: PARRY.stagger, hasHit: false, retreating: false, velocity: { x: 0, y: next[a].velocity.y } };
+        events.push({ type: "parry", player: d, attacker: a, attack, at });
+        continue;
+      }
       const level = ATTACKS[attack].level;
       // A held guard, or a free fighter who let go of back/down a moment ago (leniency).
       const lenient = (defender.action === "idle" || defender.action === "walk" || defender.action === "jumpSquat") && isGrounded(defender)
@@ -578,7 +604,7 @@ export class FightSimulation {
       const away = (Math.sign(defender.position.x - fighters[a].position.x) || fighters[a].facing) as 1 | -1; // cross-ups push the right way
       // A KO'd fighter falls back; an anti-air hit knocks down (no juggles: they can't be hit again till they're up).
       if (hitDefender.action === "ko") hitDefender = { ...knockDown(hitDefender, away), action: "ko" };
-      else if (!blocked && !isGrounded(defender) && ATTACKS[attack].knocksDownInAir) {
+      else if (!blocked && (ATTACKS[attack].knockdown === "always" || (ATTACKS[attack].knockdown === "air" && !isGrounded(defender)))) {
         hitDefender = knockDown(hitDefender, away);
         events.push({ type: "knockdown", player: d });
       }
@@ -628,7 +654,7 @@ export class FightSimulation {
     if (round.roundWinner === "draw" || round.roundWinner === null) return fighters;
     const w = round.roundWinner;
     const winner = fighters[w];
-    if (winner.action === "win" || winner.action === "ko" || !isGrounded(winner) || isCommitted(winner.action) || winner.action === "hurt" || isDown(winner)) return fighters;
+    if (winner.action === "win" || winner.action === "ko" || !isGrounded(winner) || isCommitted(winner.action) || winner.action === "hurt" || winner.action === "parried" || isDown(winner)) return fighters;
     const next: [FighterState, FighterState] = [fighters[0], fighters[1]];
     next[w] = this.withVariant(w, { ...winner, action: "win", actionFrame: 0, velocity: { x: 0, y: 0 } });
     return next;

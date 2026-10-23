@@ -31,7 +31,8 @@ export function makeFighter(options: { poseBytes?: Partial<Record<PoseId, number
   return {
     fighterId: crypto.randomUUID(),
     name: options.name ?? "Test Fighter",
-    schemaVersion: 1,
+    schemaVersion: 2,
+    archetype: "brawler",
     createdAt: 1_700_000_000_000,
     facingDirection: "right",
     poses,
@@ -42,7 +43,7 @@ export function makeFighter(options: { poseBytes?: Partial<Record<PoseId, number
     },
     thumbnailBlob: new Blob([bytes(400, 99)], { type: "image/png" }),
     poseVariants: Object.fromEntries(
-      (["punch", "kick", "hurt", "win"] as const).map((id, i) => [id, [{ ...poses[id], imageBlob: new Blob([bytes(900 + i, 70 + i)], { type: "image/png" }), capturedAt: 10 + i }]]),
+      (["idle", "punch", "kick", "hurt", "win"] as const).map((id, i) => [id, [{ ...poses[id], imageBlob: new Blob([bytes(900 + i, 70 + i)], { type: "image/png" }), capturedAt: 10 + i }]]),
     ),
     ...(options.extraTakes ? { soundVariants: { attack: [new Blob([bytes(800, 80)], { type: "audio/webm" }), new Blob([bytes(801, 81)], { type: "audio/webm" })] } } : {}),
   };

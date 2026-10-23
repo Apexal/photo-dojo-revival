@@ -1,9 +1,10 @@
+import type { ArchetypeId } from "../shared/archetypes";
 import type { LimbSide, SoundId } from "../shared/fighter-model";
-import { CAPTURE_TARGETS } from "../shared/pose-definitions";
+import { captureTargetsFor } from "../shared/pose-definitions";
 import type { CaptureMode } from "./capture-flow";
 import type { PoseCaptureGeometry } from "./sprite-normalizer";
 
-export const DRAFT_VERSION = 1;
+export const DRAFT_VERSION = 2;
 /** Drafts older than this aren't offered for resuming. */
 export const DRAFT_MAX_AGE_MS = 3 * 24 * 60 * 60 * 1000;
 
@@ -25,13 +26,15 @@ export interface CaptureDraft {
   name: string;
   mode: CaptureMode;
   roomCode: string | null;
+  /** Null until it's picked (just before the signature pose). */
+  archetype: ArchetypeId | null;
   captures: DraftCapture[];
   sounds: Partial<Record<SoundId, Blob[]>>;
 }
 
 export interface DraftSummary {
   captured: number;
-  /** All fifteen poses are in. */
+  /** All sixteen poses are in. */
   complete: boolean;
   /** First pose still missing (null when complete). */
   nextPoseIndex: number | null;
@@ -40,9 +43,10 @@ export interface DraftSummary {
 
 export function summarizeDraft(draft: CaptureDraft, now = Date.now()): DraftSummary {
   const keys = new Set(draft.captures.map((c) => c.key));
-  const missing = CAPTURE_TARGETS.findIndex((t) => !keys.has(t.key));
+  const targets = captureTargetsFor(draft.archetype ?? "brawler"); // the keys are the same for every archetype
+  const missing = targets.findIndex((t) => !keys.has(t.key));
   return {
-    captured: CAPTURE_TARGETS.filter((t) => keys.has(t.key)).length,
+    captured: targets.filter((t) => keys.has(t.key)).length,
     complete: missing < 0,
     nextPoseIndex: missing < 0 ? null : missing,
     ageMs: now - draft.savedAt,

@@ -1,6 +1,7 @@
+import { ARCHETYPE_IDS, type ArchetypeId } from "./archetypes";
 import { POSE_IDS, type LandmarkName, type PoseId } from "./fighter-model";
 import type { PoseTarget } from "./pose-geometry";
-import { STICK_BONUS_POSES, buildStickFigureLandmarks, stickFigureSvgPath } from "./stick-figure";
+import { STICK_BONUS_POSES, STICK_SIGNATURE_POSES, buildStickFigureLandmarks, stickFigureSvgPath } from "./stick-figure";
 
 export interface PoseDefinition extends PoseTarget {
   poseId: PoseId;
@@ -15,7 +16,9 @@ const FULL_BODY: LandmarkName[] = ["nose", "leftShoulder", "rightShoulder", "lef
 
 type DefinitionSpec = Omit<PoseDefinition, "ghostSvgPath" | "poseId">;
 
-const SPECS: Record<PoseId, DefinitionSpec> = {
+type MainPoseId = Exclude<PoseId, "signature">;
+
+const SPECS: Record<MainPoseId, DefinitionSpec> = {
   idle: {
     label: "Fighting stance",
     voicePrompt: "Fighting stance. Fists up by your chin, feet apart.",
@@ -126,15 +129,73 @@ const SPECS: Record<PoseId, DefinitionSpec> = {
   },
 };
 
-export const POSE_DEFINITIONS: Record<PoseId, PoseDefinition> = Object.fromEntries(
-  POSE_IDS.map((poseId) => [
+/** The main poses but the signature, whose definition depends on the archetype (SIGNATURE_DEFINITIONS). */
+export const POSE_DEFINITIONS: Record<MainPoseId, PoseDefinition> = Object.fromEntries(
+  POSE_IDS.filter((poseId) => poseId !== "signature").map((poseId) => [
     poseId,
-    { poseId, ...SPECS[poseId], ghostSvgPath: stickFigureSvgPath(buildStickFigureLandmarks(poseId)) },
+    { poseId, ...SPECS[poseId as MainPoseId], ghostSvgPath: stickFigureSvgPath(buildStickFigureLandmarks(poseId)) },
   ]),
-) as Record<PoseId, PoseDefinition>;
+) as Record<MainPoseId, PoseDefinition>;
 
-/** Capture order. */
-export const POSE_SEQUENCE: readonly PoseDefinition[] = POSE_IDS.map((id) => POSE_DEFINITIONS[id]);
+/** Each archetype's signature pose (see archetypes.ts and STICK_SIGNATURE_POSES). */
+const SIGNATURE_SPECS: Record<ArchetypeId, DefinitionSpec> = {
+  brawler: {
+    label: "Shoulder charge",
+    voicePrompt: "Shoulder charge! Lean hard into your front shoulder, arm tucked, and lunge forward.",
+    angleTargets: [
+      { joint: "torsoLean", degrees: 28, tolerance: 14 },
+      { joint: "legSpread", degrees: 68, tolerance: 22 },
+      { joint: "rightElbow", degrees: 60, tolerance: 35 }, // tucked, not punching
+    ],
+    requiredVisibleLandmarks: FULL_BODY,
+    attackLimb: "arm",
+  },
+  grappler: {
+    label: "Bear hug",
+    voicePrompt: "Bear hug! Both arms out wide at chest height, ready to squeeze.",
+    angleTargets: [
+      { joint: "rightShoulderElevation", degrees: 80, tolerance: 25 },
+      { joint: "leftShoulderElevation", degrees: 78, tolerance: 25 },
+      { joint: "rightElbow", degrees: 128, tolerance: 30 },
+      { joint: "leftElbow", degrees: 125, tolerance: 30 },
+    ],
+    requiredVisibleLandmarks: FULL_BODY,
+  },
+  guardian: {
+    label: "Parry",
+    voicePrompt: "Parry! Front palm up and out like a stop sign, other fist by your chin.",
+    angleTargets: [
+      { joint: "rightShoulderElevation", degrees: 105, tolerance: 25 },
+      { joint: "rightElbow", degrees: 115, tolerance: 30 },
+      { joint: "leftElbow", degrees: 45, tolerance: 35 },
+    ],
+    requiredVisibleLandmarks: FULL_BODY,
+    attackLimb: "arm",
+  },
+  acrobat: {
+    label: "Flying knee",
+    voicePrompt: "Flying knee! Drive your front knee up high, on one foot.",
+    angleTargets: [
+      { joint: "rightHipFlexion", degrees: 108, tolerance: 25 },
+      { joint: "rightKnee", degrees: 62, tolerance: 30 },
+      { joint: "leftKnee", degrees: 168, tolerance: 22 },
+    ],
+    requiredVisibleLandmarks: ["rightHip", "rightKnee", "rightAnkle", "leftAnkle", "rightShoulder"],
+    attackLimb: "leg",
+  },
+};
+
+export const SIGNATURE_DEFINITIONS: Record<ArchetypeId, PoseDefinition> = Object.fromEntries(
+  ARCHETYPE_IDS.map((id) => [
+    id,
+    { poseId: "signature", ...SIGNATURE_SPECS[id], ghostSvgPath: stickFigureSvgPath(buildStickFigureLandmarks("signature", STICK_SIGNATURE_POSES[id])) },
+  ]),
+) as Record<ArchetypeId, PoseDefinition>;
+
+/** A main pose's definition; the signature pose's is the archetype's. */
+export function poseDefinition(poseId: PoseId, archetype: ArchetypeId): PoseDefinition {
+  return poseId === "signature" ? SIGNATURE_DEFINITIONS[archetype] : POSE_DEFINITIONS[poseId];
+}
 
 /**
  * Second versions of five poses, keyed like "punch-2": a second stance the idle
@@ -221,25 +282,30 @@ export interface CaptureTarget {
 }
 
 /**
- * New fighters capture all fifteen, so everyone has the same move set. Alternates come right after their main pose;
- * the handshake (the round intro) closes the session.
+ * Every fighter captures all sixteen: the shared moveset's poses, then the
+ * signature (once the archetype is picked, after the win poses), and the
+ * handshake (the round intro) closes the session. Alternates come right after their main pose.
  */
-const CAPTURE_ORDER = ["idle", "idle-2", "walk", "block", "crouch", "punch", "punch-2", "kick", "kick-2", "jump", "hurt", "hurt-2", "win", "win-2", "handshake"] as const;
+const CAPTURE_ORDER = ["idle", "idle-2", "walk", "block", "crouch", "punch", "punch-2", "kick", "kick-2", "jump", "hurt", "hurt-2", "win", "win-2", "signature", "handshake"] as const;
 
-export const CAPTURE_TARGETS: readonly CaptureTarget[] = CAPTURE_ORDER.map((key) => {
-  const alternate = ALTERNATE_DEFINITIONS[key];
-  return alternate
-    ? { key, poseId: alternate.poseId, variant: Number(key.split("-")[1]) - 1, definition: alternate }
-    : { key, poseId: key as PoseId, variant: 0, definition: POSE_DEFINITIONS[key as PoseId] };
-});
+export const CAPTURE_TARGET_COUNT = CAPTURE_ORDER.length;
+/** Where the signature pose sits in the capture order: the archetype is picked just before it. */
+export const SIGNATURE_TARGET_INDEX = CAPTURE_ORDER.indexOf("signature");
 
-/**
- * Alternates added after fighters already existed: captured from now on, but a
- * fighter file without them is still valid (the game makes up a stand-in).
- */
-export const OPTIONAL_ALTERNATES: ReadonlySet<string> = new Set(["idle-2"]);
+/** What to capture, in order, for a fighter of this archetype. */
+export function captureTargetsFor(archetype: ArchetypeId): readonly CaptureTarget[] {
+  return CAPTURE_TARGETS[archetype];
+}
+
+const CAPTURE_TARGETS = Object.fromEntries(ARCHETYPE_IDS.map((archetype) => [
+  archetype,
+  CAPTURE_ORDER.map((key): CaptureTarget => {
+    const alternate = ALTERNATE_DEFINITIONS[key];
+    return alternate
+      ? { key, poseId: alternate.poseId, variant: Number(key.split("-")[1]) - 1, definition: alternate }
+      : { key, poseId: key as PoseId, variant: 0, definition: poseDefinition(key as PoseId, archetype) };
+  }),
+])) as unknown as Record<ArchetypeId, readonly CaptureTarget[]>;
 
 /** Alternates every fighter has: variant 1 of each of these poses. */
-export const REQUIRED_VARIANT_POSES: readonly PoseId[] = CAPTURE_TARGETS
-  .filter((t) => t.variant > 0 && !OPTIONAL_ALTERNATES.has(t.key))
-  .map((t) => t.poseId);
+export const REQUIRED_VARIANT_POSES: readonly PoseId[] = CAPTURE_TARGETS.brawler.filter((t) => t.variant > 0).map((t) => t.poseId);

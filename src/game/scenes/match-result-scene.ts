@@ -28,7 +28,9 @@ export interface MatchResultData {
 /** Long enough that mashing through the KO doesn't skip the page. */
 const INPUT_DELAY_MS = 1200;
 const PLAYER_CSS = ["#e8483b", "#3f86f0"];
-const MOVE_NAMES: Record<AttackId, string> = { punch: "Punch", kick: "Kick", uppercut: "Uppercut", lowKick: "Low kick", jumpKick: "Jump kick" };
+const MOVE_NAMES: Record<AttackId, string> = {
+  punch: "Punch", kick: "Kick", uppercut: "Uppercut", lowKick: "Low kick", jumpKick: "Jump kick", charge: "Shoulder charge", flyingKnee: "Flying knee",
+};
 
 const clock = (frames: number) => {
   const seconds = Math.round(frames / FRAMES_PER_SECOND);

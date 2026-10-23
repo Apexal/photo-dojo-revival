@@ -1,5 +1,6 @@
+import { ARCHETYPES, ARCHETYPE_IDS, type ArchetypeId } from "../../shared/archetypes";
 import { MAX_SOUND_SECONDS, MAX_SOUND_TAKES, SOUND_IDS, type PoseId, type SoundId } from "../../shared/fighter-model";
-import { CAPTURE_TARGETS } from "../../shared/pose-definitions";
+import { CAPTURE_TARGET_COUNT, SIGNATURE_DEFINITIONS, captureTargetsFor } from "../../shared/pose-definitions";
 import { describeAge, type DraftSummary } from "../capture-draft";
 import type { CaptureFlowState, CaptureMode } from "../capture-flow";
 import type { CaptureSessionData } from "../main";
@@ -18,6 +19,8 @@ export interface ScreenActions {
   retakeRough(): void;
   keepRough(): void;
   retake(targetKey: string): void;
+  pickArchetype(archetype: ArchetypeId): void;
+  changeArchetype(): void;
   reviewDone(): void;
   recordSound(soundId: SoundId, onLevel?: (level: AudioLevel) => void): Promise<void>;
   removeTake(soundId: SoundId, index: number): void;
@@ -59,10 +62,10 @@ const SOUND_PROMPTS: Record<SoundId, { title: string; hint: string }> = {
 
 const screen = (...children: (Node | string | null | false)[]) => h("section", { class: "screen" }, ...children);
 
-/** All fifteen poses. Tapping one retakes it. */
-function strip(data: CaptureSessionData, onPick?: (targetKey: string) => void): HTMLElement {
+/** All sixteen poses. Tapping one retakes it. */
+function strip(data: CaptureSessionData, archetype: ArchetypeId, onPick?: (targetKey: string) => void): HTMLElement {
   return h("div", { class: "strip" },
-    ...CAPTURE_TARGETS.map((t) =>
+    ...captureTargetsFor(archetype).map((t) =>
       h("button", { type: "button", disabled: !onPick, on: { click: () => onPick?.(t.key) } },
         data.previews[t.key] ? h("img", { src: data.previews[t.key], alt: t.key }) : h("div", { class: "muted" }, "—"),
         t.definition.label,
@@ -76,13 +79,25 @@ const randomTake = (data: CaptureSessionData, id: SoundId) => {
   return takes[Math.floor(Math.random() * takes.length)];
 };
 
-/** Scripted showcase with hard cuts: idle → walk → punch → kick → win, with the recorded sounds. */
-function showcase(data: CaptureSessionData): HTMLCanvasElement {
+/** A pose's stick-figure ghost (path data in 512×512 sprite space) as an inline SVG. */
+function ghost(path: string): SVGSVGElement {
+  const ns = "http://www.w3.org/2000/svg";
+  const svg = document.createElementNS(ns, "svg");
+  svg.setAttribute("viewBox", "0 0 512 512");
+  svg.setAttribute("aria-hidden", "true");
+  const p = document.createElementNS(ns, "path");
+  p.setAttribute("d", path);
+  svg.append(p);
+  return svg;
+}
+
+/** Scripted showcase with hard cuts: idle → walk → punch → kick → signature → win, with the recorded sounds. */
+function showcase(data: CaptureSessionData, archetype: ArchetypeId): HTMLCanvasElement {
   const canvas = h("canvas", { class: "showcase", width: 512, height: 512 });
   const ctx = canvas.getContext("2d")!;
   // Both versions of each pose, so the showcase mixes in the alternates.
   const images = new Map<PoseId, HTMLImageElement[]>();
-  for (const t of CAPTURE_TARGETS) {
+  for (const t of captureTargetsFor(archetype)) {
     const url = data.previews[t.key];
     if (url) images.set(t.poseId, [...(images.get(t.poseId) ?? []), h("img", { src: url })]);
   }
@@ -90,7 +105,8 @@ function showcase(data: CaptureSessionData): HTMLCanvasElement {
     { pose: "idle", ms: 700 }, { pose: "walk", ms: 280 }, { pose: "idle", ms: 280 }, { pose: "walk", ms: 280 },
     { pose: "idle", ms: 250 }, { pose: "punch", ms: 380, sound: "attack" }, { pose: "idle", ms: 300 },
     { pose: "kick", ms: 450, sound: "attack" }, { pose: "idle", ms: 300 }, { pose: "hurt", ms: 400, sound: "hurt" },
-    { pose: "jump", ms: 400 }, { pose: "win", ms: 1400, sound: "win" },
+    { pose: "jump", ms: 400 }, { pose: "idle", ms: 250 }, { pose: "signature", ms: 600, sound: "attack" },
+    { pose: "win", ms: 1400, sound: "win" },
   ];
   let step = -1;
   let next = 0;
@@ -132,14 +148,14 @@ export function renderScreen(root: HTMLElement, flow: CaptureFlowState, data: Ca
         env.draft
           ? h("div", { class: "resume" },
               h("strong", {}, "Pick up where you left off?"),
-              h("p", { class: "muted" }, `${env.draft.captured} of ${CAPTURE_TARGETS.length} poses captured · ${describeAge(env.draft.ageMs)}`),
+              h("p", { class: "muted" }, `${env.draft.captured} of ${CAPTURE_TARGET_COUNT} poses captured · ${describeAge(env.draft.ageMs)}`),
               h("div", { class: "row" },
                 h("button", { type: "button", class: "primary", on: { click: () => a.resumeDraft() } }, "Resume"),
                 h("button", { type: "button", on: { click: () => a.discardDraft() } }, "Start fresh"),
               ),
             )
           : null,
-        h("p", {}, `Strike ${CAPTURE_TARGETS.length} poses, record ${SOUND_IDS.length} battle cries, and become a fighter.`),
+        h("p", {}, `Strike ${CAPTURE_TARGET_COUNT} poses, record ${SOUND_IDS.length} battle cries, and become a fighter.`),
         roomInfo,
         flow.roomCode ? null : code,
         h("div", { class: "choices" },
@@ -207,11 +223,26 @@ export function renderScreen(root: HTMLElement, flow: CaptureFlowState, data: Ca
       void env.video.play().catch(() => {});
       break;
     }
+    case "archetype":
+      root.append(screen(
+        h("h2", {}, "Pick your fighting style"),
+        h("p", { class: "muted" }, "It gives you one signature move (down + punch + kick), and it's your next pose."),
+        h("div", { class: "choices archetypes" },
+          ...ARCHETYPE_IDS.map((id) =>
+            h("button", { type: "button", class: id === flow.archetype ? "primary" : "", on: { click: () => a.pickArchetype(id) } },
+              ghost(SIGNATURE_DEFINITIONS[id].ghostSvgPath),
+              h("span", {}, `${ARCHETYPES[id].name}: ${ARCHETYPES[id].moveName}`, h("small", {}, ARCHETYPES[id].blurb)),
+            ),
+          ),
+        ),
+      ));
+      break;
     case "review":
       root.append(screen(
         h("h2", {}, "Your moves"),
         h("p", { class: "muted" }, "Tap a pose to retake it."),
-        strip(data, a.retake),
+        strip(data, flow.archetype!, a.retake),
+        h("button", { type: "button", on: { click: () => a.changeArchetype() } }, `Style: ${ARCHETYPES[flow.archetype!].name} · change`),
         h("button", { type: "button", class: "primary", on: { click: () => a.reviewDone() } }, "Looks good"),
         env.debug ? h("button", { type: "button", on: { click: () => a.downloadDebug() } }, "Download matting debug (zip)") : null,
       ));
@@ -278,14 +309,14 @@ export function renderScreen(root: HTMLElement, flow: CaptureFlowState, data: Ca
       name.addEventListener("input", () => a.setName(name.value));
       root.append(screen(
         h("h2", {}, "Ready to fight"),
-        showcase(data),
+        showcase(data, flow.archetype!),
         name,
         roomInfo,
         h("button", { type: "button", class: "primary", on: { click: () => { a.setName(name.value); a.finish(); } } },
           flow.roomCode ? "Send to game" : "Save"),
         h("details", {},
           h("summary", { class: "muted" }, "Retake a pose"),
-          strip(data, a.retake),
+          strip(data, flow.archetype!, a.retake),
         ),
       ));
       break;

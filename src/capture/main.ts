@@ -14,7 +14,8 @@ import {
 import { clearDraft, loadDraft, saveDraft, saveFighter } from "../shared/fighter-storage";
 import { DRAFT_VERSION, isResumable, summarizeDraft, type CaptureDraft, type DraftCapture } from "./capture-draft";
 import { GameLink } from "./game-link";
-import { CAPTURE_TARGETS } from "../shared/pose-definitions";
+import { CAPTURE_TARGET_COUNT, captureTargetsFor } from "../shared/pose-definitions";
+import type { ArchetypeId } from "../shared/archetypes";
 import { normalizeRoomCode } from "../shared/room-code";
 import { connectAsGuest, fetchIceServers, type PeerLink } from "../transfer/peer-connection";
 import { sendFighter } from "../transfer/fighter-sender";
@@ -210,7 +211,7 @@ class CaptureApp {
     }
     const draft: CaptureDraft = {
       version: DRAFT_VERSION, savedAt: Date.now(), fighterId: this.data.fighterId, name: this.data.name,
-      mode: this.flow.mode, roomCode: this.flow.roomCode, captures, sounds: this.data.sounds,
+      mode: this.flow.mode, roomCode: this.flow.roomCode, archetype: this.flow.archetype, captures, sounds: this.data.sounds,
     };
     await saveDraft(draft).catch((err) => console.warn("[draft] couldn't save", err));
   }
@@ -244,7 +245,7 @@ class CaptureApp {
     await this.renderSprites();
     const roomCode = this.flow.roomCode ?? draft.roomCode;
     this.link.setRoom(roomCode);
-    this.dispatch({ type: "resume", mode: draft.mode, roomCode: draft.roomCode, nextPoseIndex: summarizeDraft(draft).nextPoseIndex });
+    this.dispatch({ type: "resume", mode: draft.mode, roomCode: draft.roomCode, archetype: draft.archetype, nextPoseIndex: summarizeDraft(draft).nextPoseIndex });
     this.link.warmUp();
   }
 
@@ -264,6 +265,7 @@ class CaptureApp {
       this.ensureModels().then(() => this.dispatch({ type: "modelsReady" }), (err) => this.failModels(err));
     }
     if (s.name === "pose") this.startPose(s.poseIndex);
+    if (s.name === "archetype") this.voice.say("Pick your fighting style.");
     if (s.name === "sounds" && !SoundRecorder.isSupported()) return this.dispatch({ type: "skipAllSounds" });
     if (s.name === "sending") void this.send();
     if (s.name === "saved" && previous.screen.name === "preview") void this.saveLocal();
@@ -292,13 +294,13 @@ class CaptureApp {
   private renderHud(): void {
     const s = this.flow.screen;
     if (!isLiveScreen(s)) return;
-    const target = targetAt(s.poseIndex);
+    const target = targetAt(s.poseIndex, this.flow.archetype);
     const def = target.definition;
     const step = this.root.querySelector<HTMLElement>("[data-hud=step]");
     const label = this.root.querySelector<HTMLElement>("[data-hud=label]");
     const hint = this.root.querySelector<HTMLElement>("[data-hud=hint]");
     const manual = this.root.querySelector<HTMLButtonElement>("[data-hud=manual]");
-    if (step) step.textContent = `${s.poseIndex + 1} / ${CAPTURE_TARGETS.length}${s.retake ? " · retake" : ""}`;
+    if (step) step.textContent = `${s.poseIndex + 1} / ${CAPTURE_TARGET_COUNT}${s.retake ? " · retake" : ""}`;
     if (label) label.textContent = def.label;
     const rough = s.name === "captured" && s.rough;
     if (hint) {
@@ -317,7 +319,7 @@ class CaptureApp {
   private hintText(): string {
     const s = this.flow.screen;
     if (s.name !== "pose") return "";
-    const def = targetAt(s.poseIndex).definition;
+    const def = targetAt(s.poseIndex, this.flow.archetype).definition;
     const { landmarks, update, framing } = this.live;
     if (!landmarks) return "Step into the frame";
     const inFrame = update !== null && update.score !== Infinity;
@@ -347,7 +349,7 @@ class CaptureApp {
     start: () => {
       this.voice.unlock();
       this.holdSound.unlock();
-      this.link.warmUp(); // find out now, not after fifteen poses, whether the laptop is reachable
+      this.link.warmUp(); // find out now, not after sixteen poses, whether the laptop is reachable
       this.dispatch({ type: "start" });
     },
     manualCapture: () => {
@@ -358,6 +360,8 @@ class CaptureApp {
     retakeRough: () => this.dispatch({ type: "retakeRough" }),
     keepRough: () => this.dispatch({ type: "keepRough" }),
     retake: (targetKey) => this.dispatch({ type: "retake", targetKey }),
+    pickArchetype: (archetype) => this.pickArchetype(archetype),
+    changeArchetype: () => this.dispatch({ type: "changeArchetype" }),
     reviewDone: () => this.dispatch({ type: "reviewDone" }),
     recordSound: async (soundId, onLevel) => {
       const takes = (this.data.sounds[soundId] ??= []);
@@ -405,6 +409,21 @@ class CaptureApp {
       this.dispatch({ type: "restart" });
     },
   };
+
+  /** A different archetype means a different signature pose: the one captured for the old one goes. */
+  private pickArchetype(archetype: ArchetypeId): void {
+    if (this.flow.archetype && this.flow.archetype !== archetype) {
+      this.captures.delete("signature");
+      this.renderedScale.delete("signature");
+      this.debugCaptures.delete("signature");
+      delete this.data.poses.signature;
+      const url = this.data.previews.signature;
+      if (url) URL.revokeObjectURL(url);
+      delete this.data.previews.signature;
+    }
+    this.dispatch({ type: "pickArchetype", archetype });
+    this.saveDraftSoon();
+  }
 
   // --- camera + models -------------------------------------------------------------
 
@@ -460,7 +479,7 @@ class CaptureApp {
 
 
   private startPose(index: number): void {
-    const def = targetAt(index).definition;
+    const def = targetAt(index, this.flow.archetype).definition;
     this.matcher = new PoseMatcher(def);
     this.matcher.start(performance.now());
     this.live = { landmarks: null, update: null, framing: null };
@@ -481,7 +500,7 @@ class CaptureApp {
     const W = this.camera.width;
     const H = this.camera.height;
     this.overlay.resize(W, H);
-    const target = targetAt(s.poseIndex);
+    const target = targetAt(s.poseIndex, this.flow.archetype);
     const def = target.definition;
     if (s.name === "pose" && this.matcher && !this.capturing && this.tracker.shouldDetect(now)) {
       const landmarks = this.tracker.detectLive(this.camera.video, now);
@@ -553,7 +572,7 @@ class CaptureApp {
     const s = this.flow.screen;
     if (s.name !== "pose" || this.capturing || !this.tracker || !this.remover) return;
     this.capturing = true;
-    const target = targetAt(s.poseIndex);
+    const target = targetAt(s.poseIndex, this.flow.archetype);
     const side = this.matcher?.side ?? "right";
     const liveLandmarks = this.live.landmarks;
     this.holdSound.complete();
@@ -664,11 +683,14 @@ class CaptureApp {
   // --- finish ------------------------------------------------------------------------
 
   private async buildFighter(): Promise<Fighter> {
-    const missing = CAPTURE_TARGETS.filter((t) => !(t.variant ? this.data.variants[t.key] : this.data.poses[t.poseId])).map((t) => t.definition.label);
+    const archetype = this.flow.archetype;
+    if (!archetype) throw new Error("No fighting style picked");
+    const targets = captureTargetsFor(archetype);
+    const missing = targets.filter((t) => !(t.variant ? this.data.variants[t.key] : this.data.poses[t.poseId])).map((t) => t.definition.label);
     if (missing.length) throw new Error(`Missing poses: ${missing.join(", ")}`);
     const poses = this.data.poses as Record<PoseId, CapturedPose>;
     const poseVariants: Partial<Record<PoseId, CapturedPose[]>> = {};
-    for (const t of CAPTURE_TARGETS) {
+    for (const t of targets) {
       if (t.variant > 0) ((poseVariants[t.poseId] ??= [])[t.variant - 1] = this.data.variants[t.key]!);
     }
     const soundVariants: Partial<Record<SoundId, Blob[]>> = {};
@@ -679,7 +701,8 @@ class CaptureApp {
     return {
       fighterId: this.data.fighterId,
       name: this.data.name.trim() || "New Fighter",
-      schemaVersion: 1,
+      schemaVersion: 2,
+      archetype,
       createdAt: Date.now(),
       facingDirection: "right",
       poses,

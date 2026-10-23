@@ -44,7 +44,8 @@ describe("fighter codec", () => {
     const { assembler } = await transfer(fighter);
     const rebuilt = assembler.build();
     expect(await fighterSnapshot(rebuilt)).toEqual(await fighterSnapshot(fighter));
-    expect(Object.keys(rebuilt.poseVariants).sort()).toEqual(["hurt", "kick", "punch", "win"]);
+    expect(Object.keys(rebuilt.poseVariants).sort()).toEqual(["hurt", "idle", "kick", "punch", "win"]);
+    expect(rebuilt.archetype).toBe("brawler");
     expect(rebuilt.poseVariants.punch?.[0].attackSide).toBe("left");
     expect(rebuilt.soundVariants?.attack).toHaveLength(2);
     // ...and through a .photodojo file
@@ -52,28 +53,20 @@ describe("fighter codec", () => {
     expect(await fighterSnapshot(imported)).toEqual(await fighterSnapshot(fighter));
   });
 
-  it("requires every pose but the second stance: a missing second pose or its image is rejected", async () => {
+  it("requires every pose: a missing second pose or its image is rejected", async () => {
     const { manifest } = await encodeFighter(makeFighter());
     const parts = manifest.parts.filter((p) => p.partId !== "pose:win:1");
     expect(() => validateManifest({ ...manifest, parts })).toThrow(/win variant 1/);
     expect(() => validateManifest({ ...manifest, variantPoses: manifest.variantPoses.filter((v) => v.poseId !== "kick") })).toThrow(/second kick/);
-  });
-
-  it("carries the second stance when there is one (older fighters don't have it)", async () => {
-    const plain = makeFighter();
-    expect(plain.poseVariants.idle).toBeUndefined();
-    const fighter = { ...plain, poseVariants: { ...plain.poseVariants, idle: [{ ...plain.poses.idle, capturedAt: 42 }] } };
-    const imported = await importFighterFile(await exportFighterFile(fighter));
-    expect(await fighterSnapshot(imported)).toEqual(await fighterSnapshot(fighter));
-    expect(imported.poseVariants.idle?.[0].capturedAt).toBe(42);
+    expect(() => validateManifest({ ...manifest, variantPoses: manifest.variantPoses.filter((v) => v.poseId !== "idle") })).toThrow(/second idle/);
   });
 
   it("manifest lists parts, landmarks and anchors", async () => {
     const { manifest } = await encodeFighter(makeFighter());
     expect(manifest.parts.map((p) => p.partId)).toEqual([
-      "pose:idle", "pose:walk", "pose:block", "pose:crouch", "pose:punch", "pose:kick", "pose:jump", "pose:hurt", "pose:win", "pose:handshake",
+      "pose:idle", "pose:walk", "pose:block", "pose:crouch", "pose:punch", "pose:kick", "pose:jump", "pose:hurt", "pose:win", "pose:signature", "pose:handshake",
       "sound:attack", "sound:win", "thumbnail",
-      "pose:punch:1", "pose:kick:1", "pose:hurt:1", "pose:win:1",
+      "pose:idle:1", "pose:punch:1", "pose:kick:1", "pose:hurt:1", "pose:win:1",
     ]);
     expect(manifest.landmarks.kick).toHaveLength(33);
     expect(manifest.anchors.jump).toEqual({ x: 256, y: 300 });
@@ -132,7 +125,8 @@ describe("fighter codec", () => {
 
   it("validates manifests", async () => {
     const { manifest } = await encodeFighter(makeFighter());
-    expect(() => validateManifest({ ...manifest, schemaVersion: 2 })).toThrow(/schema version/);
+    expect(() => validateManifest({ ...manifest, schemaVersion: 1 })).toThrow(/schema version/);
+    expect(() => validateManifest({ ...manifest, archetype: "ninja" })).toThrow(/archetype/);
     expect(() => validateManifest({ ...manifest, parts: manifest.parts.filter((p) => p.poseId !== "win") })).toThrow(/win/);
     expect(() => validateManifest({ ...manifest, landmarks: { ...manifest.landmarks, idle: [] } })).toThrow(/landmarks/);
     expect(() =>

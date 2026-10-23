@@ -1,6 +1,6 @@
 import Phaser from "phaser";
 import type { Fighter } from "../../shared/fighter-model";
-import { CAPTURE_TARGETS } from "../../shared/pose-definitions";
+import { CAPTURE_TARGET_COUNT } from "../../shared/pose-definitions";
 import { FightSimulation, type FightState } from "../../simulation/fight-simulation";
 import type { InputFrame } from "../../simulation/input-frame";
 import type { PlayerIndex } from "../../simulation/round-rules";
@@ -200,7 +200,7 @@ export class TitleScene extends Phaser.Scene {
 
   /** First visit (nothing captured yet): how to get yourself in the game. */
   private buildHowTo(cx: number, y: number): Phaser.GameObjects.GameObject[] {
-    const steps = ["📱 Scan the code", `🥋 Strike ${CAPTURE_TARGETS.length} poses`, "🥊 Fight as yourself"];
+    const steps = ["📱 Scan the code", `🥋 Strike ${CAPTURE_TARGET_COUNT} poses`, "🥊 Fight as yourself"];
     const gap = 330;
     const band = this.add.rectangle(cx, y, gap * steps.length + 40, 46, 0x121018, 0.7).setDepth(OVERLAY_DEPTH);
     const items: Phaser.GameObjects.GameObject[] = [band];

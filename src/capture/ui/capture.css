@@ -17,6 +17,8 @@ button:disabled { opacity: 0.5; }
 .choices button { text-align: left; }
 .choices button small { display: block; font-weight: 400; color: var(--muted); }
 .choices button.primary small { color: #3b2f1a; }
+.archetypes button { display: flex; gap: 12px; align-items: center; }
+.archetypes svg { flex: none; width: 64px; height: 64px; fill: none; stroke: currentColor; stroke-width: 14; stroke-linecap: round; stroke-linejoin: round; }
 .row { display: flex; gap: 10px; flex-wrap: wrap; }
 .row > * { flex: 1; }
 label.check { display: flex; gap: 8px; align-items: center; color: var(--muted); }

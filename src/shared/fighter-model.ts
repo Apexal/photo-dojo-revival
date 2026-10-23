@@ -1,13 +1,17 @@
+import type { ArchetypeId } from "./archetypes";
+
 export type PoseId =
   | "idle" | "walk" | "punch" | "kick"
   | "jump" | "block" | "crouch" | "hurt" | "win"
+  /** The archetype's signature move (archetypes.ts): a different pose for each archetype. */
+  | "signature"
   /** Reaching out to shake hands: the round intro (fight-simulation.ts). */
   | "handshake";
 
 export type SoundId = "attack" | "hurt" | "win";
 
 /** Capture order: easy poses first so the user learns the mechanic. */
-export const POSE_IDS: readonly PoseId[] = ["idle", "walk", "block", "crouch", "punch", "kick", "jump", "hurt", "win", "handshake"];
+export const POSE_IDS: readonly PoseId[] = ["idle", "walk", "block", "crouch", "punch", "kick", "jump", "hurt", "win", "signature", "handshake"];
 export const SOUND_IDS: readonly SoundId[] = ["attack", "hurt", "win"];
 
 /** Pixel coords in the sprite canvas (or in the source frame before normalization). */
@@ -22,13 +26,15 @@ export interface CapturedPose {
   landmarks: NormalizedLandmark[];       // 33 MediaPipe landmarks, in sprite-canvas pixel space
   anchorPoint: { x: number; y: number }; // feet midpoint (or pelvis for jump), in sprite-canvas pixels
   capturedAt: number;
-  attackSide?: LimbSide;                 // punch/kick/handshake only; defaults to "right"
+  attackSide?: LimbSide;                 // punch/kick/signature/handshake only; defaults to "right"
 }
 
 export interface Fighter {
   fighterId: string;                      // uuid
   name: string;
-  schemaVersion: 1;
+  schemaVersion: 2;
+  /** Picks the signature move and what the `signature` pose shows. */
+  archetype: ArchetypeId;
   createdAt: number;
   facingDirection: "right";               // all captures face right; renderer flips for P2
   poses: Record<PoseId, CapturedPose>;

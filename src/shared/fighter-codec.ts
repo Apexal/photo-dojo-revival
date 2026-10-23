@@ -1,4 +1,5 @@
 import { strFromU8, strToU8, unzipSync, zipSync, type Zippable } from "fflate";
+import { isArchetypeId, type ArchetypeId } from "./archetypes";
 import { REQUIRED_VARIANT_POSES } from "./pose-definitions";
 import {
   LANDMARK_COUNT,
@@ -38,14 +39,15 @@ export interface FighterManifest {
   type: "manifest";
   fighterId: string;
   name: string;
-  schemaVersion: 1;
+  schemaVersion: 2;
+  archetype: ArchetypeId;
   createdAt: number;
   chunkSize: number;
   parts: ManifestPart[];
   landmarks: Record<PoseId, NormalizedLandmark[]>;
   anchors: Record<PoseId, { x: number; y: number }>;
   poseMeta: Record<PoseId, { capturedAt: number; attackSide?: LimbSide }>;
-  /** The second versions of punch, kick, hurt and win. */
+  /** The second versions of idle, punch, kick, hurt and win. */
   variantPoses: VariantPoseMeta[];
 }
 
@@ -119,7 +121,8 @@ export async function encodeFighter(fighter: Fighter, chunkSize = CHUNK_SIZE): P
       type: "manifest",
       fighterId: fighter.fighterId,
       name: fighter.name,
-      schemaVersion: 1,
+      schemaVersion: 2,
+      archetype: fighter.archetype,
       createdAt: fighter.createdAt,
       chunkSize,
       parts,
@@ -169,7 +172,8 @@ export function validateManifest(value: unknown): FighterManifest {
   if (!value || typeof value !== "object") fail("not an object");
   const m = value as FighterManifest;
   if (m.type !== "manifest") fail("wrong type");
-  if (m.schemaVersion !== 1) fail(`unsupported schema version ${String(m.schemaVersion)}`);
+  if (m.schemaVersion !== 2) fail(`unsupported schema version ${String(m.schemaVersion)}`);
+  if (!isArchetypeId(m.archetype)) fail("missing or unknown archetype");
   if (typeof m.fighterId !== "string" || !m.fighterId) fail("missing fighterId");
   if (typeof m.name !== "string") fail("missing name");
   if (!isFiniteNumber(m.createdAt)) fail("missing createdAt");
@@ -273,7 +277,8 @@ export function decodeFighter(manifest: FighterManifest, parts: Uint8Array[]): F
     ...(Object.keys(soundVariants).length ? { soundVariants } : {}),
     fighterId: manifest.fighterId,
     name: manifest.name,
-    schemaVersion: 1,
+    schemaVersion: 2,
+    archetype: manifest.archetype,
     createdAt: manifest.createdAt,
     facingDirection: "right",
     poses,

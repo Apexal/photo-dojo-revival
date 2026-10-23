@@ -1,4 +1,18 @@
-import { ATTACKS, KNOCKDOWN, TAUNT, THROW, THROW_TOTAL_FRAMES, attackTotalFrames, type AttackId, type FighterGeometry } from "../../shared/frame-data";
+import { ARCHETYPES, type ArchetypeId } from "../../shared/archetypes";
+import {
+  ATTACKS,
+  GRABS,
+  KNOCKDOWN,
+  PARRY,
+  PARRY_TOTAL_FRAMES,
+  TAUNT,
+  THROW,
+  attackTotalFrames,
+  grabTotalFrames,
+  isGrab,
+  type AttackId,
+  type FighterGeometry,
+} from "../../shared/frame-data";
 import { worldBoxesOf } from "../../simulation/fight-simulation";
 import { createFighterState, currentAttackPhase, isAttack, isDown, isGrounded, type FighterState } from "../../simulation/fighter-state-machine";
 import { EMPTY_INPUT, type InputFrame } from "../../simulation/input-frame";
@@ -20,12 +34,14 @@ interface CpuTuning {
   punish: number;
   /** Chance of breaking a throw. */
   tech: number;
+  /** Chance per decision of using the signature move when it fits (a guardian: of parrying an attack it sees coming). */
+  signature: number;
 }
 
 export const CPU_LEVELS: Record<CpuLevel, CpuTuning> = {
-  easy: { reaction: 24, think: 30, block: 0.15, antiAir: 0.05, aggression: 0.25, punish: 0.1, tech: 0.05 },
-  normal: { reaction: 14, think: 16, block: 0.5, antiAir: 0.4, aggression: 0.45, punish: 0.45, tech: 0.35 },
-  hard: { reaction: 8, think: 8, block: 0.85, antiAir: 0.8, aggression: 0.6, punish: 0.85, tech: 0.75 },
+  easy: { reaction: 24, think: 30, block: 0.15, antiAir: 0.05, aggression: 0.25, punish: 0.1, tech: 0.05, signature: 0.1 },
+  normal: { reaction: 14, think: 16, block: 0.5, antiAir: 0.4, aggression: 0.45, punish: 0.45, tech: 0.35, signature: 0.3 },
+  hard: { reaction: 8, think: 8, block: 0.85, antiAir: 0.8, aggression: 0.6, punish: 0.85, tech: 0.75, signature: 0.5 },
 };
 
 /** Gap left inside each range, so the CPU doesn't swing at the very tip and whiff. */
@@ -35,10 +51,14 @@ const JUMP_IN_DISTANCE = 320;
 
 type Stance = "idle" | "forward" | "back" | "crouch";
 
+type CoreAttack = "punch" | "kick" | "uppercut" | "lowKick" | "jumpKick";
+
 /** How far each move reaches, measured once from the two fighters' landmark-derived boxes. */
 export interface Ranges {
-  attack: Record<AttackId, number>;
+  attack: Record<CoreAttack, number>;
   throw: number;
+  /** The signature move's reach: a strike's, the bear hug's grab range; 0 for the parry. */
+  signature: number;
 }
 
 export function rangesFor(self: FighterGeometry, opponent: FighterGeometry): Ranges {
@@ -52,10 +72,21 @@ export function rangesFor(self: FighterGeometry, opponent: FighterGeometry): Ran
     return hit.x + hit.width + (ATTACKS[attack].advance ?? 0) + oppFront - RANGE_MARGIN;
   };
   const selfBody = worldBoxesOf(self, createFighterState(0, 1, 1)).bodyBox;
+  const grabReach = (range: number) => selfBody.x + selfBody.width - oppBoxes.bodyBox.x + range - RANGE_MARGIN;
+  const move = ARCHETYPES[self.archetype].move;
   return {
     attack: { punch: reach("punch"), kick: reach("kick"), uppercut: reach("uppercut"), lowKick: reach("lowKick"), jumpKick: reach("jumpKick") },
-    throw: selfBody.x + selfBody.width - oppBoxes.bodyBox.x + THROW.range - RANGE_MARGIN,
+    throw: grabReach(THROW.range),
+    signature: move === "parry" ? 0 : isGrab(move) ? grabReach(GRABS[move].range) : reach(move),
   };
+}
+
+const SIGNATURE_INPUT: Partial<InputFrame> = { down: true, punch: true, kick: true };
+
+/** Startup frames of the attack an input makes (punch, kick, or with down held, uppercut / low kick). */
+function startupOf(move: Partial<InputFrame>): number {
+  const attack: AttackId = move.punch ? (move.down ? "uppercut" : "punch") : move.down ? "lowKick" : "kick";
+  return ATTACKS[attack].startup;
 }
 
 /**
@@ -64,15 +95,10 @@ export function rangesFor(self: FighterGeometry, opponent: FighterGeometry): Ran
  * succeed with per-level odds. Output is plain InputFrames, so it plays by
  * exactly the same rules as a person.
  */
-/** Startup frames of the attack an input makes (punch, kick, or with down held, uppercut / low kick). */
-function startupOf(move: Partial<InputFrame>): number {
-  const attack: AttackId = move.punch ? (move.down ? "uppercut" : "punch") : move.down ? "lowKick" : "kick";
-  return ATTACKS[attack].startup;
-}
-
 export class CpuPlayer {
   private readonly tuning: CpuTuning;
   private readonly ranges: Ranges;
+  private readonly archetype: ArchetypeId;
   /** Recent opponent states; the CPU acts on the one `reaction` frames old. */
   private seen: FighterState[] = [];
   /** Scripted frames to play before deciding again (jump-ins). */
@@ -93,6 +119,7 @@ export class CpuPlayer {
   ) {
     this.tuning = CPU_LEVELS[level];
     this.ranges = rangesFor(geometry.self, geometry.opponent);
+    this.archetype = geometry.self.archetype;
   }
 
   read(self: FighterState, opponent: FighterState): InputFrame {
@@ -115,8 +142,8 @@ export class CpuPlayer {
     const free = isGrounded(self) && (self.action === "idle" || self.action === "walk" || self.action === "block");
 
     if (self.action === "grabbed") {
-      // Its own state isn't delayed, but reacting to the grab is.
-      const at = Math.min(this.tuning.reaction, THROW.techWindow - 1);
+      // Its own state isn't delayed, but reacting to the grab is (and a bear hug can't be broken at all).
+      const at = Math.min(this.tuning.reaction, THROW.holdFrames - 1);
       return self.actionFrame === at && this.random() < this.tuning.tech
         ? { ...EMPTY_INPUT, punch: true, kick: true }
         : { ...EMPTY_INPUT };
@@ -135,9 +162,17 @@ export class CpuPlayer {
 
     // An attack it can see coming: guard the right way for it (punches pass over a crouch).
     const phase = currentAttackPhase(opp);
-    if (isAttack(opp.action) && (phase === "startup" || phase === "active") && this.roll(`attack:${this.moveId(opp)}`, this.tuning.block)) {
-      const level = ATTACKS[opp.action].level;
-      return level === "low" || level === "high" ? { ...EMPTY_INPUT, down: true } : { ...EMPTY_INPUT, [back]: true };
+    if (isAttack(opp.action) && (phase === "startup" || phase === "active")) {
+      // A guardian sometimes parries it instead, timed so the hit comes during the parry.
+      const hitsIn = ATTACKS[opp.action].startup - opp.actionFrame - (this.seen.length - 1);
+      const parryCatches = hitsIn >= PARRY.startup && hitsIn < PARRY.startup + PARRY.active;
+      if (this.archetype === "guardian" && free && parryCatches && this.roll(`parry:${this.moveId(opp)}`, this.tuning.signature)) {
+        return this.attack(SIGNATURE_INPUT);
+      }
+      if (this.roll(`attack:${this.moveId(opp)}`, this.tuning.block)) {
+        const level = ATTACKS[opp.action].level;
+        return level === "low" || level === "high" ? { ...EMPTY_INPUT, down: true } : { ...EMPTY_INPUT, [back]: true };
+      }
     }
 
     // Knocked down: nothing to hit yet. Walk in, and (more often the harder it is) time an
@@ -153,7 +188,7 @@ export class CpuPlayer {
     }
 
     // Hit or blocked: maybe keep the guard up for what comes next.
-    if (self.action === "hurt" || self.action === "blockstun") {
+    if (self.action === "hurt" || self.action === "blockstun" || self.action === "parried") {
       return this.roll(`stun:${this.frame - self.actionFrame}`, this.tuning.block) ? { ...EMPTY_INPUT, down: true } : this.stanceInput(forward, back);
     }
     if (!free) return this.stanceInput(forward, back);
@@ -182,6 +217,8 @@ export class CpuPlayer {
     };
 
     if (this.cooldown === 0 && r < t.aggression) {
+      const signature = this.signatureFits(opp, distance);
+      if (signature && this.random() < t.signature) return this.attack(SIGNATURE_INPUT);
       if (distance <= this.ranges.throw && throwable && this.random() < (opp.action === "block" ? 0.8 : 0.3)) return this.attack({ punch: true, kick: true });
       if (opp.action === "block") {
         // Against a guard: throw it up close, jump in on a crouch, low kick a standing one.
@@ -201,6 +238,21 @@ export class CpuPlayer {
     else if (distance > this.ranges.attack.punch || this.random() < t.aggression) this.stance = "forward";
     else this.stance = "idle";
     return this.stanceInput(forward, back);
+  }
+
+  /**
+   * Is now the moment for the signature move? The charge closes in from beyond kick
+   * range, the bear hug catches a guard from outside throw range, the knee beats a
+   * crouching guard. (The parry is a reaction, see decide.)
+   */
+  private signatureFits(opp: FighterState, distance: number): boolean {
+    if (distance > this.ranges.signature) return false;
+    switch (this.archetype) {
+      case "brawler": return distance > this.ranges.attack.kick && (opp.action === "idle" || opp.action === "walk");
+      case "grappler": return distance > this.ranges.throw && (opp.action === "block" || opp.action === "idle");
+      case "acrobat": return opp.action === "block" && opp.crouching;
+      case "guardian": return false;
+    }
   }
 
   /** The strongest attack that reaches from here (`varied`: mixes in low kicks and kicks). */
@@ -229,7 +281,9 @@ export class CpuPlayer {
     if (isAttack(opp.action) && currentAttackPhase(opp) === "recovery" && opp.action !== "jumpKick") {
       return attackTotalFrames(ATTACKS[opp.action]) - opp.actionFrame - late;
     }
-    if (opp.action === "throw" && opp.actionFrame > THROW.startup) return THROW_TOTAL_FRAMES - opp.actionFrame - late;
+    if (isGrab(opp.action) && opp.actionFrame > GRABS[opp.action].startup) return grabTotalFrames(GRABS[opp.action]) - opp.actionFrame - late;
+    if (opp.action === "parry" && opp.actionFrame >= PARRY.startup + PARRY.active) return PARRY_TOTAL_FRAMES - opp.actionFrame - late;
+    if (opp.action === "parried") return opp.stunFrames - opp.actionFrame - late;
     if (opp.action === "taunt") return TAUNT.frames - opp.actionFrame - late;
     return 0;
   }

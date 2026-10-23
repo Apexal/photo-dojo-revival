@@ -1,12 +1,17 @@
+import { ARCHETYPES, type ArchetypeId } from "../shared/archetypes";
 import {
   ATTACKS,
+  GRABS,
   JUMP_SQUAT_FRAMES,
   KNOCKDOWN,
+  PARRY_TOTAL_FRAMES,
   TAUNT,
   THROW_LENIENCY_FRAMES,
-  THROW_TOTAL_FRAMES,
   attackPhaseAt,
   attackTotalFrames,
+  grabTotalFrames,
+  isAttackId,
+  isGrab,
   type AttackId,
   type FighterAction,
 } from "../shared/frame-data";
@@ -55,6 +60,8 @@ export interface StepContext {
   opponent: FighterState;
   /** False during round intro/outro: no new actions from input. */
   controllable: boolean;
+  /** Whose signature move down + punch + kick starts. */
+  archetype: ArchetypeId;
 }
 
 export function createFighterState(x: number, facing: Facing, health: number): FighterState {
@@ -76,10 +83,9 @@ export function createFighterState(x: number, facing: Facing, health: number): F
 }
 
 export const isGrounded = (s: FighterState) => s.position.y >= FLOOR_Y && s.velocity.y >= 0;
-export const isAttack = (a: FighterAction): a is AttackId =>
-  a === "punch" || a === "kick" || a === "uppercut" || a === "lowKick" || a === "jumpKick";
-/** Moves the fighter can't interrupt: attacks, throws and taunts. */
-export const isCommitted = (a: FighterAction) => isAttack(a) || a === "throw" || a === "taunt";
+export const isAttack = isAttackId;
+/** Moves the fighter can't interrupt: attacks, grabs, the parry and taunts. */
+export const isCommitted = (a: FighterAction) => isAttack(a) || isGrab(a) || a === "parry" || a === "taunt";
 /** Holding a guard: free block or locked blockstun. */
 export const isGuarding = (s: FighterState) => s.action === "block" || s.action === "blockstun";
 /** Knocked down: flying, lying on the floor, or getting up. */
@@ -155,18 +161,22 @@ export function knockDown(s: FighterState, away: 1 | -1, vx: number = away * KNO
 const startMove = (s: FighterState, action: FighterAction): FighterState =>
   ({ ...s, action, actionFrame: 0, hasHit: false, stunFrames: 0, velocity: { x: 0, y: 0 }, retreating: false });
 
+/** Punch + kick: with down held, the archetype's signature; otherwise a throw (or a taunt from far away). */
+function bothButtons(s: FighterState, ctx: StepContext): FighterAction {
+  if (ctx.input.down) return ARCHETYPES[ctx.archetype].move;
+  return Math.abs(ctx.opponent.position.x - s.position.x) >= TAUNT.minDistance ? "taunt" : "throw";
+}
+
 /**
  * Choose the grounded action for this frame from input.
- * Punch + kick together = throw; down + punch = uppercut; down + kick = low kick.
+ * Punch + kick together = throw, or with down the signature; down + punch = uppercut; down + kick = low kick.
  */
 function chooseFreeAction(s: FighterState, ctx: StepContext): FighterState {
   const { input, pressed, opponent } = ctx;
   const forwardHeld = s.facing === 1 ? input.right : input.left;
   const backHeld = s.facing === 1 ? input.left : input.right;
 
-  if (pressed.punch && pressed.kick) {
-    return startMove(s, Math.abs(opponent.position.x - s.position.x) >= TAUNT.minDistance ? "taunt" : "throw");
-  }
+  if (pressed.punch && pressed.kick) return startMove(s, bothButtons(s, ctx));
   if (pressed.punch) return startMove(s, input.down ? "uppercut" : "punch");
   // Kicking while backing off keeps your distance: no lunge.
   if (pressed.kick) return { ...startMove(s, input.down ? "lowKick" : "kick"), retreating: backHeld };
@@ -223,6 +233,7 @@ export function stepFighter(s: FighterState, ctx: StepContext): FighterState {
         : { ...s, actionFrame: s.actionFrame + 1, velocity: { x: 0, y: 0 } };
       break;
     case "hurt":
+    case "parried":
       next = s.actionFrame + 1 >= s.stunFrames
         ? recover(s, ctx)
         : { ...s, actionFrame: s.actionFrame + 1 };
@@ -252,11 +263,14 @@ export function stepFighter(s: FighterState, ctx: StepContext): FighterState {
     case "punch":
     case "kick":
     case "uppercut":
-    case "lowKick": {
-      // Leniency: pressing the other button just after starting an attack makes it a throw.
+    case "lowKick":
+    case "charge":
+    case "flyingKnee": {
+      // Leniency: pressing the other button just after starting a punch or kick makes it a throw (or the signature).
+      const core = s.action === "punch" || s.action === "kick" || s.action === "uppercut" || s.action === "lowKick";
       const other = s.action === "punch" || s.action === "uppercut" ? ctx.pressed.kick : ctx.pressed.punch;
-      if (ctx.controllable && other && s.actionFrame < THROW_LENIENCY_FRAMES) {
-        next = startMove(s, "throw");
+      if (core && ctx.controllable && other && s.actionFrame < THROW_LENIENCY_FRAMES) {
+        next = startMove(s, ctx.input.down ? ARCHETYPES[ctx.archetype].move : "throw");
         break;
       }
       const attack = ATTACKS[s.action];
@@ -274,9 +288,15 @@ export function stepFighter(s: FighterState, ctx: StepContext): FighterState {
       break;
     }
     case "throw":
-      next = s.actionFrame + 1 >= THROW_TOTAL_FRAMES
+    case "bearHug":
+      next = s.actionFrame + 1 >= grabTotalFrames(GRABS[s.action])
         ? recover(s, ctx)
         : { ...s, actionFrame: s.actionFrame + 1 };
+      break;
+    case "parry":
+      next = s.actionFrame + 1 >= PARRY_TOTAL_FRAMES
+        ? recover(s, ctx)
+        : { ...s, actionFrame: s.actionFrame + 1, velocity: { x: 0, y: 0 } };
       break;
     case "grabbed":
       // Held in place; the simulation decides between a tech and the throw landing.
@@ -311,8 +331,8 @@ export function applyHit(defender: FighterState, attack: AttackId, blocked: bool
   return { ...defender, health, action: "hurt", actionFrame: 0, stunFrames: data.hitstun, velocity: { x: 0, y: defender.velocity.y } };
 }
 
-/** Can be grabbed: grounded and neutral. Attacks beat throws; no throwing someone in hit- or blockstun. */
+/** Can be grabbed: grounded and neutral (or parrying). Attacks beat grabs; no throwing someone in hit- or blockstun. */
 export function isThrowable(s: FighterState): boolean {
   if (!isGrounded(s)) return false;
-  return s.action === "idle" || s.action === "walk" || s.action === "block" || s.action === "taunt" || s.action === "jumpSquat";
+  return s.action === "idle" || s.action === "walk" || s.action === "block" || s.action === "taunt" || s.action === "jumpSquat" || s.action === "parry";
 }

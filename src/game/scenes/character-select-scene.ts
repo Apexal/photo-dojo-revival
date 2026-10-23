@@ -2,6 +2,7 @@ import Phaser from "phaser";
 import QRCode from "qrcode";
 import { exportFighterFile, fighterFileName, importFighterFile } from "../../shared/fighter-codec";
 import { formatCountdown } from "../../shared/room-code";
+import { ARCHETYPES } from "../../shared/archetypes";
 import { SPRITE_CANVAS_SIZE, type Fighter, type SoundId } from "../../shared/fighter-model";
 import { frameGeometry, groundAnchorFor } from "../../shared/frame-data";
 import { deleteFighter, getSetting, isStoragePersisted, saveFighter, setSetting } from "../../shared/fighter-storage";
@@ -79,6 +80,8 @@ interface Preview {
   fighter: PosePreview | null;
   title: Phaser.GameObjects.Text;
   name: Phaser.GameObjects.Text;
+  /** The archetype and its signature move, under the name. */
+  style: Phaser.GameObjects.Text;
   status: Phaser.GameObjects.Text;
   /** Points at the tutorial (gold, just under the name); pulses for a fighter nobody has played yet. */
   tip: Phaser.GameObjects.Text;
@@ -674,6 +677,7 @@ export class CharacterSelectScene extends Phaser.Scene {
       fighter: null,
       title: text(PANEL_Y + 14, { fontSize: "34px", fontStyle: "bold", color: PLAYER_CSS[i] }).setText(`P${i + 1}`),
       name: text(PANEL_Y + 60, { fontSize: "26px", fontStyle: "bold", color: "#f3efe6" }),
+      style: text(PANEL_Y + 94, { fontSize: "16px", color: "#c9c3b8" }),
       status: text(PANEL_Y + 136, { fontSize: "17px", color: PLAYER_CSS[i], lineSpacing: 4 }),
       tip: text(PANEL_Y + 136, { fontSize: "17px", fontStyle: "bold", color: "#f2c14e", lineSpacing: 4 }),
       tipPulses: false,
@@ -682,7 +686,7 @@ export class CharacterSelectScene extends Phaser.Scene {
     };
     preview.title.setPosition(right ? x + PANEL_W - 20 : x + 20, PANEL_Y + 14).setOrigin(right ? 1 : 0, 0);
     // One container so the intro moves the panel as a whole; above the VS dimmer.
-    const panel = this.add.container(0, 0, [preview.frame, preview.title, preview.name, preview.status, preview.tip, preview.device, preview.join]).setDepth(PREVIEW_DEPTH);
+    const panel = this.add.container(0, 0, [preview.frame, preview.title, preview.name, preview.style, preview.status, preview.tip, preview.device, preview.join]).setDepth(PREVIEW_DEPTH);
     this.introduce([panel], INTRO_PANELS_MS + i * 80, { y: 120 });
     return preview;
   }
@@ -695,6 +699,8 @@ export class CharacterSelectScene extends Phaser.Scene {
       v.frame.setStrokeStyle(p?.ready ? 4 : 2, p ? PLAYER_COLORS[i] : 0x3a3346, p ? 1 : 0.6);
       v.title.setAlpha(p ? 1 : 0.5);
       v.name.setText(entry ? entry.fighter.name : "");
+      const archetype = entry && ARCHETYPES[entry.fighter.archetype];
+      v.style.setText(archetype ? `${archetype.name} · ${archetype.moveName}` : "").setY(PANEL_Y + 62 + v.name.height);
       v.join.setText(p ? "" : `Press any button to join\n(gamepad, ${actionKeyLabel("p1", "punch")}, or ${actionKeyLabel("p2", "punch")})`);
       // The tutorial is one player's: suggest it to anyone alone, and push it for a fighter's first fight.
       const fresh = !!entry && !hasPlayed(this.registry, entry.fighter.fighterId);
@@ -703,7 +709,7 @@ export class CharacterSelectScene extends Phaser.Scene {
         : alone && p.ready ? (fresh ? "First fight!\nup: TUTORIAL" : "up: tutorial")
         : alone ? (fresh ? "New? Pick, then\nup: TUTORIAL" : "")
         : fresh ? "New? Try the\ntutorial solo" : "",
-      ).setY(PANEL_Y + 64 + v.name.height + 12).setAlpha(1);
+      ).setY(v.style.y + v.style.height + 12).setAlpha(1);
       v.tipPulses = fresh && alone;
       v.status.setText(
         !p ? ""

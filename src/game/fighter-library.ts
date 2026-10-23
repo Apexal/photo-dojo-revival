@@ -1,3 +1,4 @@
+import type { ArchetypeId } from "../shared/archetypes";
 import type { FighterGeometry, PoseGeometry } from "../shared/frame-data";
 import { POSE_IDS, type CapturedPose, type Fighter, type PoseId } from "../shared/fighter-model";
 import { listFighters } from "../shared/fighter-storage";
@@ -13,6 +14,7 @@ export const PLACEHOLDER_IDS = ["placeholder-red", "placeholder-blue", "placehol
 interface PlaceholderJson {
   fighterId: string;
   name: string;
+  archetype: ArchetypeId;
   thumbnail: string;
   poses: Record<PoseId, PlaceholderPose>;
   variants?: Partial<Record<PoseId, PlaceholderPose[]>>;
@@ -49,7 +51,8 @@ export async function loadPlaceholderFighter(id: string, base = import.meta.env.
   return {
     fighterId: json.fighterId,
     name: json.name,
-    schemaVersion: 1,
+    schemaVersion: 2,
+    archetype: json.archetype,
     createdAt: 0,
     facingDirection: "right",
     poses: Object.fromEntries(entries) as Record<PoseId, CapturedPose>,
@@ -68,21 +71,20 @@ export async function loadLibrary(): Promise<LibraryEntry[]> {
     }),
     Promise.all(PLACEHOLDER_IDS.map((id) => loadPlaceholderFighter(id))),
   ]);
-  // Fighters from before a pose was added (e.g. crouch) can't be played; skip rather than crash.
+  // Fighters saved by an older version of the game can't be played; skip rather than crash.
   const complete = stored.filter((f) => {
-    const missing = POSE_IDS.filter((id) => !f.poses[id]);
-    if (missing.length) console.warn(`[library] skipping ${f.name}: no ${missing.join(", ")} pose (captured with an older version)`);
-    return !missing.length;
+    if (f.schemaVersion !== 2) console.warn(`[library] skipping ${f.name}: captured with an older version`);
+    return f.schemaVersion === 2;
   });
   return [...complete.map((fighter) => ({ fighter, builtIn: false })), ...placeholders.map((fighter) => ({ fighter, builtIn: true }))];
 }
 
-/** What the simulation needs from a fighter: per-pose landmarks and anchors. */
+/** What the simulation needs from a fighter: per-pose landmarks and anchors, and the archetype. */
 export function geometryOf(fighter: Fighter): FighterGeometry {
   const of = (p: CapturedPose): PoseGeometry => ({ landmarks: p.landmarks, anchorPoint: p.anchorPoint, ...(p.attackSide ? { attackSide: p.attackSide } : {}) });
   const poses = Object.fromEntries(POSE_IDS.map((poseId) => [poseId, of(fighter.poses[poseId])])) as Record<PoseId, PoseGeometry>;
   const variants = Object.fromEntries(
     Object.entries(fighter.poseVariants ?? {}).map(([poseId, list]) => [poseId, (list ?? []).map(of)]),
   ) as Partial<Record<PoseId, PoseGeometry[]>>;
-  return { ...poses, variants };
+  return { ...poses, variants, archetype: fighter.archetype };
 }

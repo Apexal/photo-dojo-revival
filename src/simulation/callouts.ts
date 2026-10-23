@@ -42,6 +42,9 @@ export class CalloutTracker {
           if (hits >= 2) out.push({ type: "combo", player: ev.attacker, hits });
           break;
         }
+        case "parry":
+          this.combo.blocked(ev.attacker);
+          break;
         case "throw":
           this.firstBlood(ev.attacker, out);
           break;

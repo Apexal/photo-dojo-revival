@@ -1,6 +1,7 @@
 {
  "fighterId": "placeholder-red",
  "name": "Red Stick",
+ "archetype": "brawler",
  "thumbnail": "thumbnail.png",
  "poses": {
   "idle": {
@@ -1570,6 +1571,181 @@
      "visibility": 0.95
     }
    ]
+  },
+  "signature": {
+   "file": "signature.png",
+   "anchorPoint": {
+    "x": 256,
+    "y": 480
+   },
+   "landmarks": [
+    {
+     "x": 355.32,
+     "y": 182.66,
+     "visibility": 0.95
+    },
+    {
+     "x": 354.01,
+     "y": 177.83,
+     "visibility": 0.95
+    },
+    {
+     "x": 353.05,
+     "y": 175.81,
+     "visibility": 0.95
+    },
+    {
+     "x": 351.47,
+     "y": 174.58,
+     "visibility": 0.95
+    },
+    {
+     "x": 356.47,
+     "y": 174.68,
+     "visibility": 0.95
+    },
+    {
+     "x": 355.51,
+     "y": 172.66,
+     "visibility": 0.95
+    },
+    {
+     "x": 353.94,
+     "y": 171.43,
+     "visibility": 0.95
+    },
+    {
+     "x": 337.98,
+     "y": 169.11,
+     "visibility": 0.95
+    },
+    {
+     "x": 341.13,
+     "y": 171.57,
+     "visibility": 0.95
+    },
+    {
+     "x": 346.01,
+     "y": 188.07,
+     "visibility": 0.95
+    },
+    {
+     "x": 348.47,
+     "y": 184.92,
+     "visibility": 0.95
+    },
+    {
+     "x": 313.33,
+     "y": 204.01,
+     "visibility": 0.95
+    },
+    {
+     "x": 323.33,
+     "y": 204.01,
+     "visibility": 0.95
+    },
+    {
+     "x": 327.05,
+     "y": 268.57,
+     "visibility": 0.95
+    },
+    {
+     "x": 319.87,
+     "y": 269.92,
+     "visibility": 0.95
+    },
+    {
+     "x": 372.01,
+     "y": 228.09,
+     "visibility": 0.95
+    },
+    {
+     "x": 371.18,
+     "y": 237.86,
+     "visibility": 0.95
+    },
+    {
+     "x": 382.86,
+     "y": 223.7,
+     "visibility": 0.95
+    },
+    {
+     "x": 382.63,
+     "y": 235.42,
+     "visibility": 0.95
+    },
+    {
+     "x": 382.41,
+     "y": 218.72,
+     "visibility": 0.95
+    },
+    {
+     "x": 383.05,
+     "y": 230.44,
+     "visibility": 0.95
+    },
+    {
+     "x": 373.87,
+     "y": 219.69,
+     "visibility": 0.95
+    },
+    {
+     "x": 374.47,
+     "y": 229.91,
+     "visibility": 0.95
+    },
+    {
+     "x": 261.69,
+     "y": 301.14,
+     "visibility": 0.95
+    },
+    {
+     "x": 271.69,
+     "y": 301.14,
+     "visibility": 0.95
+    },
+    {
+     "x": 206.53,
+     "y": 366.86,
+     "visibility": 0.95
+    },
+    {
+     "x": 289.52,
+     "y": 385.06,
+     "visibility": 0.95
+    },
+    {
+     "x": 140.81,
+     "y": 422.01,
+     "visibility": 0.95
+    },
+    {
+     "x": 256,
+     "y": 464.04,
+     "visibility": 0.95
+    },
+    {
+     "x": 131.07,
+     "y": 419.74,
+     "visibility": 0.95
+    },
+    {
+     "x": 246.29,
+     "y": 466.44,
+     "visibility": 0.95
+    },
+    {
+     "x": 148.82,
+     "y": 444.01,
+     "visibility": 0.95
+    },
+    {
+     "x": 273.13,
+     "y": 480,
+     "visibility": 0.95
+    }
+   ],
+   "attackSide": "right"
   },
   "handshake": {
    "file": "handshake.png",

@@ -431,11 +431,11 @@ describe("throws", () => {
   it("beats block: grab, tech window, then damage and a knockdown", () => {
     const sim = fightingSim(80);
     const events = run(sim, THROW.startup + 1, input({ punch: true, kick: true }), input({ down: true }));
-    expect(events).toContainEqual({ type: "grab", attacker: 0, defender: 1 });
+    expect(events).toContainEqual({ type: "grab", attacker: 0, defender: 1, grab: "throw" });
     expect(sim.current.fighters[1].action).toBe("grabbed");
     const x = sim.current.fighters[1].position.x;
-    const later = run(sim, THROW.techWindow + 1, idle, input({ down: true }));
-    expect(later).toContainEqual({ type: "throw", attacker: 0, defender: 1, damage: THROW.damage });
+    const later = run(sim, THROW.holdFrames + 1, idle, input({ down: true }));
+    expect(later).toContainEqual({ type: "throw", attacker: 0, defender: 1, grab: "throw", damage: THROW.damage });
     expect(later).toContainEqual({ type: "knockdown", player: 1 });
     expect(sim.current.fighters[1].health).toBe(MAX_HEALTH - THROW.damage);
     expect(sim.current.fighters[1].action).toBe("knockdown");
@@ -881,6 +881,8 @@ describe("knockdowns stay rare", () => {
     const plain = [{ punch: true }, { kick: true }].flatMap((press) => [120, 150, 200].map((gap) => jumper(press, gap))).filter((r) => r.hit);
     expect(plain.length).toBeGreaterThan(0);
     expect(plain.every((r) => !r.knockdown)).toBe(true);
-    expect(Object.entries(ATTACKS).filter(([, a]) => a.knocksDownInAir).map(([id]) => id)).toEqual(["uppercut"]);
+    expect(Object.entries(ATTACKS).filter(([, a]) => a.knockdown === "air").map(([id]) => id)).toEqual(["uppercut"]);
+    // The brawler's charge is the one move that knocks anyone down.
+    expect(Object.entries(ATTACKS).filter(([, a]) => a.knockdown === "always").map(([id]) => id)).toEqual(["charge"]);
   });
 });

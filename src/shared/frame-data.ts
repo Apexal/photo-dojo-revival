@@ -1,3 +1,4 @@
+import { archetypeOfMove, type ArchetypeId } from "./archetypes";
 import { CANONICAL_TORSO_LENGTH_PX, LANDMARK, type LimbSide, type NormalizedLandmark, type PoseId } from "./fighter-model";
 import { midHip } from "./pose-geometry";
 import { headCenter, stickFigureGeometry } from "./stick-figure";
@@ -21,7 +22,8 @@ export const isTween = (entry: PoseFrame): entry is TweenFrame => "fromPoseId" i
 /** The pose whose geometry counts for an entry: a tween plays as the pose it leaves. */
 export const gameplayPoseOf = (entry: PoseFrame): PoseId => (isTween(entry) ? entry.fromPoseId : entry.poseId);
 
-export type AttackId = "punch" | "kick" | "uppercut" | "lowKick" | "jumpKick";
+/** The shared moves, then the strike signatures (the brawler's charge, the acrobat's knee). */
+export type AttackId = "punch" | "kick" | "uppercut" | "lowKick" | "jumpKick" | "charge" | "flyingKnee";
 
 /** mid: block either way; low: must crouch-block; overhead: must block standing; high: block standing, whiffs over a crouch. */
 export type HitLevel = "mid" | "low" | "overhead" | "high";
@@ -40,12 +42,18 @@ export interface AttackData {
    * they win at a range a punch can't reach: the punch is fast, the kick is long.
    */
   advance?: number;
-  /** Which limb carries the hitbox. */
-  limb: "arm" | "leg";
-  /** A clean hit on someone in the air knocks them down (the anti-air's reward); other air hits are plain hits. */
-  knocksDownInAir?: boolean;
+  /** Which limb carries the hitbox (shoulder: the lead shoulder and upper arm). */
+  limb: "arm" | "leg" | "shoulder";
+  /**
+   * A clean hit knocks down: "air" only someone in the air (the anti-air's reward;
+   * other air hits are plain hits), "always" anyone.
+   */
+  knockdown?: "air" | "always";
   level: HitLevel;
-  /** The pose (and captured version) shown on active frames: uppercut / low kick use the second punch / kick captures. */
+  /**
+   * The pose (and captured version) shown on active frames: uppercut / low kick use the second
+   * punch / kick captures, signature strikes the signature capture.
+   */
   pose: { poseId: PoseId; variant: number };
   sequence: PoseFrame[];
 }
@@ -60,6 +68,8 @@ export interface AttackData {
  *                                 long range; punishable up close, safe blocked at the tip (pushback 20)
  *   uppercut     +2        −8     anti-air: airborne attacks can't hit it during startup/active; very punishable on block
  *   low kick     +1        −4     quick poke along the ground (lunges 20 px); must be blocked crouching
+ *   charge      knockdown −16     brawler: a slow wind-up, then 300 px across the stage; blocking it is a free punish
+ *   flying knee   +2        −4     acrobat: an overhead from the ground (lunges 80 px), so a crouching guard can't sit still
  *
  * The jump kick is an overhead (must be blocked standing); landing ends it, so its
  * advantage depends on how high it hits.
@@ -87,7 +97,7 @@ export const ATTACKS: Record<AttackId, AttackData> = {
   },
   uppercut: {
     startup: 6, active: 4, recovery: 18, damage: 11, hitstun: 24, blockstun: 14, pushback: 12,
-    limb: "arm", level: "mid", pose: { poseId: "punch", variant: 1 }, knocksDownInAir: true,
+    limb: "arm", level: "mid", pose: { poseId: "punch", variant: 1 }, knockdown: "air",
     sequence: [
       // Hard cut out of the crouch: the pop up is what reads as an anti-air.
       { poseId: "block", frames: 6, phase: "startup" },
@@ -120,6 +130,30 @@ export const ATTACKS: Record<AttackId, AttackData> = {
       { poseId: "jump", frames: 4, phase: "recovery" },
     ],
   },
+  /** Brawler: leans in slowly (the tell), then barrels forward over its active frames. */
+  charge: {
+    startup: 14, active: 10, recovery: 18, damage: 14, hitstun: 24, blockstun: 12, pushback: 30, advance: 300,
+    limb: "shoulder", level: "mid", pose: { poseId: "signature", variant: 0 }, knockdown: "always",
+    sequence: [
+      { fromPoseId: "idle", toPoseId: "signature", frames: 14, phase: "startup" },
+      { poseId: "signature", frames: 10, phase: "active" },
+      { poseId: "signature", frames: 4, phase: "recovery" },
+      { fromPoseId: "signature", toPoseId: "idle", frames: 6, phase: "recovery" },
+      { poseId: "idle", frames: 8, phase: "recovery" },
+    ],
+  },
+  /** Acrobat: a dip (the block capture, like the uppercut's), then the knee drives up and forward. */
+  flyingKnee: {
+    startup: 16, active: 4, recovery: 14, damage: 9, hitstun: 20, blockstun: 14, pushback: 10, advance: 80,
+    limb: "leg", level: "overhead", pose: { poseId: "signature", variant: 0 },
+    sequence: [
+      { poseId: "block", frames: 6, phase: "startup" },
+      { fromPoseId: "block", toPoseId: "signature", frames: 10, phase: "startup" },
+      { poseId: "signature", frames: 4, phase: "active" },
+      { fromPoseId: "signature", toPoseId: "idle", frames: 6, phase: "recovery" },
+      { poseId: "idle", frames: 8, phase: "recovery" },
+    ],
+  },
 };
 
 /** Does this attack pass over a crouching guard (instead of hitting or being blocked)? */
@@ -140,31 +174,91 @@ export const JUMP_SQUAT_FRAMES = 3;
 export const BLOCK_LENIENCY_FRAMES = 3;
 
 /**
- * Throw: beats block, loses to attacks (a fighter in an attack's startup or
- * active frames can't be grabbed), whiffs into long recovery. The grabbed
- * fighter can break it by pressing punch + kick during the tech window. A
- * throw that lands knocks down (KNOCKDOWN), flinging the victim throwDistance.
+ * Grabs beat block, lose to attacks (a fighter in an attack's startup or active
+ * frames can't be grabbed) and whiff into long recovery. On the active frame
+ * they catch a throwable opponent within `range`, who is then held for
+ * `holdFrames` and thrown: knocked down (KNOCKDOWN), landing throwDistance away.
  */
-export const THROW = {
-  startup: 5,
-  active: 1,
-  recovery: 20,
-  damage: 12,
-  /** Frames the grabbed fighter has to press punch + kick and break free. */
-  techWindow: 8,
+export interface GrabData {
+  startup: number;
+  active: number;
+  recovery: number;
+  damage: number;
+  /** Frames the grabbed fighter is held before the throw lands. */
+  holdFrames: number;
+  /** The grabbed fighter can break free with punch + kick while held. */
+  techable: boolean;
   /** How far the thrown fighter lands from where they were grabbed (px). */
-  throwDistance: 90,
+  throwDistance: number;
   /** Max gap between the two push boxes for the grab to connect. */
-  range: 40,
+  range: number;
+  sequence: PoseFrame[];
+}
+
+export type GrabId = "throw" | "bearHug";
+
+export const GRABS: Record<GrabId, GrabData> = {
+  /** Punch + kick up close: the shared throw. */
+  throw: {
+    startup: 5, active: 1, recovery: 20, damage: 12, holdFrames: 8, techable: true, throwDistance: 90, range: 40,
+    sequence: [
+      { fromPoseId: "idle", toPoseId: "punch", frames: 5, phase: "startup" },
+      { poseId: "punch", frames: 1, phase: "active" },
+      { fromPoseId: "punch", toPoseId: "idle", frames: 6, phase: "recovery" },
+      { poseId: "idle", frames: 14, phase: "recovery" },
+    ],
+  },
+  /**
+   * Grappler: reaches almost three times as far as a throw and can't be broken,
+   * but it's slower and a whiff is a long time stuck with arms out.
+   */
+  bearHug: {
+    startup: 8, active: 1, recovery: 32, damage: 20, holdFrames: 14, techable: false, throwDistance: 70, range: 110,
+    sequence: [
+      { fromPoseId: "idle", toPoseId: "signature", frames: 8, phase: "startup" },
+      { poseId: "signature", frames: 1, phase: "active" },
+      { poseId: "signature", frames: 14, phase: "recovery" },
+      { fromPoseId: "signature", toPoseId: "idle", frames: 6, phase: "recovery" },
+      { poseId: "idle", frames: 12, phase: "recovery" },
+    ],
+  },
+};
+
+export const THROW = GRABS.throw;
+
+export const isGrab = (a: FighterAction): a is GrabId => a === "throw" || a === "bearHug";
+
+export function grabTotalFrames(grab: GrabData): number {
+  return grab.startup + grab.active + grab.recovery;
+}
+
+/**
+ * Guardian's parry: during its active frames, any strike that would connect is
+ * caught instead. No damage, and the attacker staggers (the "parried" action,
+ * shown with the hurt capture) long enough for a free punish while the parrying
+ * fighter is free at once. It doesn't stop grabs, and a whiffed parry is a long
+ * time standing open.
+ */
+export const PARRY = {
+  startup: 3,
+  active: 10,
+  recovery: 18,
+  /** Frames the parried attacker is stuck. */
+  stagger: 24,
   sequence: [
-    { fromPoseId: "idle", toPoseId: "punch", frames: 5, phase: "startup" },
-    { poseId: "punch", frames: 1, phase: "active" },
-    { fromPoseId: "punch", toPoseId: "idle", frames: 6, phase: "recovery" },
-    { poseId: "idle", frames: 14, phase: "recovery" },
+    { fromPoseId: "idle", toPoseId: "signature", frames: 3, phase: "startup" },
+    { poseId: "signature", frames: 10, phase: "active" },
+    { fromPoseId: "signature", toPoseId: "idle", frames: 6, phase: "recovery" },
+    { poseId: "idle", frames: 12, phase: "recovery" },
   ] as PoseFrame[],
 } as const;
 
-export const THROW_TOTAL_FRAMES = THROW.startup + THROW.active + THROW.recovery;
+export const PARRY_TOTAL_FRAMES = PARRY.startup + PARRY.active + PARRY.recovery;
+
+/** Is a parry on this frame catching strikes? */
+export function parryActiveAt(actionFrame: number): boolean {
+  return actionFrame >= PARRY.startup && actionFrame < PARRY.startup + PARRY.active;
+}
 
 /**
  * Knockdown, Street Fighter style: a throw, or an anti-air (uppercut) hit on
@@ -227,21 +321,14 @@ export function tweenAtFrame(sequence: PoseFrame[], actionFrame: number): PoseTw
   return isTween(entry) ? { from: entry.fromPoseId, to: entry.toPoseId, t: (frame + 1) / (entry.frames + 1) } : null;
 }
 
-/** The sequence an action plays, if it has one (attacks and the throw). */
+/** The sequence an action plays, if it has one (attacks, grabs and the parry). */
 export function sequenceFor(action: FighterAction): PoseFrame[] | null {
-  switch (action) {
-    case "punch":
-    case "kick":
-    case "uppercut":
-    case "lowKick":
-    case "jumpKick":
-      return ATTACKS[action].sequence;
-    case "throw":
-      return THROW.sequence;
-    default:
-      return null;
-  }
+  if (isAttackId(action)) return ATTACKS[action].sequence;
+  if (isGrab(action)) return GRABS[action].sequence;
+  return action === "parry" ? PARRY.sequence : null;
 }
+
+export const isAttackId = (a: FighterAction): a is AttackId => Object.hasOwn(ATTACKS, a);
 
 /**
  * Rendering only, like tween entries: when the shown capture cuts from one pose
@@ -263,6 +350,8 @@ export const SOFT_CUTS: readonly { from: PoseId; to: PoseId; frames: number }[] 
   { from: "block", to: "jump", frames: 3 }, { from: "jump", to: "idle", frames: 5 },
   { from: "jump", to: "block", frames: 4 }, { from: "jump", to: "walk", frames: 5 },
   { from: "kick", to: "jump", frames: 3 }, { from: "kick", to: "idle", frames: 5 },
+  // A parry that caught something lets go at once.
+  { from: "signature", to: "idle", frames: 5 },
   // Getting over a hit.
   { from: "hurt", to: "idle", frames: 6 }, { from: "hurt", to: "block", frames: 4 },
   // The round intro: reaching out to shake hands (from the walk cycle's either capture), letting go.
@@ -286,7 +375,9 @@ export function idleSwayAt(actionFrame: number): number {
 export type FighterAction =
   | "idle" | "walk" | "jump" | "block" | "blockstun"
   | "jumpSquat"
-  | "punch" | "kick" | "uppercut" | "lowKick" | "jumpKick" | "throw" | "taunt"
+  | AttackId | GrabId | "taunt"
+  /** The guardian's parry, and an attacker it caught (staggered). */
+  | "parry" | "parried"
   | "grabbed" | "hurt" | "ko" | "win"
   /** The round intro's handshake (fight-simulation.ts). */
   | "handshake"
@@ -306,13 +397,18 @@ export function poseForAction(action: FighterAction, actionFrame: number): PoseI
     case "uppercut":
     case "lowKick":
     case "jumpKick":
+    case "charge":
+    case "flyingKnee":
     case "throw":
+    case "bearHug":
+    case "parry":
       return gameplayPoseOf(poseAtFrame(sequenceFor(action)!, actionFrame));
     case "jumpSquat":
       return "block"; // the crouch before the jump
     case "taunt":
       return "win";
     case "grabbed":
+    case "parried":
       return "hurt";
     case "blockstun":
       return "block";
@@ -345,6 +441,8 @@ export interface PoseGeometry {
 export type FighterGeometry = Record<PoseId, PoseGeometry> & {
   /** Captured alternates; variant n uses variants[poseId][n - 1]. */
   variants?: Partial<Record<PoseId, PoseGeometry[]>>;
+  /** Whose signature the signature pose (and move) is. */
+  archetype: ArchetypeId;
 };
 
 /** Geometry for one displayed frame; unknown variants fall back to the main capture. */
@@ -434,15 +532,19 @@ export function rawHurtboxesFor(pose: PoseGeometry): Box[] {
 /** How far each hurtbox edge may stray from the reference fighter's: 15%, but at least this many px. */
 export const HURTBOX_MIN_TOLERANCE_PX = 16;
 
+/** A displayed frame: which pose, which captured version, and (for the signature pose) whose. */
+export interface FrameRef { poseId: PoseId; variant: number }
+
 /**
  * Hurtboxes, each clipped to the reference fighter's same frame (its overall
  * extent from the feet anchor, ±15%): a sprawling capture doesn't make you a
- * bigger target. Pass the frame to clip; omit it for the raw boxes.
+ * bigger target. Pass the frame (and the archetype, for the signature pose) to
+ * clip; omit it for the raw boxes.
  */
-export function hurtboxesFor(pose: PoseGeometry, frame?: { poseId: PoseId; variant: number }): Box[] {
+export function hurtboxesFor(pose: PoseGeometry, frame?: FrameRef, archetype: ArchetypeId = "brawler"): Box[] {
   const boxes = rawHurtboxesFor(pose);
   if (!frame) return boxes;
-  const ref = canonicalHurtExtent(frame.poseId, frame.variant);
+  const ref = canonicalHurtExtent(frame.poseId, frame.variant, archetype);
   const a = pose.anchorPoint;
   const tol = (edge: number) => Math.max(HURTBOX_MIN_TOLERANCE_PX, Math.abs(edge) * REACH_TOLERANCE);
   const limit = { left: a.x + ref.left - tol(ref.left), right: a.x + ref.right + tol(ref.right), top: a.y + ref.top - tol(ref.top), bottom: a.y + ref.bottom + tol(ref.bottom) };
@@ -462,12 +564,11 @@ export function hurtboxesFor(pose: PoseGeometry, frame?: { poseId: PoseId; varia
 const hurtExtentCache = new Map<string, { left: number; right: number; top: number; bottom: number }>();
 
 /** The reference fighter's overall hurtbox extent for a frame, relative to its anchor. */
-function canonicalHurtExtent(poseId: PoseId, variant: number) {
-  const key = `${poseId}#${variant}`;
+function canonicalHurtExtent(poseId: PoseId, variant: number, archetype: ArchetypeId) {
+  const key = poseId === "signature" ? `${poseId}#${variant}#${archetype}` : `${poseId}#${variant}`;
   let edges = hurtExtentCache.get(key);
   if (!edges) {
-    referenceGeometry ??= stickFigureGeometry();
-    const pose = frameGeometry(referenceGeometry, poseId, variant);
+    const pose = frameGeometry(referenceGeometry(archetype), poseId, variant);
     const boxes = rawHurtboxesFor(pose);
     const b = boundingBox(boxes.flatMap((x) => [{ x: x.x, y: x.y }, { x: x.x + x.width, y: x.y + x.height }]));
     edges = { left: b.x - pose.anchorPoint.x, right: b.x + b.width - pose.anchorPoint.x, top: b.y - pose.anchorPoint.y, bottom: b.y + b.height - pose.anchorPoint.y };
@@ -484,11 +585,13 @@ function canonicalHurtExtent(poseId: PoseId, variant: number) {
  */
 export function rawHitboxFor(attack: AttackId, pose: PoseGeometry): Box {
   const side = pose.attackSide ?? "right";
-  const arm = ATTACKS[attack].limb === "arm";
-  const joints = arm
+  const limb = ATTACKS[attack].limb;
+  const joints = limb === "arm"
     ? [LANDMARK[`${side}Wrist`], LANDMARK[`${side}Elbow`], LANDMARK[`${side}Shoulder`]]
-    : [LANDMARK[`${side}Ankle`], LANDMARK[`${side}Knee`]];
-  const size = arm ? PUNCH_HITBOX_SIZE : KICK_HITBOX_SIZE;
+    : limb === "leg"
+      ? [LANDMARK[`${side}Ankle`], LANDMARK[`${side}Knee`]]
+      : [LANDMARK[`${side}Shoulder`], LANDMARK[`${side}Elbow`]];
+  const size = limb === "arm" ? PUNCH_HITBOX_SIZE : KICK_HITBOX_SIZE;
   const squares = joints.map((j) => expandBox({ x: pose.landmarks[j].x, y: pose.landmarks[j].y, width: 0, height: 0 }, size / 2));
   return boundingBox(squares.flatMap((b) => [{ x: b.x, y: b.y }, { x: b.x + b.width, y: b.y + b.height }]));
 }
@@ -515,16 +618,23 @@ export function hitboxFor(attack: AttackId, pose: PoseGeometry, referenceReach: 
   return { ...box, x: box.x + (clamped - reach) };
 }
 
-let referenceGeometry: FighterGeometry | null = null;
+const referenceCache = new Map<ArchetypeId, FighterGeometry>();
+
+/** The canonical stick fighter of an archetype: the fairness reference. */
+function referenceGeometry(archetype: ArchetypeId): FighterGeometry {
+  let geometry = referenceCache.get(archetype);
+  if (!geometry) referenceCache.set(archetype, (geometry = stickFigureGeometry(archetype)));
+  return geometry;
+}
+
 const reachCache = new Map<AttackId, number>();
 
 /** Reach of each attack on the canonical stick fighter (the fairness reference). */
 export function canonicalReach(attack: AttackId): number {
-  referenceGeometry ??= stickFigureGeometry();
   let reach = reachCache.get(attack);
   if (reach === undefined) {
     const { poseId, variant } = ATTACKS[attack].pose;
-    const pose = frameGeometry(referenceGeometry, poseId, variant);
+    const pose = frameGeometry(referenceGeometry(archetypeOfMove(attack) ?? "brawler"), poseId, variant);
     reach = hitboxReach(rawHitboxFor(attack, pose), pose);
     reachCache.set(attack, reach);
   }

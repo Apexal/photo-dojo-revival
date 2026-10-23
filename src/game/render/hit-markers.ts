@@ -46,6 +46,16 @@ export class HitMarkers {
               .lineBetween(m.x + Math.cos(a) * r * 0.85, m.y + Math.sin(a) * r * 0.85, m.x + Math.cos(a) * r * 1.15, m.y + Math.sin(a) * r * 1.15);
           }
           break;
+        case "flash":
+          // A parry: a bright double ring, and rays flaring out all round.
+          this.g.lineStyle(8, core, alpha).strokeCircle(m.x, m.y, r * 0.55);
+          this.g.lineStyle(4, rim, alpha).strokeCircle(m.x, m.y, r * 0.55).strokeCircle(m.x, m.y, r * 0.8);
+          for (let k = 0; k < 8; k++) {
+            const a = (k / 8 + m.turn) * Math.PI * 2;
+            this.g.lineStyle(5, rim, alpha)
+              .lineBetween(m.x + Math.cos(a) * r * 0.9, m.y + Math.sin(a) * r * 0.9, m.x + Math.cos(a) * r * 1.2, m.y + Math.sin(a) * r * 1.2);
+          }
+          break;
         case "chevrons":
           // Two ">" shapes pointing the way the victim is thrown.
           for (const offset of [-0.35, 0.35]) {

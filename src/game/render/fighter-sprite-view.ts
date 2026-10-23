@@ -218,7 +218,7 @@ export class FighterSpriteView {
   private everyTween(): Pick<FrameTween, "from" | "to">[] {
     const versions = (poseId: PoseId) => Array.from({ length: variantCount(this.geometry, poseId) }, (_, variant) => ({ poseId, variant }));
     return [
-      ...allTweens(),
+      ...allTweens(this.geometry.archetype),
       { from: { poseId: "idle", variant: 0 }, to: { poseId: "idle", variant: 1 } }, // the idle sway
       { from: { poseId: "handshake", variant: 1 }, to: { poseId: "handshake", variant: 2 } }, // the intro's shake
       ...SOFT_CUTS.flatMap((cut) => versions(cut.from).flatMap((from) => versions(cut.to).map((to) => ({ from, to })))),

@@ -380,7 +380,7 @@ describe("controller rumble", () => {
   });
 
   it("throws and KOs are the big ones; announcer events don't rumble", () => {
-    expect(rumbleFor({ type: "throw", attacker: 0, defender: 1, damage: 12 }, 1)).toMatchObject({ strong: 1 });
+    expect(rumbleFor({ type: "throw", attacker: 0, defender: 1, grab: "throw", damage: 12 }, 1)).toMatchObject({ strong: 1 });
     expect(rumbleFor({ type: "ko", player: 1 }, 1)!.duration).toBeGreaterThan(300);
     expect(rumbleFor({ type: "ko", player: 1 }, 0)).toBeNull();
     expect(rumbleFor({ type: "fight" }, 0)).toBeNull();

@@ -103,14 +103,19 @@ describe("pose scoring", () => {
   });
 });
 
+/** Every main pose, the signature one once per archetype: its name, canonical skeleton and definition. */
+const MAIN_POSES = POSE_IDS.flatMap((poseId) =>
+  poseId === "signature"
+    ? ARCHETYPE_IDS.map((a) => ({ name: `signature (${a})`, landmarks: buildStickFigureLandmarks(poseId, STICK_SIGNATURE_POSES[a]), def: poseDefinition(poseId, a) }))
+    : [{ name: poseId, landmarks: buildStickFigureLandmarks(poseId), def: poseDefinition(poseId, "brawler") }]);
+
 describe("pose definitions", () => {
   it("each canonical stick pose matches its own definition and no other", () => {
-    for (const poseId of POSE_IDS) {
-      const lm = buildStickFigureLandmarks(poseId);
-      for (const other of POSE_IDS) {
-        const { score } = evaluatePose(lm, POSE_DEFINITIONS[other]);
-        if (other === poseId) expect(score, `${poseId} vs itself`).toBeLessThan(0.9);
-        else expect(score, `${poseId} vs ${other}`).toBeGreaterThan(1);
+    for (const pose of MAIN_POSES) {
+      for (const other of MAIN_POSES) {
+        const { score } = evaluatePose(pose.landmarks, other.def);
+        if (other === pose) expect(score, `${pose.name} vs itself`).toBeLessThan(0.9);
+        else expect(score, `${pose.name} vs ${other.name}`).toBeGreaterThan(1);
       }
     }
   });
@@ -140,12 +145,18 @@ describe("pose definitions", () => {
   });
 
   it("has a ghost path and prompt for every pose", () => {
-    for (const poseId of POSE_IDS) {
-      expect(POSE_DEFINITIONS[poseId].ghostSvgPath).toMatch(/^M[\d.]+ [\d.]+L/);
-      expect(POSE_DEFINITIONS[poseId].voicePrompt.length).toBeGreaterThan(3);
-      expect(POSE_DEFINITIONS[poseId].angleTargets.length).toBeGreaterThanOrEqual(3);
-      expect(POSE_DEFINITIONS[poseId].angleTargets.length).toBeLessThanOrEqual(5);
+    for (const { def } of MAIN_POSES) {
+      expect(def.ghostSvgPath).toMatch(/^M[\d.]+ [\d.]+L/);
+      expect(def.voicePrompt.length).toBeGreaterThan(3);
+      expect(def.angleTargets.length).toBeGreaterThanOrEqual(3);
+      expect(def.angleTargets.length).toBeLessThanOrEqual(5);
     }
+  });
+
+  it("each archetype's signature pose has its own skeleton and definition", () => {
+    const paths = ARCHETYPE_IDS.map((a) => SIGNATURE_DEFINITIONS[a].ghostSvgPath);
+    expect(new Set(paths).size).toBe(ARCHETYPE_IDS.length);
+    for (const a of ARCHETYPE_IDS) expect(SIGNATURE_DEFINITIONS[a].poseId).toBe("signature");
   });
 
   it("mirrors joint names", () => {
@@ -173,30 +184,36 @@ describe("facing", () => {
   });
 });
 
-import { ALTERNATE_DEFINITIONS, CAPTURE_TARGETS, REQUIRED_VARIANT_POSES } from "../src/shared/pose-definitions";
-import { STICK_BONUS_POSES } from "../src/shared/stick-figure";
+import { ALTERNATE_DEFINITIONS, REQUIRED_VARIANT_POSES, SIGNATURE_DEFINITIONS, captureTargetsFor, poseDefinition } from "../src/shared/pose-definitions";
+import { STICK_BONUS_POSES, STICK_SIGNATURE_POSES } from "../src/shared/stick-figure";
+import { ARCHETYPE_IDS } from "../src/shared/archetypes";
 
 describe("second-version poses", () => {
   it("each second-version skeleton matches its own target, and no main pose triggers one", () => {
     for (const [key, def] of Object.entries(ALTERNATE_DEFINITIONS)) {
       const lm = buildStickFigureLandmarks(def.poseId, STICK_BONUS_POSES[key]);
       expect(evaluatePose(lm, def).score, key).toBeLessThan(0.9);
-      for (const poseId of POSE_IDS) {
+      for (const pose of MAIN_POSES) {
         // The second stance is meant to look like the first; the matcher's "relax, then strike
         // the pose" rule between similar poses is what stops it being captured by accident.
-        if (key === "idle-2" && poseId === "idle") continue;
-        expect(evaluatePose(buildStickFigureLandmarks(poseId), def).score, `${poseId} vs ${key}`).toBeGreaterThan(1);
+        if (key === "idle-2" && pose.name === "idle") continue;
+        expect(evaluatePose(pose.landmarks, def).score, `${pose.name} vs ${key}`).toBeGreaterThan(1);
       }
     }
   });
 
-  it("capture targets: all fifteen, each second version right after its main pose, the handshake last", () => {
-    expect(CAPTURE_TARGETS.map((t) => [t.key, t.poseId, t.variant])).toEqual([
-      ["idle", "idle", 0], ["idle-2", "idle", 1], ["walk", "walk", 0], ["block", "block", 0], ["crouch", "crouch", 0],
-      ["punch", "punch", 0], ["punch-2", "punch", 1], ["kick", "kick", 0], ["kick-2", "kick", 1],
-      ["jump", "jump", 0], ["hurt", "hurt", 0], ["hurt-2", "hurt", 1], ["win", "win", 0], ["win-2", "win", 1], ["handshake", "handshake", 0],
-    ]);
-    expect(REQUIRED_VARIANT_POSES).toEqual(["punch", "kick", "hurt", "win"]); // the second stance is optional
+  it("capture targets: all sixteen, each second version right after its main pose, the signature, the handshake last", () => {
+    for (const archetype of ARCHETYPE_IDS) {
+      const targets = captureTargetsFor(archetype);
+      expect(targets.map((t) => [t.key, t.poseId, t.variant])).toEqual([
+        ["idle", "idle", 0], ["idle-2", "idle", 1], ["walk", "walk", 0], ["block", "block", 0], ["crouch", "crouch", 0],
+        ["punch", "punch", 0], ["punch-2", "punch", 1], ["kick", "kick", 0], ["kick-2", "kick", 1],
+        ["jump", "jump", 0], ["hurt", "hurt", 0], ["hurt-2", "hurt", 1], ["win", "win", 0], ["win-2", "win", 1],
+        ["signature", "signature", 0], ["handshake", "handshake", 0],
+      ]);
+      expect(targets.find((t) => t.key === "signature")!.definition).toBe(SIGNATURE_DEFINITIONS[archetype]);
+    }
+    expect(REQUIRED_VARIANT_POSES).toEqual(["idle", "punch", "kick", "hurt", "win"]);
     expect(ALTERNATE_DEFINITIONS["punch-2"].attackLimb).toBe("arm");
     expect(ALTERNATE_DEFINITIONS["kick-2"].attackLimb).toBe("leg");
   });

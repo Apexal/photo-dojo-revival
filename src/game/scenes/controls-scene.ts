@@ -1,11 +1,11 @@
 import Phaser from "phaser";
-import { ATTACKS, THROW_TOTAL_FRAMES, groundAnchorFor, type FighterAction, type FighterGeometry } from "../../shared/frame-data";
+import { ATTACKS, GRABS, PARRY_TOTAL_FRAMES, grabTotalFrames, groundAnchorFor, isGrab, type FighterAction, type FighterGeometry } from "../../shared/frame-data";
 import { SPRITE_CANVAS_SIZE } from "../../shared/fighter-model";
 import { frameOf } from "../../simulation/fight-simulation";
 import { GRAVITY, JUMP_IMPULSE, createFighterState, isAttack } from "../../simulation/fighter-state-machine";
 import type { InputFrame } from "../../simulation/input-frame";
 import { geometryOf } from "../fighter-library";
-import { MOVE_GUIDE, controlLabels, deviceName } from "../input/control-labels";
+import { controlLabels, deviceName, moveGuide } from "../input/control-labels";
 import { createInputSource, isPlayerInput, type PlayerInputDescriptor } from "../input/input-descriptor";
 import type { InputSource } from "../input/input-source";
 import { fighterTextureKeys, preloadFighterTextures, textureKey } from "../render/fighter-sprite-view";
@@ -16,10 +16,10 @@ import { stopMenuMusic } from "../menu-music";
 const PREFIXES = ["ctl0", "ctl1"] as const;
 export const MIRROR_TINT = 0x9fc4ff;
 const PLAYER_CSS = ["#e8483b", "#3f86f0"];
-const COLS = 4;
-const CARD_W = 146;
+const COLS = 5;
+const CARD_W = 116;
 const CARD_H = 190;
-const SPRITE_SCALE = 0.27;
+const SPRITE_SCALE = 0.24;
 const PAUSE_FRAMES = 30;
 /** Previews run in slow motion so the hard cuts are readable (real attack frames last ~0.1 s). */
 const PREVIEW_SPEED = 0.5;
@@ -30,9 +30,15 @@ const INPUT_DELAY_MS = 500;
 /** How long each card's loop runs before a short idle pause. */
 function loopFrames(action: FighterAction): number {
   if (isAttack(action)) return ATTACKS[action].startup + ATTACKS[action].active + ATTACKS[action].recovery;
-  if (action === "throw") return THROW_TOTAL_FRAMES;
+  if (isGrab(action)) return grabTotalFrames(GRABS[action]);
+  if (action === "parry") return PARRY_TOTAL_FRAMES;
   if (action === "jump") return Math.round((2 * -JUMP_IMPULSE) / GRAVITY);
   return 40;
+}
+
+/** Shrink a label that's wider than its card. */
+function fitWidth(text: Phaser.GameObjects.Text, width: number): Phaser.GameObjects.Text {
+  return text.width > width ? text.setScale(width / text.width) : text;
 }
 
 interface Card {
@@ -85,7 +91,7 @@ export class ControlsScene extends Phaser.Scene {
     this.add.text(GAME_WIDTH / 2, 22, "HOW TO FIGHT", { fontSize: "40px", fontStyle: "bold", color: "#f2c14e" }).setOrigin(0.5, 0);
     this.add.rectangle(GAME_WIDTH / 2, 90, 2, GAME_HEIGHT - 150, 0x3a3346).setOrigin(0.5, 0);
     [0, 1].forEach((p) => this.buildHalf(p));
-    this.add.text(GAME_WIDTH / 2, GAME_HEIGHT - 58, "Down: crouch (punches whiff over you).  Jump kick: block standing.  Low kick: block crouching.  Punch + kick far away = taunt.", {
+    this.add.text(GAME_WIDTH / 2, GAME_HEIGHT - 58, "Down: crouch (punches whiff over you).  Jump kick, flying knee: block standing.  Low kick: block crouching.  Punch + kick far away = taunt.", {
       fontSize: "16px", color: "#c9c3b8",
     }).setOrigin(0.5);
     this.add.text(GAME_WIDTH / 2, GAME_HEIGHT - 32, "Previews in slow motion.   Grabbed? Press punch + kick to break free.   Pause: Esc / Start", {
@@ -107,7 +113,7 @@ export class ControlsScene extends Phaser.Scene {
     this.add.text(x0, 84, `P${player + 1} · ${name}`, { fontSize: "26px", fontStyle: "bold", color: PLAYER_CSS[player] });
     this.add.text(x0, 116, deviceName(input), { fontSize: "16px", color: "#c9c3b8" });
 
-    MOVE_GUIDE.forEach((move, i) => {
+    moveGuide(this.setup.entries[player].fighter.archetype).forEach((move, i) => {
       const cx = x0 + (i % COLS) * (CARD_W + 6);
       const cy = 146 + Math.floor(i / COLS) * (CARD_H + 10);
       this.add.rectangle(cx, cy, CARD_W, CARD_H, 0x1c1824).setOrigin(0).setStrokeStyle(1, 0x3a3346);
@@ -118,10 +124,10 @@ export class ControlsScene extends Phaser.Scene {
       // Same tint the fight uses to tell a mirror match apart.
       if (!left && this.setup.entries[0].fighter.fighterId === this.setup.entries[1].fighter.fighterId) sprite.setTint(MIRROR_TINT);
       this.cards.push({ sprite, action: move.action, player, baseY, frames: loopFrames(move.action), offset: i * STAGGER_FRAMES });
-      this.add.text(cx + 6, cy + 4, move.name, { fontSize: "15px", fontStyle: "bold", color: "#f3efe6" });
-      this.add.text(cx + CARD_W / 2, cy + CARD_H - 22, move.how(labels), {
+      fitWidth(this.add.text(cx + 6, cy + 4, move.name, { fontSize: "15px", fontStyle: "bold", color: "#f3efe6" }), CARD_W - 12);
+      fitWidth(this.add.text(cx + CARD_W / 2, cy + CARD_H - 22, move.how(labels), {
         fontSize: "17px", fontStyle: "bold", color: "#f2c14e", align: "center",
-      }).setOrigin(0.5);
+      }).setOrigin(0.5), CARD_W - 8);
     });
 
     this.readyTexts[player] = this.add.text(x0 + 290, GAME_HEIGHT - 100, "", { fontSize: "22px", fontStyle: "bold", color: PLAYER_CSS[player] }).setOrigin(0.5);

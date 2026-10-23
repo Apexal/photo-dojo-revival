@@ -1,14 +1,18 @@
 import { describe, expect, it } from "vitest";
-import { CAPTURE_TARGETS } from "../src/shared/pose-definitions";
+import { CAPTURE_TARGET_COUNT, SIGNATURE_DEFINITIONS, SIGNATURE_TARGET_INDEX, captureTargetsFor } from "../src/shared/pose-definitions";
 import { captureFlowReducer, initialCaptureFlow, targetAt, type CaptureEvent, type CaptureFlowState } from "../src/capture/capture-flow";
 
 const run = (state: CaptureFlowState, ...events: CaptureEvent[]) => events.reduce(captureFlowReducer, state);
-const indexOf = (key: string) => CAPTURE_TARGETS.findIndex((t) => t.key === key);
+const indexOf = (key: string) => captureTargetsFor("brawler").findIndex((t) => t.key === key);
 const capture: CaptureEvent[] = [{ type: "poseCaptured" }, { type: "graceElapsed" }];
 
 function toReview(roomCode: string | null = "ABC234") {
   let s = run(initialCaptureFlow(roomCode), { type: "selectMode", mode: "solo" }, { type: "start" }, { type: "modelsReady" });
-  for (let i = 0; i < CAPTURE_TARGETS.length; i++) {
+  for (let i = 0; i < CAPTURE_TARGET_COUNT; i++) {
+    if (i === SIGNATURE_TARGET_INDEX) {
+      expect(s.screen).toEqual({ name: "archetype", retake: false });
+      s = run(s, { type: "pickArchetype", archetype: "guardian" });
+    }
     expect(s.screen).toEqual({ name: "pose", poseIndex: i, retake: false });
     s = run(s, ...capture);
   }
@@ -16,14 +20,33 @@ function toReview(roomCode: string | null = "ABC234") {
 }
 
 describe("capture flow", () => {
-  it("walks intro → tips → all 15 poses → review", () => {
+  it("walks intro → tips → all 16 poses (picking the archetype before the signature) → review", () => {
     const s = toReview();
     expect(s.mode).toBe("solo");
     expect(s.screen).toEqual({ name: "review" });
-    expect(targetAt(0).poseId).toBe("idle");
-    expect(targetAt(indexOf("punch") + 1).key).toBe("punch-2"); // uppercut right after punch
-    expect(targetAt(indexOf("block") + 1).key).toBe("crouch"); // crouch block right after block
-    expect(targetAt(CAPTURE_TARGETS.length - 1).key).toBe("handshake"); // the last one: for the round intro
+    expect(s.archetype).toBe("guardian");
+    expect(targetAt(0, null).poseId).toBe("idle");
+    expect(targetAt(indexOf("punch") + 1, null).key).toBe("punch-2"); // uppercut right after punch
+    expect(targetAt(indexOf("block") + 1, null).key).toBe("crouch"); // crouch block right after block
+    expect(targetAt(SIGNATURE_TARGET_INDEX, "guardian").definition).toBe(SIGNATURE_DEFINITIONS.guardian);
+    expect(() => targetAt(SIGNATURE_TARGET_INDEX, null)).toThrow();
+    expect(targetAt(CAPTURE_TARGET_COUNT - 1, null).key).toBe("handshake"); // the last one: for the round intro
+  });
+
+  it("changing the archetype from the review retakes the signature pose, then returns", () => {
+    let s = run(toReview(), { type: "changeArchetype" });
+    expect(s.screen).toEqual({ name: "archetype", retake: true });
+    s = run(s, { type: "pickArchetype", archetype: "acrobat" });
+    expect(s.archetype).toBe("acrobat");
+    expect(s.screen).toEqual({ name: "pose", poseIndex: SIGNATURE_TARGET_INDEX, retake: true });
+    expect(run(s, ...capture).screen).toEqual({ name: "review" });
+  });
+
+  it("a resumed draft without an archetype asks for one at the signature pose", () => {
+    const s = run(initialCaptureFlow(null), { type: "resume", mode: "solo", roomCode: null, archetype: null, nextPoseIndex: SIGNATURE_TARGET_INDEX }, { type: "start" }, { type: "modelsReady" });
+    expect(s.screen).toEqual({ name: "archetype", retake: false });
+    const picked = run(initialCaptureFlow(null), { type: "resume", mode: "solo", roomCode: null, archetype: "brawler", nextPoseIndex: SIGNATURE_TARGET_INDEX }, { type: "start" }, { type: "modelsReady" });
+    expect(picked.screen).toEqual({ name: "pose", poseIndex: SIGNATURE_TARGET_INDEX, retake: false });
   });
 
   it("both modes go straight to the first pose once the models are ready", () => {
@@ -34,7 +57,7 @@ describe("capture flow", () => {
   });
 
   it("a resumed solo draft continues at the next pose", () => {
-    const s = run(initialCaptureFlow(null), { type: "resume", mode: "solo", roomCode: null, nextPoseIndex: 5 }, { type: "start" }, { type: "modelsReady" });
+    const s = run(initialCaptureFlow(null), { type: "resume", mode: "solo", roomCode: null, archetype: null, nextPoseIndex: 5 }, { type: "start" }, { type: "modelsReady" });
     expect(s.screen).toEqual({ name: "pose", poseIndex: 5, retake: false });
   });
 
@@ -118,7 +141,7 @@ import { isResumable, summarizeDraft, type CaptureDraft } from "../src/capture/c
 
 describe("resuming a saved capture", () => {
   it("continues from the first missing pose after the camera loads", () => {
-    let s = run(initialCaptureFlow("ABC234"), { type: "resume", mode: "solo", roomCode: null, nextPoseIndex: 3 });
+    let s = run(initialCaptureFlow("ABC234"), { type: "resume", mode: "solo", roomCode: null, archetype: null, nextPoseIndex: 3 });
     expect(s.screen).toEqual({ name: "tips" });
     expect(s.mode).toBe("solo");
     s = run(s, { type: "start" }, { type: "modelsReady" });
@@ -128,28 +151,28 @@ describe("resuming a saved capture", () => {
   });
 
   it("goes straight to review when all main poses are in", () => {
-    const s = run(initialCaptureFlow(null), { type: "resume", mode: "friend", roomCode: "XYZ789", nextPoseIndex: null });
+    const s = run(initialCaptureFlow(null), { type: "resume", mode: "friend", roomCode: "XYZ789", archetype: "grappler", nextPoseIndex: null });
     expect(s.screen).toEqual({ name: "review" });
     expect(s.roomCode).toBe("XYZ789"); // the draft's room, since the URL had none
+    expect(s.archetype).toBe("grappler");
   });
 
   it("a room code in the URL wins over the draft's", () => {
-    const s = run(initialCaptureFlow("NEW234"), { type: "resume", mode: "friend", roomCode: "OLD234", nextPoseIndex: null });
+    const s = run(initialCaptureFlow("NEW234"), { type: "resume", mode: "friend", roomCode: "OLD234", archetype: "grappler", nextPoseIndex: null });
     expect(s.roomCode).toBe("NEW234");
   });
 });
 
 describe("draft summary", () => {
   const draft = (keys: string[], savedAt = 1000): CaptureDraft => ({
-    version: 1, savedAt, fighterId: "f", name: "", mode: "friend", roomCode: null, sounds: {},
+    version: 2, savedAt, fighterId: "f", name: "", mode: "friend", roomCode: null, archetype: null, sounds: {},
     captures: keys.map((key) => ({ key, cutPng: new Blob(), offsetX: 0, offsetY: 0, capturedAt: 0, geometry: { poseId: "idle", landmarks: [], frameWidth: 1, frameHeight: 1 } })),
   });
 
   it("counts captured poses and finds the next missing one", () => {
-    // A draft from before the second stance existed picks up there.
     expect(summarizeDraft(draft(["idle", "walk", "block"]), 2000)).toEqual({ captured: 3, complete: false, nextPoseIndex: 1, ageMs: 1000 });
-    const all = ["idle", "idle-2", "walk", "block", "crouch", "punch", "punch-2", "kick", "kick-2", "jump", "hurt", "hurt-2", "win", "win-2", "handshake"];
-    expect(summarizeDraft(draft(all))).toMatchObject({ captured: 15, complete: true, nextPoseIndex: null });
+    const all = ["idle", "idle-2", "walk", "block", "crouch", "punch", "punch-2", "kick", "kick-2", "jump", "hurt", "hurt-2", "win", "win-2", "signature", "handshake"];
+    expect(summarizeDraft(draft(all))).toMatchObject({ captured: 16, complete: true, nextPoseIndex: null });
     expect(summarizeDraft(draft(all.filter((k) => k !== "kick-2")))).toMatchObject({ complete: false, nextPoseIndex: indexOf("kick-2") });
   });
 
