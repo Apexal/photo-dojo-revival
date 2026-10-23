@@ -8,7 +8,7 @@ export interface LibraryEntry {
   builtIn: boolean;
 }
 
-export const PLACEHOLDER_IDS = ["placeholder-red", "placeholder-blue"];
+export const PLACEHOLDER_IDS = ["placeholder-red", "placeholder-blue", "placeholder-green", "placeholder-purple"];
 
 interface PlaceholderJson {
   fighterId: string;

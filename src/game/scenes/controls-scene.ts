@@ -10,7 +10,7 @@ import { createInputSource, isPlayerInput, type PlayerInputDescriptor } from "..
 import type { InputSource } from "../input/input-source";
 import { fighterTextureKeys, preloadFighterTextures, textureKey } from "../render/fighter-sprite-view";
 import { GAME_HEIGHT, GAME_WIDTH } from "../render/stage";
-import type { FightSceneData } from "./fight-scene";
+import { menuSceneFor, type FightSceneData } from "./fight-scene";
 import { stopMenuMusic } from "../menu-music";
 
 const PREFIXES = ["ctl0", "ctl1"] as const;
@@ -150,7 +150,7 @@ export class ControlsScene extends Phaser.Scene {
           this.ready[i] = false;
           this.updateReadyText(i);
         } else {
-          this.scene.start("character-select");
+          this.scene.start(menuSceneFor(this.setup));
         }
       }
     });

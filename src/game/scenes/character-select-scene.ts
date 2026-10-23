@@ -24,6 +24,8 @@ import { pickTake } from "../sound-choice";
 import { REGISTRY } from "./boot-scene";
 import type { FightSceneData } from "./fight-scene";
 import { startMatch } from "./stage-select-scene";
+import type { TournamentSetupData } from "./tournament-setup-scene";
+import { MIN_ENTRANTS } from "../tournament";
 import { playMenuMusic, updateMenuMusicVolume } from "../menu-music";
 
 const ROWS = 2;
@@ -157,6 +159,8 @@ export class CharacterSelectScene extends Phaser.Scene {
   private cursorPoses: (Phaser.GameObjects.Image | null)[] = [null, null];
   private loadingPoses = new Set<string>();
   private pendingDelete: { fighterId: string; until: number } | null = null;
+  /** Under the Tournament button: why it can't start yet. */
+  private tournamentHint!: Phaser.GameObjects.Text;
   /** Tile chosen with the mouse / touch (shows its export / delete buttons). */
   private selected: number | null = null;
   private buttonPressedAt = 0;
@@ -219,6 +223,7 @@ export class CharacterSelectScene extends Phaser.Scene {
     this.input.keyboard!.on("keydown", (ev: KeyboardEvent) => this.onKeyDown(ev));
     this.input.gamepad?.on("down", (pad: Phaser.Input.Gamepad.Gamepad, button: Phaser.Input.Gamepad.Button) => {
       if (button.index === PAD_BUTTON.SELECT) this.openSettings();
+      else if (button.index === PAD_BUTTON.START && this.players.some((p) => p?.input.kind === "pad" && p.input.index === pad.index)) this.openTournament();
       else this.join({ kind: "pad", index: pad.index });
     });
     const settings = this.add.text(1240, 60, "⚙ Settings (Tab)", { fontSize: "20px", color: "#c9c3b8", backgroundColor: "#1c1824", padding: { x: 10, y: 6 } })
@@ -226,7 +231,13 @@ export class CharacterSelectScene extends Phaser.Scene {
     settings.on("pointerover", () => settings.setColor("#f2c14e"));
     settings.on("pointerout", () => settings.setColor("#c9c3b8"));
     settings.on("pointerdown", () => this.openSettings());
-    this.introduce([logo, stamp, subtitle, settings], 0, { y: -60 });
+    const tournament = this.add.text(settings.x - settings.width - 12, 60, "🏆 Tournament (T)", { fontSize: "18px", color: "#c9c3b8", backgroundColor: "#1c1824", padding: { x: 10, y: 6 } })
+      .setOrigin(1, 0).setInteractive({ useHandCursor: true });
+    tournament.on("pointerover", () => tournament.setColor("#f2c14e"));
+    tournament.on("pointerout", () => tournament.setColor("#c9c3b8"));
+    tournament.on("pointerdown", () => this.openTournament());
+    this.tournamentHint = this.add.text(tournament.x - tournament.width / 2, 100, "", { fontSize: "14px", color: "#f2c14e" }).setOrigin(0.5, 0).setDepth(30);
+    this.introduce([logo, stamp, subtitle, settings, tournament], 0, { y: -60 });
     // The preview fighters step in once their panels have landed.
     this.previewsHeld = this.introAt !== null;
     if (this.previewsHeld) this.time.delayedCall(INTRO_SETTLED_MS, () => {
@@ -566,6 +577,7 @@ export class CharacterSelectScene extends Phaser.Scene {
     }
     const layout = KeyboardInputSource.layoutForKey(ev.keyCode);
     if (layout) this.join({ kind: "keyboard", layout });
+    else if (ev.keyCode === KEY.T) this.openTournament();
   }
 
   /** "Press any button": the first unassigned controller takes the next free slot. */
@@ -754,6 +766,26 @@ export class CharacterSelectScene extends Phaser.Scene {
     this.vs = null;
   }
 
+
+  // --- tournament -------------------------------------------------------------
+
+  /** Both joined players' controllers go along: P1 plays the top fighter of each bracket match, P2 the bottom. */
+  private openTournament(): void {
+    const [a, b] = this.players;
+    if (!a || !b) {
+      this.tournamentHint.setText("Both players join first");
+      this.time.delayedCall(2000, () => this.tournamentHint.setText(""));
+      return this.playEffect("block", 0.4);
+    }
+    if (this.library.length < MIN_ENTRANTS) {
+      this.tournamentHint.setText(`Needs ${MIN_ENTRANTS} fighters`);
+      this.time.delayedCall(2000, () => this.tournamentHint.setText(""));
+      return this.playEffect("block", 0.4);
+    }
+    this.playEffect("hit", 0.6);
+    void setSetting("controllerMapping", { p1: a.input, p2: b.input }).catch(() => {});
+    this.scene.start("tournament-setup", { inputs: [a.input, b.input] } satisfies TournamentSetupData);
+  }
 
   // --- settings ---------------------------------------------------------------
 

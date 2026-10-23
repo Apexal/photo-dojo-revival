@@ -8,7 +8,7 @@ import { GAME_HEIGHT, GAME_WIDTH } from "../render/stage";
 import { STAGES, randomStage, stageFor } from "../stages/stages";
 import { playStageMusic, preloadStage, stopStageMusic } from "../stages/stage-music";
 import { REGISTRY } from "./boot-scene";
-import type { FightSceneData } from "./fight-scene";
+import { menuSceneFor, type FightSceneData } from "./fight-scene";
 import { stopMenuMusic } from "../menu-music";
 
 /** The last option on the stage select screen. */
@@ -31,7 +31,7 @@ function startWithStage(scene: Phaser.Scene, data: FightSceneData): void {
 /**
  * Stage select: the highlighted stage fills the screen behind its name.
  * Either player moves (left / right) and confirms (punch); kick goes back to
- * fighter select. Starts on the last stage picked this session.
+ * fighter select (or the tournament bracket). Starts on the last stage picked this session.
  */
 export class StageSelectScene extends Phaser.Scene {
   private setup!: FightSceneData;
@@ -164,7 +164,7 @@ export class StageSelectScene extends Phaser.Scene {
   private back(): void {
     this.leaving = true;
     this.playEffect("block", 0.4);
-    this.scene.start("character-select");
+    this.scene.start(menuSceneFor(this.setup));
   }
 
   /** Menu sounds: the "Game volume" setting. */

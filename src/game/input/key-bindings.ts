@@ -13,7 +13,7 @@ export const KEYBOARD_LAYOUTS: readonly KeyboardLayout[] = ["p1", "p2"];
 
 export const KEY = {
   TAB: 9, ENTER: 13, ESC: 27, SPACE: 32, LEFT: 37, UP: 38, RIGHT: 39, DOWN: 40,
-  A: 65, D: 68, J: 74, K: 75, S: 83, W: 87, NUMPAD_ONE: 97, NUMPAD_TWO: 98, F1: 112, COMMA: 188, PERIOD: 190,
+  A: 65, D: 68, J: 74, K: 75, S: 83, T: 84, W: 87, NUMPAD_ONE: 97, NUMPAD_TWO: 98, F1: 112, COMMA: 188, PERIOD: 190,
 } as const;
 
 /** P1: WASD + J/K. P2: arrows + , (punch) and . (kick); numpad 1/2 also work if present. */

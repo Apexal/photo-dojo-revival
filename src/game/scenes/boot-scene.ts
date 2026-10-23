@@ -9,7 +9,7 @@ import { loadPlayedFighters } from "../played-fighters";
 import { fallbackSoundKey } from "../render/fighter-sprite-view";
 import { GAME_HEIGHT, GAME_WIDTH } from "../render/stage";
 
-export const REGISTRY = { library: "library", debugHitboxes: "debugHitboxes", host: "host", lastStage: "lastStage" } as const;
+export const REGISTRY = { library: "library", debugHitboxes: "debugHitboxes", host: "host", lastStage: "lastStage", tournament: "tournament" } as const;
 
 /** Opens IndexedDB, loads settings and the fighter library. */
 export class BootScene extends Phaser.Scene {

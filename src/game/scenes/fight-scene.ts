@@ -45,6 +45,13 @@ export interface FightSceneData {
   tutorial?: boolean;
   /** StageDefinition id (stages/stages.ts); the default stage when missing or unknown. */
   stageId?: string;
+  /** A match of the tournament in the registry (tournament-scene.ts): it ends back at the bracket. */
+  tournament?: boolean;
+}
+
+/** Where backing out of a match (or its lead-up) goes: the bracket in a tournament, else fighter select. */
+export function menuSceneFor(data: FightSceneData): string {
+  return data.tournament ? "tournament" : "character-select";
 }
 
 const STEP_MS = 1000 / 60;
@@ -448,6 +455,10 @@ export class FightScene extends Phaser.Scene {
     return Boolean(this.setup.practice);
   }
 
+  get isTournament(): boolean {
+    return Boolean(this.setup.tournament);
+  }
+
   get playerInfo(): { inputs: [PlayerInputDescriptor, InputDescriptor]; names: [string, string] } {
     return { inputs: this.setup.inputs, names: [this.setup.entries[0].fighter.name, this.setup.entries[1].fighter.name] };
   }
@@ -557,7 +568,7 @@ export class FightScene extends Phaser.Scene {
     this.sound.stopAll();
     this.scene.stop("round-result");
     this.scene.stop("match-result");
-    this.scene.start("character-select");
+    this.scene.start(menuSceneFor(this.setup));
   }
 
   /** Called by the round result screen. */
@@ -585,6 +596,7 @@ export class FightScene extends Phaser.Scene {
         entries: this.setup.entries,
         inputs: this.setup.inputs,
         prefixes: PREFIXES,
+        tournament: this.setup.tournament,
       };
       this.scene.launch("match-result", data);
       return;

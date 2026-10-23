@@ -96,6 +96,8 @@ function downscale(img: Uint8Array, from: number, to: number): Uint8Array {
 const FIGHTERS = [
   { id: "placeholder-red", name: "Red Stick", body: [214, 64, 52] as RGB, accent: [250, 210, 60] as RGB },
   { id: "placeholder-blue", name: "Blue Stick", body: [52, 112, 214] as RGB, accent: [240, 240, 240] as RGB },
+  { id: "placeholder-green", name: "Green Stick", body: [56, 168, 84] as RGB, accent: [250, 140, 40] as RGB },
+  { id: "placeholder-purple", name: "Purple Stick", body: [150, 74, 204] as RGB, accent: [110, 230, 225] as RGB },
 ];
 
 for (const f of FIGHTERS) {
