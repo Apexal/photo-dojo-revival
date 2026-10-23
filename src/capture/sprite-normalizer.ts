@@ -118,9 +118,9 @@ export interface MaskedCapture {
 }
 
 /** A cut-out from a matte's crop-sized RGBA (colours already cleaned of background, alpha set). */
-export function cutoutFromCrop(rgba: Uint8ClampedArray, crop: { x: number; y: number; width: number; height: number }): MaskedCapture {
+export function cutoutFromCrop(rgba: Uint8ClampedArray<ArrayBuffer>, crop: { x: number; y: number; width: number; height: number }): MaskedCapture {
   const canvas = createCanvas(crop.width, crop.height);
-  context2d(canvas).putImageData(new ImageData(new Uint8ClampedArray(rgba), crop.width, crop.height), 0, 0);
+  context2d(canvas).putImageData(new ImageData(rgba, crop.width, crop.height), 0, 0);
   return { image: canvas, offsetX: crop.x, offsetY: crop.y };
 }
 

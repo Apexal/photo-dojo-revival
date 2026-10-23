@@ -52,6 +52,8 @@ export interface ScreenEnv {
   debug: boolean;
   /** A saved, unfinished capture that can be resumed. */
   draft: DraftSummary | null;
+  /** The draft is being loaded: the intro's buttons wait. */
+  resuming: boolean;
 }
 
 const SOUND_PROMPTS: Record<SoundId, { title: string; hint: string }> = {
@@ -150,8 +152,8 @@ export function renderScreen(root: HTMLElement, flow: CaptureFlowState, data: Ca
               h("strong", {}, "Pick up where you left off?"),
               h("p", { class: "muted" }, `${env.draft.captured} of ${CAPTURE_TARGET_COUNT} poses captured · ${describeAge(env.draft.ageMs)}`),
               h("div", { class: "row" },
-                h("button", { type: "button", class: "primary", on: { click: () => a.resumeDraft() } }, "Resume"),
-                h("button", { type: "button", on: { click: () => a.discardDraft() } }, "Start fresh"),
+                h("button", { type: "button", class: "primary", disabled: env.resuming, on: { click: () => a.resumeDraft() } }, env.resuming ? "Loading your draft…" : "Resume"),
+                h("button", { type: "button", disabled: env.resuming, on: { click: () => a.discardDraft() } }, "Start fresh"),
               ),
             )
           : null,
@@ -159,9 +161,9 @@ export function renderScreen(root: HTMLElement, flow: CaptureFlowState, data: Ca
         roomInfo,
         flow.roomCode ? null : code,
         h("div", { class: "choices" },
-          h("button", { type: "button", class: "primary", on: { click: () => a.selectMode("friend") } },
+          h("button", { type: "button", class: "primary", disabled: env.resuming, on: { click: () => a.selectMode("friend") } },
             "Friend holds the phone", h("small", {}, "Someone else points the camera at you.")),
-          h("button", { type: "button", on: { click: () => a.selectMode("solo") } },
+          h("button", { type: "button", disabled: env.resuming, on: { click: () => a.selectMode("solo") } },
             "Solo, phone propped up", h("small", {}, "Bigger text and a pause after each pose to get back in position.")),
         ),
         env.voiceSupported
@@ -226,7 +228,9 @@ export function renderScreen(root: HTMLElement, flow: CaptureFlowState, data: Ca
     case "archetype":
       root.append(screen(
         h("h2", {}, "Pick your fighting style"),
-        h("p", { class: "muted" }, "It gives you one signature move (down + punch + kick), and it's your next pose."),
+        h("p", { class: "muted" }, s.retake
+          ? "A new style means a new signature pose. Tap your current one to keep it."
+          : "It gives you one signature move (down + punch + kick), and it's your next pose."),
         h("div", { class: "choices archetypes" },
           ...ARCHETYPE_IDS.map((id) =>
             h("button", { type: "button", class: id === flow.archetype ? "primary" : "", on: { click: () => a.pickArchetype(id) } },
@@ -353,6 +357,7 @@ export function renderScreen(root: HTMLElement, flow: CaptureFlowState, data: Ca
         code,
         h("button", { type: "button", class: "primary", on: { click: () => { if (code.value.trim()) a.setRoomCode(code.value); a.retrySend(); } } }, "Try again"),
         h("button", { type: "button", on: { click: () => a.download() } }, "Download fighter file"),
+        h("button", { type: "button", on: { click: () => a.restart() } }, "Capture another fighter"),
       ));
       break;
     }

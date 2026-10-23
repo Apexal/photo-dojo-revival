@@ -13,7 +13,7 @@ export const DUMMY_BEHAVIORS: readonly { behavior: DummyBehavior; label: string 
   { behavior: "block", label: "Block (standing)" },
   { behavior: "crouch", label: "Crouch-block" },
   { behavior: "jump", label: "Jump" },
-  { behavior: "jumpIn", label: "Jump in with a kick (practice anti-air)" },
+  { behavior: "jumpIn", label: "Jump-in kick (anti-air drill)" },
   { behavior: "punch", label: "Punch" },
   { behavior: "throw", label: "Throw" },
   { behavior: "random", label: "Mix it up" },

@@ -14,6 +14,7 @@ import {
   isGrab,
   type AttackId,
   type FighterAction,
+  type GrabId,
 } from "../shared/frame-data";
 import type { Facing } from "./collision";
 import type { InputFrame } from "./input-frame";
@@ -47,6 +48,8 @@ export interface FighterState {
   airAttackUsed: boolean;
   /** The current attack was pressed while holding back: kicks come out in place instead of lunging. */
   retreating: boolean;
+  /** While "grabbed": which grab is holding them (it decides the damage, the distance and whether it can be broken). */
+  grabbedBy: GrabId;
 }
 
 /** Punch/kick presses this frame, including ones still held in the input buffer. */
@@ -79,6 +82,7 @@ export function createFighterState(x: number, facing: Facing, health: number): F
     crouching: false,
     airAttackUsed: false,
     retreating: false,
+    grabbedBy: "throw",
   };
 }
 

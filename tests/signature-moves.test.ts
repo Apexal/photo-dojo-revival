@@ -231,3 +231,34 @@ describe("guardian: parry", () => {
     expect(frameOf(sim.current.fighters[0])).toEqual({ poseId: "signature", variant: 0 });
   });
 });
+
+describe("edge cases", () => {
+  it("a parry pressed again as the last one ends uses up its press: no stray throw after it catches something", () => {
+    const sim = fightingSim("guardian", 150);
+    sim.step([signature, idle]);
+    run(sim, PARRY_TOTAL_FRAMES - 2);
+    // P2 throws a punch timed to land on the next parry's first catching frame; P1 presses again
+    // on the frame the parry ends, so it goes straight into a new one.
+    sim.step([idle, input({ punch: true })]);
+    sim.step([signature, idle]);
+    expect(sim.current.fighters[0]).toMatchObject({ action: "parry", actionFrame: 0 });
+    const events = run(sim, PARRY.startup);
+    expect(events.some((e) => e.type === "parry")).toBe(true);
+    // Nothing pressed since: after the hit freeze P1 stays in neutral.
+    const after = run(sim, 20);
+    expect(after.some((e) => e.type === "grab")).toBe(false);
+    expect(["throw", "parry", "taunt"]).not.toContain(sim.current.fighters[0].action);
+  });
+
+  it("the bell during a bear hug lets the grabbed fighter go instead of freezing them", () => {
+    const sim = fightingSim("grappler", 150);
+    // Wind the clock down so time runs out mid-hold.
+    const round = sim.current.round;
+    (sim.current as { round: typeof round }).round = { ...round, framesRemaining: GRABS.bearHug.startup + 4 };
+    press(sim, GRABS.bearHug.startup + 1, signature, input({ down: true }));
+    expect(sim.current.fighters[1].action).toBe("grabbed");
+    run(sim, 10);
+    expect(sim.current.round.phase).not.toBe("fighting");
+    expect(sim.current.fighters[1].action).not.toBe("grabbed");
+  });
+});

@@ -17,9 +17,6 @@ export type HostStatus = (
   expiresAt?: number;
 };
 
-/** The Worker's room lifetime, for Workers that don't say. */
-const DEFAULT_ROOM_TTL_MS = 10 * 60 * 1000;
-
 type StatusListener = (status: HostStatus) => void;
 type FighterListener = (fighter: Fighter) => void;
 
@@ -39,7 +36,6 @@ export class HostSession {
   private phones = 0;
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   private failures = 0;
-  private stopped = false;
   private expiresAt: number | undefined;
 
   private onStatus(status: HostStatus): void {
@@ -68,20 +64,20 @@ export class HostSession {
   }
 
   async start(): Promise<void> {
-    this.stopped = false;
     const roomCode = generateRoomCode();
     this.onStatus({ kind: "connecting", roomCode });
     try {
       const connectedAt = Date.now();
       const [{ client, welcome }, iceServers] = await Promise.all([SignalingClient.connect(roomCode, "host"), fetchIceServers()]);
-      if (this.stopped) return client.close();
-      this.expiresAt = connectedAt + (welcome.expiresInMs ?? DEFAULT_ROOM_TTL_MS);
+      this.expiresAt = connectedAt + welcome.expiresInMs;
       this.client = client;
       this.failures = 0;
       this.onStatus({ kind: "waiting", roomCode });
       client.onClose(() => this.scheduleRestart());
       this.listener = acceptAsHost(client, (link) => {
         let name = "fighter";
+        // Every 16 KB chunk reports progress; subscribers redraw, so only pass on whole percents.
+        let percent = -1;
         this.phones++;
         link.channel.addEventListener("close", () => {
           this.phones = Math.max(0, this.phones - 1);
@@ -89,8 +85,13 @@ export class HostSession {
         });
         if (this.lastStatus) this.onStatus(this.lastStatus);
         receiveFighters(link.channel, {
-          onStart: (n) => { name = n; this.onStatus({ kind: "receiving", roomCode, name, progress: 0 }); },
-          onProgress: (got, total) => this.onStatus({ kind: "receiving", roomCode, name, progress: total ? got / total : 0 }),
+          onStart: (n) => { name = n; percent = 0; this.onStatus({ kind: "receiving", roomCode, name, progress: 0 }); },
+          onProgress: (got, total) => {
+            const now = total ? Math.floor((got / total) * 100) : 0;
+            if (now === percent) return;
+            percent = now;
+            this.onStatus({ kind: "receiving", roomCode, name, progress: now / 100 });
+          },
           onFighter: (fighter) => {
             this.onStatus({ kind: "received", roomCode, name: fighter.name });
             this.onFighter(fighter);
@@ -106,7 +107,7 @@ export class HostSession {
   }
 
   private scheduleRestart(): void {
-    if (this.stopped || this.reconnectTimer) return;
+    if (this.reconnectTimer) return;
     this.teardown();
     const delay = Math.min(30_000, 1000 * 2 ** Math.min(this.failures, 5));
     this.reconnectTimer = setTimeout(() => {
@@ -121,13 +122,5 @@ export class HostSession {
     this.listener = null;
     this.client?.close();
     this.client = null;
-  }
-
-  stop(): void {
-    this.stopped = true;
-    if (this.reconnectTimer) clearTimeout(this.reconnectTimer);
-    this.reconnectTimer = null;
-    this.listener?.closeAll();
-    this.teardown();
   }
 }

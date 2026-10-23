@@ -1,6 +1,7 @@
 import type { ArchetypeId } from "../shared/archetypes";
 import { SOUND_IDS, type SoundId } from "../shared/fighter-model";
-import { CAPTURE_TARGET_COUNT, SIGNATURE_TARGET_INDEX, captureTargetsFor, type CaptureTarget } from "../shared/pose-definitions";
+import { CAPTURE_KEYS, CAPTURE_TARGET_COUNT, SIGNATURE_TARGET_INDEX, captureTargetsFor, type CaptureTarget } from "../shared/pose-definitions";
+import type { ResumePoint } from "./capture-draft";
 
 export type CaptureMode = "friend" | "solo";
 
@@ -45,13 +46,12 @@ export type CaptureEvent =
   | { type: "skipAllSounds" }
   | { type: "finish" }
   | { type: "sent" }
-  | { type: "saved" }
   | { type: "sendFailed"; reason: string }
   | { type: "retrySend" }
   | { type: "fail"; message: string }
   | { type: "restart" }
-  /** Pick up a saved draft: straight to review if all main poses are in, else continue from the first missing one. */
-  | { type: "resume"; mode: CaptureMode; roomCode: string | null; archetype: ArchetypeId | null; nextPoseIndex: number | null };
+  /** Pick up a saved draft: straight to review if all poses are in, else continue from the first missing one. */
+  | { type: "resume"; mode: CaptureMode; roomCode: string | null; archetype: ArchetypeId | null; next: ResumePoint | null };
 
 export interface CaptureFlowState {
   screen: CaptureScreen;
@@ -59,7 +59,7 @@ export interface CaptureFlowState {
   /** A room code means the fighter is sent to a laptop; otherwise it's saved locally. */
   roomCode: string | null;
   /** Where the pose sequence continues after loading (resumed drafts). */
-  resumeAt?: number | null;
+  resumeAt?: ResumePoint | null;
   /** Picked just before the signature pose; null until then. */
   archetype: ArchetypeId | null;
 }
@@ -71,10 +71,9 @@ export function initialCaptureFlow(roomCode: string | null): CaptureFlowState {
 /** The capture target at an index (all sixteen poses, in capture order); the signature pose needs the archetype. */
 export function targetAt(index: number, archetype: ArchetypeId | null): CaptureTarget {
   if (index === SIGNATURE_TARGET_INDEX && !archetype) throw new Error("No archetype picked for the signature pose");
-  return captureTargetsFor(archetype ?? "brawler")[index];
+  return captureTargetsFor(archetype ?? "brawler")[index]; // only the signature target differs between archetypes
 }
-// Keys are the same for every archetype.
-const targetIndex = (key: string) => captureTargetsFor("brawler").findIndex((t) => t.key === key);
+const targetIndex = (key: string) => (CAPTURE_KEYS as readonly string[]).indexOf(key);
 /** Screens that show the live camera (they share one DOM; only the HUD changes between them). */
 export const isLiveScreen = (s: CaptureScreen): s is Extract<CaptureScreen, { name: "pose" | "captured" }> =>
   s.name === "pose" || s.name === "captured";
@@ -98,16 +97,19 @@ export function captureFlowReducer(state: CaptureFlowState, event: CaptureEvent)
       if (event.type === "selectMode") return { ...state, mode: event.mode, screen: { name: "tips" } };
       if (event.type === "resume") {
         const resumed = { ...state, mode: event.mode, roomCode: state.roomCode ?? event.roomCode, archetype: event.archetype };
-        return event.nextPoseIndex === null
+        return event.next === null
           ? { ...resumed, screen: { name: "review" } }
-          : { ...resumed, resumeAt: event.nextPoseIndex, screen: { name: "tips" } };
+          : { ...resumed, resumeAt: event.next, screen: { name: "tips" } };
       }
       break;
     case "tips":
       if (event.type === "start") return to({ name: "loading" });
       break;
     case "loading":
-      if (event.type === "modelsReady") return { ...state, resumeAt: null, screen: poseScreen(state, state.resumeAt ?? 0, false) };
+      if (event.type === "modelsReady") {
+        const at = state.resumeAt ?? { poseIndex: 0, retake: false };
+        return { ...state, resumeAt: null, screen: poseScreen(state, at.poseIndex, at.retake) };
+      }
       break;
     case "pose":
       if (event.type === "poseCaptured") return to({ ...s, name: "captured", rough: false });
@@ -125,6 +127,8 @@ export function captureFlowReducer(state: CaptureFlowState, event: CaptureEvent)
       break;
     }
     case "archetype":
+      // Picking the style it already has, from the review, is how to back out of changing it.
+      if (event.type === "pickArchetype" && s.retake && event.archetype === state.archetype) return to({ name: "review" });
       if (event.type === "pickArchetype") {
         return { ...state, archetype: event.archetype, screen: { name: "pose", poseIndex: SIGNATURE_TARGET_INDEX, retake: s.retake } };
       }
@@ -150,7 +154,6 @@ export function captureFlowReducer(state: CaptureFlowState, event: CaptureEvent)
       break;
     case "sendFailed":
       if (event.type === "retrySend") return to({ name: "sending" });
-      if (event.type === "saved") return to({ name: "saved" });
       break;
     default:
       break;

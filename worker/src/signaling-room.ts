@@ -7,15 +7,20 @@ export interface Env {
   SIGNALING_ROOM: DurableObjectNamespace<SignalingRoom>;
   TURN_KEY_ID?: string;
   TURN_KEY_API_TOKEN?: string;
+  /** Comma-separated site origins allowed to ask for TURN credentials (unset: any). */
+  ALLOWED_ORIGINS?: string;
   /** Override the room lifetime (ms), for testing expiry. */
   ROOM_TTL_MS?: string;
 }
 
 const otherRole = (role: Role): Role => (role === "host" ? "guest" : "host");
 
+/** SDP and ICE are a few KB; anything far bigger isn't signaling. */
+export const MAX_MESSAGE_BYTES = 64 * 1024;
+
 /**
  * One room per code. Holds at most two sockets (one host, one guest), relays
- * every message from one to the other verbatim, and never parses or stores
+ * every text message from one to the other verbatim, and never parses or stores
  * payloads. Self-destructs 10 minutes after creation or when both sides leave.
  */
 export class SignalingRoom extends DurableObject<Env> {
@@ -54,7 +59,7 @@ export class SignalingRoom extends DurableObject<Env> {
 
   async webSocketMessage(ws: WebSocket, message: string | ArrayBuffer): Promise<void> {
     const role = this.roleOf(ws);
-    if (!role) return;
+    if (!role || typeof message !== "string" || message.length > MAX_MESSAGE_BYTES) return;
     for (const peer of this.ctx.getWebSockets(otherRole(role))) peer.send(message);
   }
 
@@ -74,7 +79,9 @@ export class SignalingRoom extends DurableObject<Env> {
   private async peerLeft(ws: WebSocket): Promise<void> {
     const role = this.roleOf(ws);
     const remaining = this.ctx.getWebSockets().filter((s) => s !== ws);
-    if (role) {
+    // A socket replaced by a newer one of the same role (a reconnect) didn't leave: saying so would make the
+    // laptop drop the new phone's connection while it's being set up.
+    if (role && !remaining.some((s) => this.roleOf(s) === role)) {
       for (const peer of remaining) {
         if (this.roleOf(peer) !== role && peer.readyState === WebSocket.OPEN) peer.send(JSON.stringify({ type: "peer-left", role }));
       }
@@ -89,7 +96,6 @@ export class SignalingRoom extends DurableObject<Env> {
   }
 
   private async destroy(): Promise<void> {
-    await this.ctx.storage.deleteAlarm();
-    await this.ctx.storage.deleteAll();
+    await this.ctx.storage.deleteAlarm(); // nothing else is ever stored
   }
 }

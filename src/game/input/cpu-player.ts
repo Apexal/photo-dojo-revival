@@ -142,7 +142,8 @@ export class CpuPlayer {
     const free = isGrounded(self) && (self.action === "idle" || self.action === "walk" || self.action === "block");
 
     if (self.action === "grabbed") {
-      // Its own state isn't delayed, but reacting to the grab is (and a bear hug can't be broken at all).
+      // A bear hug can't be broken. Its own state isn't delayed, but reacting to the grab is.
+      if (self.grabbedBy === "bearHug") return { ...EMPTY_INPUT };
       const at = Math.min(this.tuning.reaction, THROW.holdFrames - 1);
       return self.actionFrame === at && this.random() < this.tuning.tech
         ? { ...EMPTY_INPUT, punch: true, kick: true }
@@ -163,9 +164,11 @@ export class CpuPlayer {
     // An attack it can see coming: guard the right way for it (punches pass over a crouch).
     const phase = currentAttackPhase(opp);
     if (isAttack(opp.action) && (phase === "startup" || phase === "active")) {
-      // A guardian sometimes parries it instead, timed so the hit comes during the parry.
-      const hitsIn = ATTACKS[opp.action].startup - opp.actionFrame - (this.seen.length - 1);
-      const parryCatches = hitsIn >= PARRY.startup && hitsIn < PARRY.startup + PARRY.active;
+      // A guardian sometimes parries it instead, if its active frames will still be out once the parry is.
+      // Only slow moves leave time for that after the reaction delay; quick ones get parried as a read (think).
+      const attack = ATTACKS[opp.action];
+      const hitsIn = attack.startup - opp.actionFrame - (this.seen.length - 1);
+      const parryCatches = hitsIn < PARRY.startup + PARRY.active && hitsIn + attack.active > PARRY.startup;
       if (this.archetype === "guardian" && free && parryCatches && this.roll(`parry:${this.moveId(opp)}`, this.tuning.signature)) {
         return this.attack(SIGNATURE_INPUT);
       }
@@ -199,6 +202,10 @@ export class CpuPlayer {
       if (move && this.roll(`punish:${this.moveId(opp)}`, this.tuning.punish)) return this.attack(move);
     }
 
+    // Passing through the signature move's sweet spot (the charge's, the bear hug's) is a chance to use it.
+    if (this.cooldown === 0 && this.signatureFits(opp, distance) && this.random() < this.tuning.signature * 0.25) {
+      return this.attack(SIGNATURE_INPUT);
+    }
     if (this.thinkLeft-- <= 0) return this.think(opp, distance, forward, back);
     return this.stanceInput(forward, back);
   }
@@ -216,9 +223,12 @@ export class CpuPlayer {
       return { ...EMPTY_INPUT, ...this.plan.shift() };
     };
 
+    // A guardian in the opponent's reach guesses an attack is coming and parries ahead of it.
+    if (this.archetype === "guardian" && this.cooldown === 0 && oppCanHitUs && (opp.action === "idle" || opp.action === "walk") && this.random() < t.signature * 0.5) {
+      return this.attack(SIGNATURE_INPUT);
+    }
+    if (this.cooldown === 0 && this.signatureFits(opp, distance) && this.random() < t.signature) return this.attack(SIGNATURE_INPUT);
     if (this.cooldown === 0 && r < t.aggression) {
-      const signature = this.signatureFits(opp, distance);
-      if (signature && this.random() < t.signature) return this.attack(SIGNATURE_INPUT);
       if (distance <= this.ranges.throw && throwable && this.random() < (opp.action === "block" ? 0.8 : 0.3)) return this.attack({ punch: true, kick: true });
       if (opp.action === "block") {
         // Against a guard: throw it up close, jump in on a crouch, low kick a standing one.
@@ -243,13 +253,13 @@ export class CpuPlayer {
   /**
    * Is now the moment for the signature move? The charge closes in from beyond kick
    * range, the bear hug catches a guard from outside throw range, the knee beats a
-   * crouching guard. (The parry is a reaction, see decide.)
+   * crouching guard. (The parry is a read, see think, or a reaction to a slow move, see decide.)
    */
   private signatureFits(opp: FighterState, distance: number): boolean {
     if (distance > this.ranges.signature) return false;
     switch (this.archetype) {
       case "brawler": return distance > this.ranges.attack.kick && (opp.action === "idle" || opp.action === "walk");
-      case "grappler": return distance > this.ranges.throw && (opp.action === "block" || opp.action === "idle");
+      case "grappler": return distance > this.ranges.throw && (opp.action === "block" || opp.action === "idle" || opp.action === "walk");
       case "acrobat": return opp.action === "block" && opp.crouching;
       case "guardian": return false;
     }

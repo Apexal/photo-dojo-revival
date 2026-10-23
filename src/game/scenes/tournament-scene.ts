@@ -1,11 +1,11 @@
 import Phaser from "phaser";
 import type { InputFrame } from "../../simulation/input-frame";
 import type { LibraryEntry } from "../fighter-library";
-import { gameSoundKey, type GameSoundId } from "../game-sounds";
+import { playGameSound } from "../game-sounds";
 import { createInputSource } from "../input/input-descriptor";
 import type { InputSource } from "../input/input-source";
 import { playMenuMusic } from "../menu-music";
-import { getOptions } from "../options";
+
 import { GAME_HEIGHT, GAME_WIDTH } from "../render/stage";
 import type { Tournament } from "../tournament";
 import type { SeriesSession } from "../series";
@@ -160,7 +160,7 @@ export class TournamentScene extends Phaser.Scene {
       fontSize: "22px", fontStyle: "bold", color: "#f3efe6", backgroundColor: "#1c1824", padding: { x: 18, y: 8 },
     }).setOrigin(0.5).setInteractive({ useHandCursor: true });
     done.on("pointerdown", () => this.quit());
-    this.playEffect("hit", 0.8);
+    playGameSound(this, "hit", 0.8);
   }
 
   private setHint(): void {
@@ -175,7 +175,7 @@ export class TournamentScene extends Phaser.Scene {
     const next = this.session.bracket.next;
     if (this.leaving || !next) return;
     this.leaving = true;
-    this.playEffect("hit", 0.6);
+    playGameSound(this, "hit", 0.6);
     const { entrants } = this.session.bracket;
     startMatch(this, { entries: [entrants[next.a], entrants[next.b]], inputs: [...this.session.inputs], series: "tournament" });
   }
@@ -206,14 +206,9 @@ export class TournamentScene extends Phaser.Scene {
     } else if (pressed("kick")) {
       if (performance.now() < this.quitUntil) return this.quit();
       this.quitUntil = performance.now() + QUIT_CONFIRM_MS;
-      this.playEffect("block", 0.4);
+      playGameSound(this, "block", 0.4);
       this.setHint();
     }
   }
 
-  /** Menu sounds: the "Game volume" setting. */
-  private playEffect(id: GameSoundId, volume: number): void {
-    const v = volume * getOptions(this.registry).gameVolume;
-    if (v > 0 && this.cache.audio.exists(gameSoundKey(id))) this.sound.play(gameSoundKey(id), { volume: v });
-  }
 }

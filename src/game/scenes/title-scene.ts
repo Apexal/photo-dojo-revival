@@ -10,9 +10,9 @@ import { DummyInputSource, type DummyBehavior } from "../input/dummy-input-sourc
 import type { PlayerInputDescriptor } from "../input/input-descriptor";
 import { KeyboardInputSource } from "../input/keyboard-input-source";
 import { getOptions } from "../options";
-import { FighterSpriteView, fallbackSoundKey, loadFighterSounds, preloadFighterTextures } from "../render/fighter-sprite-view";
+import { FighterSpriteView, fallbackSoundKey, fighterTextureKeys, loadFighterSounds, preloadFighterTextures } from "../render/fighter-sprite-view";
 import { HitMarkers } from "../render/hit-markers";
-import { GAME_HEIGHT, GAME_WIDTH, worldToScreen } from "../render/stage";
+import { GAME_HEIGHT, GAME_WIDTH } from "../render/stage";
 import { randomStage, type StageDefinition } from "../stages/stages";
 import { preloadStage } from "../stages/stage-music";
 import { pickTake } from "../sound-choice";
@@ -129,6 +129,7 @@ export class TitleScene extends Phaser.Scene {
       this.input.removeAllListeners("pointerdown");
       this.objectUrls.forEach((u) => URL.revokeObjectURL(u));
       this.objectUrls = [];
+      this.pair.forEach((e, i) => fighterTextureKeys(e.fighter, PREFIXES[i]).forEach((k) => this.textures.exists(k) && this.textures.remove(k)));
     });
     if (this.setup.revealed) this.cameras.main.fadeIn(FADE_MS);
   }
@@ -244,7 +245,7 @@ export class TitleScene extends Phaser.Scene {
       }
     }
     const tweening = getOptions(this.registry).poseTweening;
-    state.fighters.forEach((f, i) => this.views[i]?.render(f, state.frame, tweening));
+    state.fighters.forEach((f, i) => this.views[i]?.render(f, state.frame, tweening, state.fighters[1 - i]));
     this.markers.render(state.frame);
     if (this.boutOver(state) && this.boutOverAt === null) this.boutOverAt = time;
     if (this.boutOverAt !== null && time - this.boutOverAt > BOUT_GAP_MS) this.nextBout();
@@ -264,18 +265,7 @@ export class TitleScene extends Phaser.Scene {
 
   /** Sparks and dust, as in a fight; no sounds (the page can't play any yet). */
   private handleEvents(state: FightState): void {
-    for (const ev of state.events) {
-      if (ev.type === "hit" || ev.type === "throw") {
-        const defender = state.fighters[ev.defender], attacker = state.fighters[ev.attacker];
-        const at = ev.type === "hit" ? worldToScreen(ev.at) : worldToScreen({ x: defender.position.x, y: defender.position.y - 160 });
-        const ko = state.events.some((e) => e.type === "ko");
-        const kind = ev.type === "throw" ? "throw" : ev.blocked ? "block" : ko ? "ko" : "hit";
-        this.markers.add(kind, ev.attacker, at.x, at.y, state.frame, defender.position.x >= attacker.position.x ? 1 : -1);
-      } else if (ev.type === "landed") {
-        const at = worldToScreen(state.fighters[ev.player].position);
-        this.markers.add("dust", ev.player, at.x, at.y, state.frame, 1);
-      }
-    }
+    for (const ev of state.events) this.markers.addFor(ev, state);
   }
 
   // --- leaving -----------------------------------------------------------------

@@ -103,9 +103,9 @@ function swing(u: Point, v: Point, t: number): Point {
 }
 
 /**
- * A second stance for fighters captured before there was one: knees soften and
- * the body sinks a little, the chest lifts (breathing in), the fists drop a
- * touch. Feet stay put. The idle photo warped onto this is the fighter's sway.
+ * A breath taken in a pose: knees soften and the body sinks a little, the chest
+ * lifts, the fists drop a touch. Feet stay put. Fighter select warps a photo
+ * onto this so the fighter on show breathes (pose-preview.ts).
  */
 export function breathingStance(l: readonly NormalizedLandmark[]): NormalizedLandmark[] {
   const torso = torsoLength(l as NormalizedLandmark[]);

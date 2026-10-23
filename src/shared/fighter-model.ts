@@ -41,9 +41,8 @@ export interface Fighter {
   sounds: Record<SoundId, Blob | null>;   // webm/opus, ≤MAX_SOUND_SECONDS each
   thumbnailBlob: Blob;                    // idle pose downscaled, for character select
   /**
-   * Second versions of punch (uppercut), kick (low kick), hurt and win, which every
-   * fighter has, and of idle (the stance it sways into), which older fighters lack.
-   * Variant n is index n-1.
+   * Second versions of idle (the stance it sways into), punch (uppercut), kick
+   * (low kick), hurt and win (REQUIRED_VARIANT_POSES). Variant n is index n-1.
    */
   poseVariants: Partial<Record<PoseId, CapturedPose[]>>;
   /** Extra takes of each voice line; the game picks one at random. */

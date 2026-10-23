@@ -1,4 +1,4 @@
-import { KNOCKDOWN } from "../../shared/frame-data";
+import { KNOCKDOWN, isAttackId, isGrab } from "../../shared/frame-data";
 import { HITSTOP_FRAMES, airFrames, type FighterState } from "../../simulation/fighter-state-machine";
 import { PLAYER_COLORS } from "./stage";
 
@@ -18,10 +18,18 @@ export function holdsStruckPose(s: FighterState): boolean {
   return (s.action === "hurt" || s.action === "ko" || s.action === "knockdown") && s.actionFrame === 0 && s.hitstopFrames > HITSTOP_FRAMES - REACTION_DELAY_FRAMES;
 }
 
-/** Sideways shake (px) of a fighter frozen in hitstop after being hit or blocking: flips every frame. */
-export function hitShake(s: FighterState, frame: number): number {
+const isStruck = (s: FighterState) => s.action === "hurt" || s.action === "ko" || s.action === "knockdown";
+
+/**
+ * Sideways shake (px) of a fighter frozen in hitstop, flipping every frame: the
+ * one who got hit (4), or blocked (2), and the one whose hit or throw landed
+ * clean (2, out of step with the defender) so the impact goes through both.
+ * Rendering only: positions and timing are the simulation's.
+ */
+export function hitShake(s: FighterState, frame: number, opponent?: FighterState): number {
   if (s.hitstopFrames <= 0) return 0;
-  const amplitude = s.action === "hurt" || s.action === "ko" || s.action === "knockdown" ? 4 : s.action === "blockstun" ? 2 : 0;
+  const landed = (isAttackId(s.action) || isGrab(s.action)) && s.hasHit && !!opponent && isStruck(opponent);
+  const amplitude = isStruck(s) ? 4 : s.action === "blockstun" ? 2 : landed ? -2 : 0;
   return frame % 2 === 0 ? amplitude : -amplitude;
 }
 

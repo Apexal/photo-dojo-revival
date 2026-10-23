@@ -1,6 +1,6 @@
 # Photo Dojo: Revival
 
-A browser-only 2D fighting game. Pose for fifteen photos on a phone, the phone turns them into a sprite fighter locally, sends it to a laptop over WebRTC, and two people fight with controllers or a shared keyboard. No accounts, no backend storage: fighters live in each browser's IndexedDB. See [PLAN.md](PLAN.md) for the design.
+A browser-only 2D fighting game. Pick a fighting style and pose for sixteen photos on a phone, the phone turns them into a sprite fighter locally, sends it to a laptop over WebRTC, and two people fight with controllers or a shared keyboard. No accounts, no backend storage: fighters live in each browser's IndexedDB. See [PLAN.md](PLAN.md) for the design.
 
 ## Run it
 
@@ -34,7 +34,12 @@ Keyboard keys can be remapped in **Settings** (Tab or a pad's Select button on f
 - The **kick** lunges forward, so it reaches further than a punch but is slower. Hold **back** while kicking to kick in place instead (shorter, keeps your distance).
 - **Down + punch** is an uppercut: the anti-air. Jumping attacks can't hit you while it comes out, so it beats a jump-in timed right, but it's very punishable if blocked. **Down + kick** is a quick low kick.
 - **Punch + kick** together throws when you're close (it beats blocking) and knocks them down, and taunts when you're far away. Press punch + kick while grabbed to break free.
-- **Knockdowns:** a throw, or an uppercut that catches someone in the air, knocks them down. Nobody can touch them while they're down; get ready for when they stand up.
+- **Down + punch + kick** is your fighter's **signature move**, set by the fighting style picked during capture:
+  - **Brawler: Shoulder Charge.** A slow lean, then a charge most of the way across the stage that knocks them down. Blocked, it's a free punish.
+  - **Grappler: Bear Hug.** A grab that reaches almost three times as far as a throw and can't be broken. It loses to any attack, and a miss leaves you open.
+  - **Guardian: Parry.** Catches any strike for a moment: no damage, and the attacker staggers long enough for a free hit. Throws go straight through it, and a mistimed one leaves you open.
+  - **Acrobat: Flying Knee.** An overhead from the ground: it hits a crouching guard, so block it standing.
+- **Knockdowns:** a throw, a bear hug, a shoulder charge, or an uppercut that catches someone in the air knocks them down. Nobody can touch them while they're down; get ready for when they stand up.
 - A press up to 5 frames early still counts, and a block still works if you let go of back within the last 3 frames. Blocked hits can't KO.
 - Players swap sides every round.
 - Gamepads rumble when you get hit (heavier for kicks and throws, a light tick when blocking, a long one on a KO) and buzz once when they join. Turn it off in Settings (or press R in the pause menu). Rumble uses the browser's Gamepad haptics (Chrome/Edge dual-rumble, Firefox pulse), and pads without it just don't rumble.
@@ -45,13 +50,14 @@ Keyboard keys can be remapped in **Settings** (Tab or a pad's Select button on f
 - F1 toggles the hitbox overlay.
 - Before each match, a "How to fight" screen shows each player's controls with slow-motion previews of their fighter's moves.
 - **Practice:** join with one controller, pick a fighter, and press punch again. You play against an easy CPU with no clock and health that refills. Key 9 cycles the CPU easy → normal → hard; keys 1–8 (or Tab / Select) turn it into a scripted training dummy instead, including jumping in with a kick to practice anti-airs. F1 shows hitboxes. Harder levels react faster, block, anti-air and punish more often, and throw or jump in on a player who just crouch-blocks.
-- **Tutorial:** join alone, pick a fighter, and press up instead of punch. A guided drill against the dummy, one move at a time, with your own buttons on screen: walk, jump, punch, kick, uppercut, low kick, block its punches, throw it. Attacks that fall short get a "too far" nudge. Then it carries on as practice. Fighters that have never fought are tagged NEW on fighter select, and picking one alone suggests the tutorial.
+- **Tutorial:** join alone, pick a fighter, and press up instead of punch. A guided drill against the dummy, one move at a time, with your own buttons on screen: walk, jump, punch, kick, uppercut, low kick, block its punches, throw it, then your signature move. Attacks that fall short get a "too far" nudge. Then it carries on as practice. Fighters that have never fought are tagged NEW on fighter select, and picking one alone suggests the tutorial.
 - **Party modes:** with both players joined on fighter select, press T (or Start on a joined pad, or click 🏆 Party modes). Pick the mode on the top row (◀ ▶), punch 3–8 fighters in, then Enter / Start begins. Each match is a normal best-of-three; a drawn match is played again; kicking twice between matches abandons the mode.
   - **Tournament:** a single-elimination bracket drawn in random order (byes go to the top seeds). P1 plays the top fighter of each match and P2 the bottom, so pass the controllers around.
   - **King of the Hill:** fighters line up in the order picked. The winner stays on, on the same side (so the same controller), and the next in line steps in; the loser goes to the back of the line. Beat every other fighter in a row to rule the hill.
 - A knockout plays back in slow motion before the round result. Press any button to skip.
 - Callouts: FIRST BLOOD for the round's first clean hit or throw, "N HIT COMBO" for hits landed while the opponent is still reeling, and PERFECT for a round won without losing any health (practice only shows combos).
 - The match ends on a stats page: damage, clean hits, accuracy, longest combo, blocks, throws, knockdowns, perfect rounds, each player's favorite move, and how every round went. Punch for a rematch, kick for fighter select.
+- Each fighter keeps a career record across matches (not practice): wins, losses and best combo show on fighter select, and the stats page shows both fighters' records. Once you've picked, press down (or click the record) for the fighter's full career page: every total, clean hits by move, their favorite move and their rivals. When the two players are on different fighters, their head-to-head (or "first meeting") shows between the panels. Records are saved in this browser with the rest of your settings; deleting a fighter deletes its record and everyone's rivalry with it.
 - Fighter select works with a mouse or touch too. Click a tile to select it, then use the tile's Export or 🗑 button. Clicking a selected tile again picks it for a player who has joined. With more than 12 fighters the grid pages: move past the last row, or click ◀ ▶.
 
 The frame data and the reasoning behind it are in [docs/fighting-mechanics.md](docs/fighting-mechanics.md).

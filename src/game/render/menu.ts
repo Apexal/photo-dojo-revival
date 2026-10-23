@@ -68,8 +68,11 @@ export class Menu {
       const disabled = item.disabled?.() ?? false;
       const selected = i === this.index && !disabled;
       t.setText(item.label());
-      t.setColor(disabled ? COLOR.disabled : selected ? COLOR.selected : COLOR.normal);
-      t.setBackgroundColor(selected ? "#f2c14e" : "#00000000");
+      // Each style setter redraws the text and re-uploads its texture, even when nothing changed.
+      const color = disabled ? COLOR.disabled : selected ? COLOR.selected : COLOR.normal;
+      const background = selected ? "#f2c14e" : "#00000000";
+      if (t.style.color !== color) t.setColor(color);
+      if (t.style.backgroundColor !== background) t.setBackgroundColor(background);
     });
   }
 

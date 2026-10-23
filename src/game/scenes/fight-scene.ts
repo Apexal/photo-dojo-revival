@@ -12,13 +12,13 @@ import { createInputSource, isPlayerInput, sameInput, type InputDescriptor, type
 import { PAD_BUTTON } from "../input/gamepad-input-source";
 import type { InputSource } from "../input/input-source";
 import { layoutForKey } from "../input/key-bindings";
-import { FighterSpriteView, loadFighterSounds, preloadFighterTextures } from "../render/fighter-sprite-view";
+import { FighterSpriteView, fighterTextureKeys, loadFighterSounds, preloadFighterTextures } from "../render/fighter-sprite-view";
 import { FightCamera, FULL_VIEW, type CameraImpact } from "../render/fight-camera";
 import { HitMarkers } from "../render/hit-markers";
 import { REPLAY_SPEED, ReplayBuffer } from "../replay-buffer";
 import { pickTake } from "../sound-choice";
 import { JOIN_RUMBLE, RumbleScheduler, rumbleFor } from "../input/rumble";
-import { gameSoundKey, type GameSoundId } from "../game-sounds";
+import { playGameSound } from "../game-sounds";
 import { getOptions, setOption } from "../options";
 import { HitboxDebugView } from "../render/hitbox-debug-view";
 import { LOW_HEALTH, clockCue, clockTicked, lowHealthPulse } from "../render/hud-cues";
@@ -33,9 +33,10 @@ import { MatchStatsTracker } from "../../simulation/match-stats";
 import { CalloutTracker, calloutText, type Callout } from "../../simulation/callouts";
 import { stopMenuMusic } from "../menu-music";
 import { controlLabels } from "../input/control-labels";
+import { recordMatch } from "../fighter-records";
 import { markPlayed } from "../played-fighters";
 import { NUDGES, Tutorial, type TutorialEvent } from "../tutorial";
-import type { SeriesKind } from "../series";
+import type { SeriesKind, SeriesSession } from "../series";
 
 export interface FightSceneData {
   entries: [LibraryEntry, LibraryEntry];
@@ -63,7 +64,6 @@ const BAR_H = 26;
 /** Objects at this depth or above are HUD: drawn by the fixed HUD camera, not the zooming fight camera. */
 const HUD_DEPTH = 100;
 /** How far above a thrown fighter's feet (px) the throw spark goes: about mid-body. */
-const THROW_MARKER_HEIGHT = 160;
 
 /**
  * Owns a FightSimulation, steps it at a fixed 60 Hz with an accumulator, and
@@ -219,6 +219,7 @@ export class FightScene extends Phaser.Scene {
       this.input.gamepad?.removeAllListeners("down");
       this.objectUrls.forEach((u) => URL.revokeObjectURL(u));
       this.objectUrls = [];
+      this.setup.entries.forEach((e, i) => fighterTextureKeys(e.fighter, PREFIXES[i]).forEach((k) => this.textures.exists(k) && this.textures.remove(k)));
     });
     this.hudCamera = this.cameras.add(0, 0, GAME_WIDTH, GAME_HEIGHT);
     this.camera = new FightCamera();
@@ -303,7 +304,7 @@ export class FightScene extends Phaser.Scene {
       switch (ev.type) {
         case "step": this.dummy?.setBehavior(this.tutorial!.steps[ev.index].dummy); break;
         case "progress":
-          this.playEffect("tick", 0.6);
+          playGameSound(this, "tick", 0.6);
           this.nudgeUntil = 0;
           break;
         case "nudge":
@@ -375,7 +376,7 @@ export class FightScene extends Phaser.Scene {
       const inputs = [this.readInput(0), this.readInput(1)] as [InputFrame, InputFrame];
       const before = state;
       state = this.sim.step(inputs);
-      if (!this.setup.practice && clockTicked(before.round, state.round)) this.playEffect("tick", 0.7);
+      if (!this.setup.practice && clockTicked(before.round, state.round)) playGameSound(this, "tick", 0.7);
       this.replayBuffer.push(state);
       this.stats.record(state);
       this.showCallouts(this.callouts.record(state));
@@ -559,6 +560,9 @@ export class FightScene extends Phaser.Scene {
     const other = this.setup.inputs[player === 0 ? 1 : 0];
     if (sameInput(other, input)) return;
     (this.setup.inputs as InputDescriptor[])[player] = input; // a rematch keeps the new controller
+    // So does the next match of a tournament / king of the hill (built from the series' own inputs).
+    const series: SeriesSession | undefined = this.setup.series ? this.registry.get(REGISTRY.series) : undefined;
+    if (series) series.inputs[player] = input;
     this.sources[player] = createInputSource(this, input);
     this.heldMask[player] = new Set();
     this.disconnected = null;
@@ -591,9 +595,15 @@ export class FightScene extends Phaser.Scene {
   private showResult(state: FightState): void {
     this.waitingForResult = true;
     if (state.round.phase === "matchOver") {
+      const stats = this.stats.result;
+      const winner = state.round.matchWinner ?? "draw";
+      if (!this.setup.practice) {
+        const [a, b] = this.setup.entries;
+        recordMatch(this.registry, [a.fighter.fighterId, b.fighter.fighterId], stats.players, winner);
+      }
       const data: MatchResultData = {
-        stats: this.stats.result,
-        winner: state.round.matchWinner ?? "draw",
+        stats,
+        winner,
         entries: this.setup.entries,
         inputs: this.setup.inputs,
         prefixes: PREFIXES,
@@ -624,12 +634,6 @@ export class FightScene extends Phaser.Scene {
     this.lastTake.set(`${player}:${id}`, key);
     const v = volume * getOptions(this.registry).voiceVolume;
     if (v > 0 && this.cache.audio.exists(key)) this.sound.play(key, { volume: v });
-  }
-
-  /** Impacts and the clock: the "Game volume" setting. */
-  private playEffect(id: GameSoundId, volume = 0.8): void {
-    const v = volume * getOptions(this.registry).gameVolume;
-    if (v > 0 && this.cache.audio.exists(gameSoundKey(id))) this.sound.play(gameSoundKey(id), { volume: v });
   }
 
   private shake(ms: number, pixels: number): void {
@@ -679,43 +683,34 @@ export class FightScene extends Phaser.Scene {
           if (r) queue.request(r);
         });
       }
+      this.markers.addFor(ev, state);
       // In a replay only the sounds and shakes come back, not the announcer banners.
       if (options.replay && (ev.type === "roundStart" || ev.type === "fight" || ev.type === "roundEnd" || ev.type === "matchEnd" || ev.type === "throwTech")) continue;
       switch (ev.type) {
         case "roundStart":
-          this.banner(this.tutorial ? "TUTORIAL" : this.setup.practice ? "PRACTICE" : `ROUND ${ev.round}`, 900);
+          this.banner(this.tutorial && !this.tutorial.finished ? "TUTORIAL" : this.setup.practice ? "PRACTICE" : `ROUND ${ev.round}`, 900);
           this.camera.snap(state.fighters.map((f) => worldToScreen(f.position)));
           break;
         case "fight": this.banner("FIGHT!", 700); break;
         case "attackActive": this.play(ev.player, "attack", 0.6); break;
         case "hit": {
           const ko = events.some((e) => e.type === "ko" && e.player === ev.defender);
-          const at = worldToScreen(ev.at);
-          const dir = state.fighters[ev.defender].position.x >= state.fighters[ev.attacker].position.x ? 1 : -1;
-          this.markers.add(ev.blocked ? "block" : ko ? "ko" : "hit", ev.attacker, at.x, at.y, state.frame, dir);
           if (!ev.blocked) this.cameraImpact(ko ? "ko" : "hit");
           const heavy = ATTACKS[ev.attack].limb !== "arm";
-          this.playEffect(ev.blocked ? "block" : "hit", heavy ? 0.9 : 0.7);
+          playGameSound(this, ev.blocked ? "block" : "hit", heavy ? 0.9 : 0.7);
           if (!ev.blocked) this.play(ev.defender, "hurt");
           if (heavy && !ev.blocked) this.shake(90, 2);
           break;
         }
         case "parry": {
-          const at = worldToScreen(ev.at);
-          const dir = state.fighters[ev.attacker].position.x >= state.fighters[ev.player].position.x ? 1 : -1;
-          this.markers.add("parry", ev.player, at.x, at.y, state.frame, dir);
-          this.playEffect("block", 1);
+          playGameSound(this, "block", 1);
           if (!options.replay) this.banner("PARRY!", 600);
           break;
         }
         case "grab": this.play(ev.attacker, "attack", 0.6); break;
         case "throw": {
-          // Mid-body of whoever got thrown, where they are now.
-          const at = worldToScreen({ x: state.fighters[ev.defender].position.x, y: state.fighters[ev.defender].position.y - THROW_MARKER_HEIGHT });
-          const dir = state.fighters[ev.defender].position.x >= state.fighters[ev.attacker].position.x ? 1 : -1;
-          this.markers.add("throw", ev.attacker, at.x, at.y, state.frame, dir);
           this.cameraImpact(events.some((e) => e.type === "ko") ? "ko" : "throw");
-          this.playEffect("hit", 1);
+          playGameSound(this, "hit", 1);
           this.play(ev.defender, "hurt");
           this.shake(140, 4);
           break;
@@ -727,9 +722,7 @@ export class FightScene extends Phaser.Scene {
           break;
         case "landed": {
           // Hitting the floor after a knockdown (or a KO): dust, a thud, a jolt.
-          const at = worldToScreen(state.fighters[ev.player].position);
-          this.markers.add("dust", ev.player, at.x, at.y, state.frame, 1);
-          this.playEffect("thud", 0.9);
+          playGameSound(this, "thud", 0.9);
           this.shake(120, 3);
           break;
         }
@@ -746,7 +739,7 @@ export class FightScene extends Phaser.Scene {
 
   private renderState(state: FightState): void {
     const tweening = getOptions(this.registry).poseTweening;
-    state.fighters.forEach((f, i) => this.views[i]?.render(f, state.frame, tweening));
+    state.fighters.forEach((f, i) => this.views[i]?.render(f, state.frame, tweening, state.fighters[1 - i]));
     // The streaks stand in for the motion a hard cut skips; when the poses morph, the motion is shown.
     this.drawMotionLines(state.fighters, (i) => !(tweening && this.views[i]?.canTween));
     this.markers.render(state.frame);
@@ -772,7 +765,8 @@ export class FightScene extends Phaser.Scene {
       const geo = this.geometry[i];
       const frame = frameOf(f);
       const side = frameGeometry(geo, frame.poseId, frame.variant).attackSide ?? "right";
-      const index = ATTACKS[f.action].limb === "arm" ? LANDMARK[`${side}Wrist`] : LANDMARK[`${side}Ankle`];
+      const limb = ATTACKS[f.action].limb;
+      const index = LANDMARK[`${side}${limb === "arm" ? "Wrist" : limb === "leg" ? "Ankle" : "Shoulder"}`];
       const from = this.landmarkWorld(geo, f, "idle", 0, index);
       const to = this.landmarkWorld(geo, f, frame.poseId, frame.variant, index);
       const dx = to.x - from.x, dy = to.y - from.y;
@@ -814,7 +808,10 @@ export class FightScene extends Phaser.Scene {
     });
     if (!this.setup.practice) {
       const cue = clockCue(state.round);
-      this.timerText.setText(String(secondsRemaining(state.round))).setColor(cue.red ? "#e8483b" : "#f2c14e").setScale(cue.scale);
+      // setColor redraws the text even when it's unchanged; only call it when the colour flips.
+      const color = cue.red ? "#e8483b" : "#f2c14e";
+      this.timerText.setText(String(secondsRemaining(state.round))).setScale(cue.scale);
+      if (this.timerText.style.color !== color) this.timerText.setColor(color);
     }
   }
 }

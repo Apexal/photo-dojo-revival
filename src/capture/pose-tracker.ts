@@ -1,6 +1,6 @@
 import { PoseLandmarker } from "@mediapipe/tasks-vision";
 import type { NormalizedLandmark } from "../shared/fighter-model";
-import { POSE_MODEL_URL, VISION_FILESET, loadModelBytes, withDelegateFallback, type DownloadProgress } from "./vision-runtime";
+import { POSE_MODEL_URL, VISION_FILESET, loadModelBytes, prefetchWasm, withDelegateFallback, type DownloadProgress } from "./vision-runtime";
 
 /** Live detection throttle; slower phones can't keep up with every video frame. */
 export const LIVE_DETECTION_HZ = 15;
@@ -26,20 +26,20 @@ function toLandmarks(result: { landmarks: { x: number; y: number; visibility?: n
  * Both use the heavy model (see vision-runtime.ts). Landmarks are MediaPipe-normalized (0..1).
  */
 export class PoseTracker {
-  private stillLandmarker: PoseLandmarker | null = null;
   private lastTimestamp = -1;
   private lastDetectionAt = -Infinity;
 
-  private constructor(private readonly videoLandmarker: PoseLandmarker, private readonly model: Uint8Array<ArrayBuffer>) {}
+  private constructor(private readonly videoLandmarker: PoseLandmarker, private readonly stillLandmarker: PoseLandmarker) {}
 
-  /** `onProgress` reports the model download (instant from the model cache on later visits). */
-  static async create(onProgress?: DownloadProgress): Promise<PoseTracker> {
-    const model = await loadModelBytes(POSE_MODEL_URL, onProgress);
+  /**
+   * `onProgress` reports the model download (instant from the model cache on
+   * later visits), `onWasmProgress` the MediaPipe runtime's; both download at once.
+   */
+  static async create(onProgress?: DownloadProgress, onWasmProgress?: DownloadProgress): Promise<PoseTracker> {
+    const [model] = await Promise.all([loadModelBytes(POSE_MODEL_URL, onProgress), prefetchWasm(onWasmProgress)]);
     const [video, still] = await Promise.all([PoseTracker.createLandmarker("VIDEO", model), PoseTracker.createLandmarker("IMAGE", model)]);
-    const tracker = new PoseTracker(video, model);
-    tracker.stillLandmarker = still;
     warmUp(still);
-    return tracker;
+    return new PoseTracker(video, still);
   }
 
   private static createLandmarker(runningMode: "VIDEO" | "IMAGE", model: Uint8Array<ArrayBuffer>): Promise<PoseLandmarker> {
@@ -71,12 +71,11 @@ export class PoseTracker {
 
   /** Landmarks for a still frame. */
   async detectStill(image: ImageInput): Promise<NormalizedLandmark[] | null> {
-    this.stillLandmarker ??= await PoseTracker.createLandmarker("IMAGE", this.model);
     return toLandmarks(this.stillLandmarker.detect(image as HTMLCanvasElement));
   }
 
   close(): void {
     this.videoLandmarker.close();
-    this.stillLandmarker?.close();
+    this.stillLandmarker.close();
   }
 }

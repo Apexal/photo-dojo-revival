@@ -5,6 +5,7 @@ import { loadLibrary, type LibraryEntry } from "../fighter-library";
 import { HostSession } from "../host-session";
 import { GAME_SOUND_IDS, gameSoundKey } from "../game-sounds";
 import { loadOptions } from "../options";
+import { loadFighterRecords } from "../fighter-records";
 import { loadPlayedFighters } from "../played-fighters";
 import { fallbackSoundKey } from "../render/fighter-sprite-view";
 import { GAME_HEIGHT, GAME_WIDTH } from "../render/stage";
@@ -30,6 +31,7 @@ export class BootScene extends Phaser.Scene {
         this.registry.set(REGISTRY.debugHitboxes, (await getSetting("debugHitboxes")) ?? false);
         await loadOptions(this.registry);
         await loadPlayedFighters(this.registry);
+        await loadFighterRecords(this.registry);
       } catch (err) {
         console.error("[boot] IndexedDB unavailable; fighters won't be saved", err);
       }

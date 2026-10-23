@@ -1,10 +1,12 @@
 import Phaser from "phaser";
-import { groundAnchorFor, type AttackId } from "../../shared/frame-data";
+import { groundAnchorFor } from "../../shared/frame-data";
 import { SPRITE_CANVAS_SIZE, type PoseId } from "../../shared/fighter-model";
 import type { InputFrame } from "../../simulation/input-frame";
 import { accuracy, type MatchStats, type PlayerStats } from "../../simulation/match-stats";
 import { FRAMES_PER_SECOND, type RoundOutcome } from "../../simulation/round-rules";
 import { geometryOf, type LibraryEntry } from "../fighter-library";
+import { recordOf, winLoss } from "../fighter-records";
+import { MOVE_NAMES } from "../move-names";
 import { createInputSource, isPlayerInput, type InputDescriptor } from "../input/input-descriptor";
 import type { InputSource } from "../input/input-source";
 import { textureKey } from "../render/fighter-sprite-view";
@@ -28,9 +30,6 @@ export interface MatchResultData {
 /** Long enough that mashing through the KO doesn't skip the page. */
 const INPUT_DELAY_MS = 1200;
 const PLAYER_CSS = ["#e8483b", "#3f86f0"];
-const MOVE_NAMES: Record<AttackId, string> = {
-  punch: "Punch", kick: "Kick", uppercut: "Uppercut", lowKick: "Low kick", jumpKick: "Jump kick", charge: "Shoulder charge", flyingKnee: "Flying knee",
-};
 
 const clock = (frames: number) => {
   const seconds = Math.round(frames / FRAMES_PER_SECOND);
@@ -119,8 +118,13 @@ export class MatchResultScene extends Phaser.Scene {
     if (winner === i) {
       this.add.text(x, feetY + 22, "WINNER", { fontSize: "16px", fontStyle: "bold", color: "#121018", backgroundColor: "#f2c14e", padding: { x: 10, y: 3 } }).setOrigin(0.5, 0);
     }
-    this.add.text(x, feetY + 54, entries[i].fighter.name, { fontSize: "26px", fontStyle: "bold", color: PLAYER_CSS[i], align: "center", wordWrap: { width: 320 } })
+    const name = this.add.text(x, feetY + 54, entries[i].fighter.name, { fontSize: "26px", fontStyle: "bold", color: PLAYER_CSS[i], align: "center", wordWrap: { width: 320 } })
       .setOrigin(0.5, 0);
+    // Their career so far, this match included (the fight scene records it before opening this page).
+    const record = recordOf(this.registry, entries[i].fighter.fighterId);
+    if (record) {
+      this.add.text(x, name.y + name.height + 2, `Career ${winLoss(record)}`, { fontSize: "16px", color: "#a8a196" }).setOrigin(0.5, 0);
+    }
   }
 
   /** P1's numbers | label | P2's numbers; the better of each pair in gold. */

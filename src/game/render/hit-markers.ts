@@ -1,5 +1,10 @@
 import type Phaser from "phaser";
+import type { FightEvent, FightState } from "../../simulation/fight-simulation";
 import { HIT_MARKER_STYLES, hitMarkerShape, markerColors, type HitMarkerKind } from "./hit-feel";
+import { worldToScreen } from "./stage";
+
+/** How high above a thrown fighter's feet the throw marker sits (mid-body). */
+const THROW_MARKER_HEIGHT = 160;
 
 interface Marker { kind: HitMarkerKind; player: 0 | 1; x: number; y: number; start: number; turn: number; dir: 1 | -1 }
 
@@ -16,6 +21,39 @@ export class HitMarkers {
   add(kind: HitMarkerKind, player: 0 | 1, x: number, y: number, frame: number, dir: 1 | -1): void {
     // A fixed tilt per frame: no two bursts look stamped from one mould, and a replay draws the same one.
     this.markers.push({ kind, player, x, y, start: frame, turn: (frame * 0.618) % 1, dir });
+  }
+
+  /**
+   * The marker a fight event leaves, if any: a hit, block or KO where it landed,
+   * a parry where the strike was caught, a throw mid-body, dust where someone fell.
+   */
+  addFor(ev: FightEvent, state: FightState): void {
+    const { fighters } = state;
+    const away = (from: 0 | 1, to: 0 | 1): 1 | -1 => (fighters[to].position.x >= fighters[from].position.x ? 1 : -1);
+    switch (ev.type) {
+      case "hit": {
+        const at = worldToScreen(ev.at);
+        const ko = state.events.some((e) => e.type === "ko" && e.player === ev.defender);
+        this.add(ev.blocked ? "block" : ko ? "ko" : "hit", ev.attacker, at.x, at.y, state.frame, away(ev.attacker, ev.defender));
+        break;
+      }
+      case "parry": {
+        const at = worldToScreen(ev.at);
+        this.add("parry", ev.player, at.x, at.y, state.frame, away(ev.player, ev.attacker));
+        break;
+      }
+      case "throw": {
+        const d = fighters[ev.defender];
+        const at = worldToScreen({ x: d.position.x, y: d.position.y - THROW_MARKER_HEIGHT });
+        this.add("throw", ev.attacker, at.x, at.y, state.frame, away(ev.attacker, ev.defender));
+        break;
+      }
+      case "landed": {
+        const at = worldToScreen(fighters[ev.player].position);
+        this.add("dust", ev.player, at.x, at.y, state.frame, 1);
+        break;
+      }
+    }
   }
 
   render(frame: number): void {

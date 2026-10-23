@@ -5,8 +5,12 @@ import { createCanvas, context2d } from "./sprite-normalizer";
 export type CameraFacing = "environment" | "user";
 
 /** getUserMedia + a video element; grabs full-resolution frames to a canvas. */
+type CameraChoice = { facingMode: CameraFacing; exact?: boolean } | { deviceId: string };
+
 export class CameraSession {
   private stream: MediaStream | null = null;
+  /** The camera last opened, so a restart after stop() comes back to the same one. */
+  private choice: CameraChoice = { facingMode: "environment" };
   readonly video: HTMLVideoElement;
 
   constructor(video?: HTMLVideoElement) {
@@ -33,8 +37,17 @@ export class CameraSession {
     await this.open({ facingMode });
   }
 
-  private async open(choice: { facingMode: CameraFacing; exact?: boolean } | { deviceId: string }): Promise<void> {
+  /** Reopen the camera that was in use before stop() (the front one, if they switched). */
+  async restart(): Promise<void> {
+    const deviceId = this.lastDeviceId;
+    await this.open(deviceId ? { deviceId } : this.choice);
+  }
+
+  private lastDeviceId: string | undefined;
+
+  private async open(choice: CameraChoice): Promise<void> {
     this.stop();
+    this.choice = choice;
     // 1080p: stills get more pixels per limb for the matting; live detection downsizes anyway.
     const size = { width: { ideal: 1920 }, height: { ideal: 1080 } };
     const video: MediaTrackConstraints = "deviceId" in choice
@@ -109,7 +122,9 @@ export class CameraSession {
     const probe = createCanvas(sample.width, sample.height);
     const probeCtx = context2d(probe);
     const scores: number[] = [];
-    let best: HTMLCanvasElement | OffscreenCanvas | null = null;
+    // One full-resolution canvas, redrawn whenever a sharper frame comes along.
+    const best = createCanvas(this.width, this.height);
+    const bestCtx = context2d(best);
     let bestScore = -1;
     for (let i = 0; i < count; i++) {
       if (i > 0) await this.nextFrame();
@@ -118,10 +133,10 @@ export class CameraSession {
       scores.push(score);
       if (score > bestScore) {
         bestScore = score;
-        best = this.grabFrame();
+        bestCtx.drawImage(this.video, 0, 0, this.width, this.height);
       }
     }
-    return { frame: best ?? this.grabFrame(), sharpness: scores };
+    return { frame: best, sharpness: scores };
   }
 
   /** Resolves on the next presented video frame, or after ~one frame's time if none comes (paused video, no rVFC). */
@@ -154,6 +169,7 @@ export class CameraSession {
   }
 
   stop(): void {
+    this.lastDeviceId = this.deviceId ?? this.lastDeviceId;
     this.stream?.getTracks().forEach((t) => t.stop());
     this.stream = null;
     this.video.srcObject = null;

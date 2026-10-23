@@ -122,6 +122,26 @@ The new bonus moves (uppercut, low kick, hit-in-the-face, flex) are picked **at 
 
 ---
 
+### 3.4 Archetypes: one signature move each (implemented)
+
+Everyone sharing one move set kept fights fair but samey. So each fighter picks an **archetype** during capture (`src/shared/archetypes.ts`), just before the one extra pose it needs (the `signature` capture). It adds exactly one move, on the same input for everyone: **down + punch + kick**. Everything else stays the shared core, so the controls, the tutorial and the README still hold for every fighter, and the balance work is four moves, not four move sets.
+
+| Archetype | Move | Frame data | Beats | Loses to |
+|---|---|---|---|---|
+| Brawler | Shoulder Charge (`ATTACKS.charge`) | 14 startup, 10 active, 18 recovery; lunges 300 px over its active frames; mid; 14 dmg; knocks down on hit (`knockdown: "always"`); −16 on block | Backing off and zoning: it reaches ~80 px past a kick's range from a standing start | Blocking (a free punish), a jump, the parry; the 14-frame lean is the tell |
+| Grappler | Bear Hug (`GRABS.bearHug`) | 8 startup, 1 active, 32 recovery; range 110 (the throw's is 40); 20 dmg; held 14 frames and can't be teched | Blocking from outside throw range | Any attack (attacks beat grabs), jumping, stepping back; a whiff is a long time with arms out |
+| Guardian | Parry (`PARRY`) | 3 startup, catches strikes on frames 3–12, 18 recovery; the attacker staggers 24 frames (`parried`), the guardian is free at once | Any strike, every hit level, including the other signatures' strikes | Grabs (a parrying fighter is throwable), waiting it out: 31 frames open on a whiff |
+| Acrobat | Flying Knee (`ATTACKS.flyingKnee`) | 16 startup (a dip, then the knee), 4 active, 14 recovery; lunges 80 px; overhead; 9 dmg; +2 on hit, −4 on block | A crouching guard, without having to jump | Standing block, reacting to the 16-frame startup, any faster attack |
+
+Notes:
+- **Why down + punch + kick.** It was a throw before, and throws hardly ever happen while holding down; neutral or back + punch + kick still throws (or taunts from afar). Punch then kick a frame or two later with down held still counts (the throw leniency, `THROW_LENIENCY_FRAMES`).
+- **The parry isn't a just-frame mechanic.** Its window is 10 frames, about a sixth of a second, and the CPU uses it only when the hit is due inside that window, given its reaction delay. It's a read: guess right and you get a free punish, guess wrong and you're open for half a second.
+- **Fairness still holds per frame.** Signature hitboxes are clamped like every other attack's (3.1), against the archetype's own stick figure. Hurtboxes during the signature pose are clipped to that stick figure's extent too.
+- **No stat leans** (speed, health, damage) for now: the moves need tuning on their own first.
+- **Tests:** `tests/signature-moves.test.ts`; each archetype also plays the whole tutorial in `tests/tutorial.test.ts`.
+
+---
+
 ## 4. Forgiveness for casual hands (cheap, high impact)
 
 Fighting games feel unfair to newcomers mostly because inputs get "eaten". The keyboard taps fix from earlier was one case.
@@ -142,8 +162,8 @@ These are standard in serious fighters, but they'd make Photo Dojo worse for its
 | Special moves with motion inputs (quarter-circles) | Hard on keyboards and for first-timers; the fun is the photos, not execution. |
 | Combos / cancels / juggles | Creates a skill cliff where one player never gets to act. Keep hitstun short enough that a hit doesn't lead to a guaranteed second hit (with the values in 2.1, +3 on hit is far from a combo). |
 | Super meter | One more thing to explain. If anything, a single "big kick" once per round. |
-| Per-character frame data | All fighters share one move set; that *is* the fairness. Personality comes from the photos and voice lines. |
-| Parries / just-frame mechanics | Intimidating; fair only between experts. |
+| Per-character frame data | The shared core stays one move set; that *is* the fairness. Archetypes (3.4) add one signature move each and nothing else. |
+| Just-frame mechanics | Intimidating; fair only between experts. The guardian's parry has a 10-frame window for that reason (3.4). |
 
 **Optional fun that doesn't hurt fairness:**
 - **Taunt** (both buttons while far away): plays the win pose and voice line, with no gameplay effect except leaving the taunter open.

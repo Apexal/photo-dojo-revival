@@ -28,6 +28,8 @@ export interface Settings {
   keyBindings: unknown;
   /** Ids of fighters that have been played; fighter select suggests the tutorial for the rest. */
   playedFighters: string[];
+  /** Career records by fighter id (game/fighter-records.ts). */
+  fighterRecords: Record<string, unknown>;
 }
 
 interface PhotoDojoDB extends DBSchema {

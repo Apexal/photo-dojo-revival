@@ -40,8 +40,21 @@ describe("hit weight", () => {
     expect(Math.abs(hitShake(defender, 10))).toBe(4);
     expect(hitShake(defender, 10)).toBe(-hitShake(defender, 11));
     expect(Math.abs(hitShake({ ...defender, action: "blockstun" }, 10))).toBe(2);
-    expect(hitShake(states[hitAt].fighters[0], 10)).toBe(0); // the attacker freezes still
     expect(hitShake(states[hitAt + HITSTOP_FRAMES].fighters[1], 10)).toBe(0);
+  });
+
+  it("shakes the attacker too on a clean hit (less, out of step), but not on a block; it's only a picture", () => {
+    const states = punchExchange();
+    const hitAt = states.findIndex((s) => s.events.some((e) => e.type === "hit"));
+    const [attacker, defender] = states[hitAt].fighters;
+    expect(Math.abs(hitShake(attacker, 10, defender))).toBe(2);
+    expect(Math.sign(hitShake(attacker, 10, defender))).toBe(-Math.sign(hitShake(defender, 10, attacker)));
+    expect(hitShake(attacker, 10, { ...defender, action: "blockstun" })).toBe(0);
+    expect(hitShake(states[hitAt + HITSTOP_FRAMES].fighters[0], 10, states[hitAt + HITSTOP_FRAMES].fighters[1])).toBe(0);
+    // Positions are untouched: both stand exactly where they stood for the whole freeze.
+    for (let f = 1; f <= HITSTOP_FRAMES; f++) {
+      expect(states[hitAt + f].fighters.map((x) => x.position)).toEqual(states[hitAt].fighters.map((x) => x.position));
+    }
   });
 
   it("markers: the attacker's colour, a symbol per kind, pop out, hold through hitstop, then fade", () => {

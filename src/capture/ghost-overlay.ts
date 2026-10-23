@@ -9,10 +9,13 @@ export interface OverlayState {
   landmarks: NormalizedLandmark[] | null;
   holdProgress: number;
   matching: boolean;
-  /** Bigger text for solo mode (phone propped up across the room). */
+  /** A bigger ring for solo mode (phone propped up across the room). */
   large: boolean;
-  message: string;
 }
+
+const sameState = (a: OverlayState, b: OverlayState) =>
+  a.ghostPath === b.ghostPath && a.landmarks === b.landmarks && a.holdProgress === b.holdProgress && a.matching === b.matching && a.large === b.large
+  && a.ghostFit?.scale === b.ghostFit?.scale && a.ghostFit?.groundX === b.ghostFit?.groundX && a.ghostFit?.groundY === b.ghostFit?.groundY;
 
 /**
  * Draws the target silhouette, the live skeleton and the hold progress ring
@@ -21,6 +24,8 @@ export interface OverlayState {
 export class GhostOverlay {
   private readonly ctx: CanvasRenderingContext2D;
   private pathCache: { source: string; path: Path2D } | null = null;
+  /** What's on the canvas now: drawing is skipped while nothing changes (detection runs slower than video). */
+  private drawn: OverlayState | null = null;
 
   constructor(readonly canvas: HTMLCanvasElement) {
     const ctx = canvas.getContext("2d");
@@ -29,8 +34,10 @@ export class GhostOverlay {
   }
 
   resize(width: number, height: number): void {
-    if (this.canvas.width !== width) this.canvas.width = width;
-    if (this.canvas.height !== height) this.canvas.height = height;
+    if (this.canvas.width === width && this.canvas.height === height) return;
+    this.canvas.width = width;
+    this.canvas.height = height;
+    this.drawn = null; // resizing clears the canvas
   }
 
   private ghost(source: string): Path2D {
@@ -39,6 +46,8 @@ export class GhostOverlay {
   }
 
   draw(state: OverlayState): void {
+    if (this.drawn && sameState(this.drawn, state)) return;
+    this.drawn = state;
     const { ctx, canvas } = this;
     const W = canvas.width;
     const H = canvas.height;
@@ -87,17 +96,6 @@ export class GhostOverlay {
       ctx.beginPath();
       ctx.arc(cx, cy, r, -Math.PI / 2, -Math.PI / 2 + state.holdProgress * Math.PI * 2);
       ctx.stroke();
-    }
-
-    if (state.message) {
-      const size = Math.round(H * (state.large ? 0.075 : 0.045));
-      ctx.font = `700 ${size}px system-ui, sans-serif`;
-      ctx.textAlign = "center";
-      ctx.lineWidth = size / 6;
-      ctx.strokeStyle = "rgba(0,0,0,0.7)";
-      ctx.fillStyle = "#fff";
-      ctx.strokeText(state.message, W / 2, H - size * 0.8);
-      ctx.fillText(state.message, W / 2, H - size * 0.8);
     }
   }
 }

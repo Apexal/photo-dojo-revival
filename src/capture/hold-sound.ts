@@ -13,7 +13,6 @@ export function holdToneFrequency(progress: number, from: number = HOLD_TONE.sta
  * pose breaks, and a ding when the snapshot is taken.
  */
 export class HoldSound {
-  enabled = true;
   private ctx: AudioContext | null = null;
   private active: { stop(at: number): void; gain: GainNode } | null = null;
 
@@ -27,7 +26,7 @@ export class HoldSound {
   /** Begin the sweep; it reaches the top note exactly when the hold completes. */
   start(durationMs: number): void {
     const ctx = this.ctx;
-    if (!this.enabled || !ctx) return;
+    if (!ctx) return;
     this.cancel();
     const now = ctx.currentTime;
     const end = now + durationMs / 1000;
@@ -81,7 +80,7 @@ export class HoldSound {
   complete(): void {
     this.cancel();
     const ctx = this.ctx;
-    if (!this.enabled || !ctx) return;
+    if (!ctx) return;
     const now = ctx.currentTime;
     for (const [freq, delay] of [[1318.5, 0], [1760, 0.07]] as const) {
       const osc = ctx.createOscillator();

@@ -261,9 +261,9 @@ export function parryActiveAt(actionFrame: number): boolean {
 }
 
 /**
- * Knockdown, Street Fighter style: a throw, or an anti-air (uppercut) hit on
- * someone in the air, sends them flying back to the floor (other air hits are
- * plain hits: knockdowns should be an event, not every exchange); they lie there, then get up. All
+ * Knockdown, Street Fighter style: a grab, a shoulder charge, or an anti-air
+ * (uppercut) hit on someone in the air, sends them flying back to the floor (other
+ * hits are plain hits: knockdowns should be an event, not every exchange); they lie there, then get up. All
  * the while they can't be hit or thrown and have no push box (walk over them):
  * no juggles, just a reset to neutral with the attacker free first. The fixed
  * wake-up timing is the guessing game: attack as they rise, or wait.
@@ -445,7 +445,7 @@ export type FighterGeometry = Record<PoseId, PoseGeometry> & {
   archetype: ArchetypeId;
 };
 
-/** Geometry for one displayed frame; unknown variants fall back to the main capture. */
+/** Geometry for one displayed frame. Versions that aren't captures (the handshake's pumping hand) use the main capture's. */
 export function frameGeometry(geometry: FighterGeometry, poseId: PoseId, variant = 0): PoseGeometry {
   return (variant > 0 && geometry.variants?.[poseId]?.[variant - 1]) || geometry[poseId];
 }

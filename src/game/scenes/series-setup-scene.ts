@@ -1,13 +1,13 @@
 import Phaser from "phaser";
 import type { InputFrame } from "../../simulation/input-frame";
 import type { LibraryEntry } from "../fighter-library";
-import { gameSoundKey, type GameSoundId } from "../game-sounds";
+import { playGameSound } from "../game-sounds";
 import { createInputSource, type PlayerInputDescriptor } from "../input/input-descriptor";
 import type { InputSource } from "../input/input-source";
 import { KEY } from "../input/key-bindings";
 import { KingOfTheHill } from "../king-of-the-hill";
 import { playMenuMusic } from "../menu-music";
-import { getOptions } from "../options";
+
 import { GAME_HEIGHT, GAME_WIDTH } from "../render/stage";
 import { MAX_ENTRANTS, MIN_ENTRANTS, SERIES_INFO, SERIES_KINDS, type SeriesKind, type SeriesSession } from "../series";
 import { Tournament } from "../tournament";
@@ -180,7 +180,7 @@ export class SeriesSetupScene extends Phaser.Scene {
   private switchKind(dir: 1 | -1): void {
     const i = SERIES_KINDS.indexOf(this.kind);
     this.kind = lastKind = SERIES_KINDS[(i + dir + SERIES_KINDS.length) % SERIES_KINDS.length];
-    this.playEffect("tick", 0.3);
+    playGameSound(this, "tick", 0.3);
     this.draw();
   }
 
@@ -189,10 +189,10 @@ export class SeriesSetupScene extends Phaser.Scene {
     const at = this.picked.indexOf(this.cursor);
     if (at >= 0) {
       this.picked.splice(at, 1);
-      this.playEffect("block", 0.4);
+      playGameSound(this, "block", 0.4);
     } else if (this.picked.length < MAX_ENTRANTS) {
       this.picked.push(this.cursor);
-      this.playEffect("hit", 0.6);
+      playGameSound(this, "hit", 0.6);
     }
     this.draw();
   }
@@ -200,7 +200,7 @@ export class SeriesSetupScene extends Phaser.Scene {
   private begin(): void {
     if (this.leaving || this.picked.length < MIN_ENTRANTS) return;
     this.leaving = true;
-    this.playEffect("hit", 0.6);
+    playGameSound(this, "hit", 0.6);
     const picked = this.picked.map((i) => this.library[i]);
     const { inputs } = this.setup;
     const session: SeriesSession = this.kind === "tournament"
@@ -226,7 +226,7 @@ export class SeriesSetupScene extends Phaser.Scene {
     }
     if (c === this.cursor) return;
     this.cursor = c;
-    this.playEffect("tick", 0.3);
+    playGameSound(this, "tick", 0.3);
     this.draw();
   }
 
@@ -245,16 +245,11 @@ export class SeriesSetupScene extends Phaser.Scene {
       if (pressed("punch")) this.toggle();
       else if (pressed("kick")) {
         this.leaving = true;
-        this.playEffect("block", 0.4);
+        playGameSound(this, "block", 0.4);
         this.scene.start("character-select");
       }
     });
     if (start) this.begin();
   }
 
-  /** Menu sounds: the "Game volume" setting. */
-  private playEffect(id: GameSoundId, volume: number): void {
-    const v = volume * getOptions(this.registry).gameVolume;
-    if (v > 0 && this.cache.audio.exists(gameSoundKey(id))) this.sound.play(gameSoundKey(id), { volume: v });
-  }
 }

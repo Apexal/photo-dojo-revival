@@ -22,10 +22,6 @@ export class VoicePrompts {
     u.volume = 0;
     this.synth.speak(u);
   }
-
-  cancel(): void {
-    this.synth?.cancel();
-  }
 }
 
 export function vibrate(pattern: number | number[] = 60): void {

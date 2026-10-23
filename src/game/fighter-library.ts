@@ -17,7 +17,7 @@ interface PlaceholderJson {
   archetype: ArchetypeId;
   thumbnail: string;
   poses: Record<PoseId, PlaceholderPose>;
-  variants?: Partial<Record<PoseId, PlaceholderPose[]>>;
+  variants: Partial<Record<PoseId, PlaceholderPose[]>>;
 }
 
 interface PlaceholderPose { file: string; anchorPoint: { x: number; y: number }; landmarks: CapturedPose["landmarks"]; attackSide?: "left" | "right" }
@@ -45,7 +45,7 @@ export async function loadPlaceholderFighter(id: string, base = import.meta.env.
   const entries = await Promise.all(POSE_IDS.map(async (poseId): Promise<[PoseId, CapturedPose]> => [poseId, await load(poseId, json.poses[poseId])]));
   const poseVariants = Object.fromEntries(
     await Promise.all(
-      Object.entries(json.variants ?? {}).map(async ([poseId, list]) => [poseId, await Promise.all((list ?? []).map((p) => load(poseId as PoseId, p)))]),
+      Object.entries(json.variants).map(async ([poseId, list]) => [poseId, await Promise.all(list!.map((p) => load(poseId as PoseId, p)))]),
     ),
   ) as Partial<Record<PoseId, CapturedPose[]>>;
   return {
@@ -84,7 +84,7 @@ export function geometryOf(fighter: Fighter): FighterGeometry {
   const of = (p: CapturedPose): PoseGeometry => ({ landmarks: p.landmarks, anchorPoint: p.anchorPoint, ...(p.attackSide ? { attackSide: p.attackSide } : {}) });
   const poses = Object.fromEntries(POSE_IDS.map((poseId) => [poseId, of(fighter.poses[poseId])])) as Record<PoseId, PoseGeometry>;
   const variants = Object.fromEntries(
-    Object.entries(fighter.poseVariants ?? {}).map(([poseId, list]) => [poseId, (list ?? []).map(of)]),
+    Object.entries(fighter.poseVariants).map(([poseId, list]) => [poseId, list!.map(of)]),
   ) as Partial<Record<PoseId, PoseGeometry[]>>;
   return { ...poses, variants, archetype: fighter.archetype };
 }

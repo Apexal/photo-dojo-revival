@@ -1,9 +1,9 @@
 import Phaser from "phaser";
 import type { InputFrame } from "../../simulation/input-frame";
-import { gameSoundKey, type GameSoundId } from "../game-sounds";
+import { playGameSound } from "../game-sounds";
 import { createInputSource, isPlayerInput } from "../input/input-descriptor";
 import type { InputSource } from "../input/input-source";
-import { getOptions } from "../options";
+
 import { GAME_HEIGHT, GAME_WIDTH } from "../render/stage";
 import { STAGES, randomStage, stageFor } from "../stages/stages";
 import { playStageMusic, preloadStage, stopStageMusic } from "../stages/stage-music";
@@ -118,7 +118,7 @@ export class StageSelectScene extends Phaser.Scene {
 
   private move(dir: number): void {
     this.index = (this.index + dir + this.options.length) % this.options.length;
-    this.playEffect("tick", 0.3);
+    playGameSound(this, "tick", 0.3);
     this.show();
   }
 
@@ -157,19 +157,14 @@ export class StageSelectScene extends Phaser.Scene {
     this.leaving = true;
     const choice = this.options[this.index];
     this.registry.set(REGISTRY.lastStage, choice);
-    this.playEffect("hit", 0.6);
+    playGameSound(this, "hit", 0.6);
     startWithStage(this, { ...this.setup, stageId: choice === RANDOM ? randomStage().id : choice });
   }
 
   private back(): void {
     this.leaving = true;
-    this.playEffect("block", 0.4);
+    playGameSound(this, "block", 0.4);
     this.scene.start(menuSceneFor(this.setup));
   }
 
-  /** Menu sounds: the "Game volume" setting. */
-  private playEffect(id: GameSoundId, volume: number): void {
-    const v = volume * getOptions(this.registry).gameVolume;
-    if (v > 0 && this.cache.audio.exists(gameSoundKey(id))) this.sound.play(gameSoundKey(id), { volume: v });
-  }
 }

@@ -5,7 +5,7 @@ import { frameOf } from "../../simulation/fight-simulation";
 import { GRAVITY, JUMP_IMPULSE, createFighterState, isAttack } from "../../simulation/fighter-state-machine";
 import type { InputFrame } from "../../simulation/input-frame";
 import { geometryOf } from "../fighter-library";
-import { controlLabels, deviceName, moveGuide } from "../input/control-labels";
+import { GRAB_TIPS, GUARD_TIPS, controlLabels, deviceName, moveGuide } from "../input/control-labels";
 import { createInputSource, isPlayerInput, type PlayerInputDescriptor } from "../input/input-descriptor";
 import type { InputSource } from "../input/input-source";
 import { fighterTextureKeys, preloadFighterTextures, textureKey } from "../render/fighter-sprite-view";
@@ -91,12 +91,8 @@ export class ControlsScene extends Phaser.Scene {
     this.add.text(GAME_WIDTH / 2, 22, "HOW TO FIGHT", { fontSize: "40px", fontStyle: "bold", color: "#f2c14e" }).setOrigin(0.5, 0);
     this.add.rectangle(GAME_WIDTH / 2, 90, 2, GAME_HEIGHT - 150, 0x3a3346).setOrigin(0.5, 0);
     [0, 1].forEach((p) => this.buildHalf(p));
-    this.add.text(GAME_WIDTH / 2, GAME_HEIGHT - 58, "Down: crouch (punches whiff over you).  Jump kick, flying knee: block standing.  Low kick: block crouching.  Punch + kick far away = taunt.", {
-      fontSize: "16px", color: "#c9c3b8",
-    }).setOrigin(0.5);
-    this.add.text(GAME_WIDTH / 2, GAME_HEIGHT - 32, "Previews in slow motion.   Grabbed? Press punch + kick to break free.   Pause: Esc / Start", {
-      fontSize: "17px", color: "#a8a196",
-    }).setOrigin(0.5);
+    this.add.text(GAME_WIDTH / 2, GAME_HEIGHT - 58, `${GUARD_TIPS}  Pause: Esc / Start`, { fontSize: "16px", color: "#c9c3b8" }).setOrigin(0.5);
+    this.add.text(GAME_WIDTH / 2, GAME_HEIGHT - 32, `Previews in slow motion.  ${GRAB_TIPS}`, { fontSize: "16px", color: "#a8a196" }).setOrigin(0.5);
     this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => {
       this.setup.entries.forEach((e, i) => fighterTextureKeys(e.fighter, PREFIXES[i]).forEach((k) => this.textures.exists(k) && this.textures.remove(k)));
       this.objectUrls.forEach((u) => URL.revokeObjectURL(u));
@@ -171,7 +167,7 @@ export class ControlsScene extends Phaser.Scene {
     const state = { ...createFighterState(0, card.player === 0 ? 1 : -1, 100), action: playing ? card.action : "idle", actionFrame: playing ? t : 0 } as const;
     const { poseId, variant } = frameOf(state);
     const prefix = PREFIXES[card.player];
-    const key = this.textures.exists(textureKey(prefix, poseId, variant)) ? textureKey(prefix, poseId, variant) : textureKey(prefix, poseId);
+    const key = textureKey(prefix, poseId, variant);
     if (card.sprite.texture.key !== key) card.sprite.setTexture(key);
     const anchor = groundAnchorFor(this.geometry[card.player], poseId, variant);
     card.sprite.setOrigin(anchor.x / SPRITE_CANVAS_SIZE, anchor.y / SPRITE_CANVAS_SIZE);

@@ -5,6 +5,10 @@ compatibility_date = "2025-09-01"
 # Optional TURN for phones on cellular: set these with `wrangler secret put`.
 #   TURN_KEY_ID, TURN_KEY_API_TOKEN  (Cloudflare Realtime TURN key)
 # Without them /turn-credentials returns 404 and clients use STUN only.
+# With TURN on, also set ALLOWED_ORIGINS (the site's origins, comma-separated, e.g.
+# "https://photo-dojo.pages.dev") so other sites can't mint credentials on your account:
+# [vars]
+# ALLOWED_ORIGINS = "https://photo-dojo.pages.dev"
 
 [[durable_objects.bindings]]
 name = "SIGNALING_ROOM"

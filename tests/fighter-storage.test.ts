@@ -79,3 +79,73 @@ describe("played fighters", () => {
     expect(hasPlayed(b, "x")).toBe(false);
   });
 });
+
+import { addMatch, emptyRecord, favoriteMoveOf, forgetFighterRecord, headToHead, loadFighterRecords, parseRecord, recordMatch, recordOf, winLoss } from "../src/game/fighter-records";
+import type { PlayerStats } from "../src/simulation/match-stats";
+
+describe("fighter records", () => {
+  const registry = () => {
+    const data = new Map<string, unknown>();
+    return { get: (k: string) => data.get(k), set: (k: string, v: unknown) => data.set(k, v) } as unknown as Phaser.Data.DataManager;
+  };
+  const stats = (over: Partial<PlayerStats> = {}): PlayerStats => ({
+    roundsWon: 0, perfectRounds: 0, damageDealt: 0, attacks: 0, hits: 0, blockedByOpponent: 0, blocks: 0,
+    throws: 0, throwTechs: 0, knockdowns: 0, taunts: 0, longestCombo: 0, favoriteMove: null, movesLanded: {}, ...over,
+  });
+
+  it("adds a match up: result from the fighter's side, totals summed, best combo kept", () => {
+    let r = addMatch(emptyRecord(), stats({ roundsWon: 2, damageDealt: 150, hits: 9, attacks: 12, longestCombo: 4 }), 0, 0);
+    r = addMatch(r, stats({ roundsWon: 1, damageDealt: 80, hits: 3, attacks: 10, longestCombo: 2 }), 1, 0);
+    r = addMatch(r, stats({ longestCombo: 5 }), 1, "draw");
+    expect(r).toMatchObject({ matches: 3, wins: 1, losses: 1, draws: 1, roundsWon: 3, damageDealt: 230, hits: 12, attacks: 22, longestCombo: 5 });
+    expect(winLoss(r)).toBe("1W 1L 1D");
+    expect(winLoss({ ...r, draws: 0 })).toBe("1W 1L");
+  });
+
+  it("sums clean hits by move into a career favorite", () => {
+    let r = addMatch(emptyRecord(), stats({ movesLanded: { punch: 3, kick: 1 } }), 0, 0);
+    expect(favoriteMoveOf(r)).toBe("punch");
+    r = addMatch(r, stats({ movesLanded: { kick: 4 } }), 0, 0);
+    expect(r.movesLanded).toEqual({ punch: 3, kick: 5 });
+    expect(favoriteMoveOf(r)).toBe("kick");
+    expect(favoriteMoveOf(emptyRecord())).toBeNull();
+  });
+
+  it("reads malformed saves as zeros", () => {
+    expect(parseRecord("junk")).toEqual(emptyRecord());
+    expect(parseRecord({ wins: 3, losses: -1, draws: "2", hits: NaN })).toEqual({ ...emptyRecord(), wins: 3 });
+    expect(parseRecord({ movesLanded: { punch: 2, fireball: 9, kick: "x" }, versus: { y: { wins: 1, losses: "?" }, z: 5 } }))
+      .toEqual({ ...emptyRecord(), movesLanded: { punch: 2 }, versus: { y: { wins: 1, losses: 0, draws: 0 } } });
+  });
+
+  it("records both sides (a mirror match twice), persists, and forgets deleted fighters", async () => {
+    const a = registry();
+    await loadFighterRecords(a);
+    expect(recordOf(a, "x")).toBeNull();
+    recordMatch(a, ["x", "y"], [stats({ roundsWon: 2 }), stats()], 0);
+    recordMatch(a, ["x", "x"], [stats(), stats({ roundsWon: 2 })], 1);
+    expect(recordOf(a, "x")).toMatchObject({ matches: 3, wins: 2, losses: 1, roundsWon: 4 });
+    expect(recordOf(a, "y")).toMatchObject({ matches: 1, wins: 0, losses: 1 });
+    // The rivalry, from each side; a mirror match isn't one.
+    recordMatch(a, ["y", "x"], [stats(), stats()], "draw");
+    expect(headToHead(a, "x", "y")).toEqual({ wins: 1, losses: 0, draws: 1 });
+    expect(headToHead(a, "y", "x")).toEqual({ wins: 0, losses: 1, draws: 1 });
+    expect(headToHead(a, "x", "x")).toBeNull();
+    expect(recordOf(a, "x")!.versus).not.toHaveProperty("x");
+    await new Promise((r) => setTimeout(r, 20)); // the save is fire-and-forget
+    const b = registry();
+    await loadFighterRecords(b);
+    expect(recordOf(b, "x")).toEqual(recordOf(a, "x"));
+    forgetFighterRecord(b, "x");
+    expect(recordOf(b, "x")).toBeNull();
+    await new Promise((r) => setTimeout(r, 20));
+    await loadFighterRecords(a);
+    expect(recordOf(a, "x")).toBeNull();
+    expect(recordOf(a, "y")).not.toBeNull();
+    expect(recordOf(a, "y")!.versus).toEqual({}); // x's gone from y's rivals too
+
+    await setSetting("fighterRecords", ["nonsense"] as unknown as Record<string, unknown>);
+    await loadFighterRecords(a);
+    expect(recordOf(a, "y")).toBeNull();
+  });
+});

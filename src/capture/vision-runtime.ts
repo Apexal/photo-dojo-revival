@@ -13,7 +13,7 @@ export const VISION_FILESET: WasmFileset = { wasmLoaderPath, wasmBinaryPath };
  * and plays, so it's worth the download and the slower live frame rate.
  */
 export const POSE_MODEL_URL =
-  import.meta.env.VITE_POSE_MODEL_URL ??
+  import.meta.env.VITE_POSE_MODEL_URL ||
   "https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_heavy/float16/1/pose_landmarker_heavy.task";
 
 /**
@@ -22,7 +22,8 @@ export const POSE_MODEL_URL =
  * segmenters, and a plain CNN, so it runs on both WebGPU and WASM. Built by
  * scripts/build-matting-model.py; the dev server serves it from models/.
  */
-export const MATTING_MODEL_URL = import.meta.env.VITE_MATTING_MODEL_URL ?? "/models/isnet-general-use-webgpu.onnx";
+// `||`: CI passes unset repository variables through as empty strings.
+export const MATTING_MODEL_URL = import.meta.env.VITE_MATTING_MODEL_URL || "/models/isnet-general-use-webgpu.onnx";
 
 /** Keep in step with the onnxruntime-web version in package.json (a test checks). */
 export const ORT_VERSION = "1.30.0";

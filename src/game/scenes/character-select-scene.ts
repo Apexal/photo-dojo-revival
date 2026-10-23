@@ -8,7 +8,7 @@ import { frameGeometry, groundAnchorFor } from "../../shared/frame-data";
 import { deleteFighter, getSetting, isStoragePersisted, saveFighter, setSetting } from "../../shared/fighter-storage";
 import type { InputFrame } from "../../simulation/input-frame";
 import { geometryOf, type LibraryEntry } from "../fighter-library";
-import { gameSoundKey, type GameSoundId } from "../game-sounds";
+import { playGameSound } from "../game-sounds";
 import { HostSession, type HostStatus } from "../host-session";
 import { PAD_BUTTON } from "../input/gamepad-input-source";
 import { createInputSource, describeInput, sameInput, type PlayerInputDescriptor } from "../input/input-descriptor";
@@ -16,6 +16,8 @@ import type { InputSource } from "../input/input-source";
 import { KeyboardInputSource } from "../input/keyboard-input-source";
 import { KEY, actionKeyLabel } from "../input/key-bindings";
 import { JOIN_RUMBLE } from "../input/rumble";
+import { forgetFighterRecord, headToHead, recordOf, winLoss } from "../fighter-records";
+import type { FighterStatsSceneData } from "./fighter-stats-scene";
 import { hasPlayed } from "../played-fighters";
 import { getOptions } from "../options";
 import { loadFighterSounds } from "../render/fighter-sprite-view";
@@ -79,6 +81,8 @@ interface Preview {
   facing: 1 | -1;
   fighter: PosePreview | null;
   title: Phaser.GameObjects.Text;
+  /** The fighter's career (fighter-records.ts), above the name; blank before their first match. */
+  record: Phaser.GameObjects.Text;
   name: Phaser.GameObjects.Text;
   /** The archetype and its signature move, under the name. */
   style: Phaser.GameObjects.Text;
@@ -130,6 +134,8 @@ export class CharacterSelectScene extends Phaser.Scene {
   /** "P1" / "P2" on the corner of each player's cursor. */
   private cursorTags: Phaser.GameObjects.Text[] = [];
   private previews: Preview[] = [];
+  /** The two picks' head-to-head, between the panels. */
+  private rivalry!: { container: Phaser.GameObjects.Container; bg: Phaser.GameObjects.Rectangle; label: Phaser.GameObjects.Text; left: Phaser.GameObjects.Text; right: Phaser.GameObjects.Text };
   /** Grid page on screen: the one the last moved cursor is on. */
   private page = 0;
   private pageText!: Phaser.GameObjects.Text;
@@ -217,6 +223,7 @@ export class CharacterSelectScene extends Phaser.Scene {
     this.introduce([this.cursors, ...this.cursorTags], INTRO_SETTLED_MS);
     this.buildPager();
     this.previews = [0, 1].map((i) => this.buildPreview(i));
+    this.buildRivalry();
     this.noticeText = this.add.text(0, 0, "", { fontSize: "13px", color: "#a8a196" });
     this.introduce([this.noticeText], INTRO_SETTLED_MS);
     this.updateHostLayout();
@@ -306,7 +313,12 @@ export class CharacterSelectScene extends Phaser.Scene {
 
   // --- library grid ---------------------------------------------------------
 
-  private thumbKey = (f: Fighter) => `thumb:${f.fighterId}`;
+  /**
+   * Image keys carry the fighter's createdAt as well as its id: the same fighter
+   * sent or imported again with new photos gets new textures, an identical copy reuses them.
+   */
+  private imageId = (f: Fighter) => `${f.fighterId}@${f.createdAt}`;
+  private thumbKey = (f: Fighter) => `thumb:${this.imageId(f)}`;
 
   private refreshGrid(): void {
     const missing = this.library.filter((e) => !this.textures.exists(this.thumbKey(e.fighter)));
@@ -356,7 +368,7 @@ export class CharacterSelectScene extends Phaser.Scene {
       arrow.on("pointerover", () => arrow.setColor("#f2c14e"));
       arrow.on("pointerout", () => arrow.setColor("#c9c3b8"));
       arrow.on("pointerdown", () => {
-        this.playEffect("tick", 0.3);
+        playGameSound(this, "tick", 0.3);
         this.showPage((this.page + dir + this.pageCount) % this.pageCount);
       });
       return arrow;
@@ -455,7 +467,7 @@ export class CharacterSelectScene extends Phaser.Scene {
     const chooser = this.players[i];
     if (chooser) {
       if (chooser.cursor === index && this.selected === index) this.setReady(i, true);
-      else if (chooser.cursor !== index) this.playEffect("tick", 0.3);
+      else if (chooser.cursor !== index) playGameSound(this, "tick", 0.3);
       chooser.cursor = index;
       this.updatePreviews();
     }
@@ -479,7 +491,7 @@ export class CharacterSelectScene extends Phaser.Scene {
   }
 
   /** Win pose (variant 0) or flex (variant 1, the win-2 capture). */
-  private winKey = (f: Fighter, variant: 0 | 1) => `win${variant ? "#1" : ""}:${f.fighterId}`;
+  private winKey = (f: Fighter, variant: 0 | 1) => `win${variant ? "#1" : ""}:${this.imageId(f)}`;
 
   /**
    * The fighter under each cursor replaces the tile's thumbnail (same scale, P2
@@ -519,11 +531,11 @@ export class CharacterSelectScene extends Phaser.Scene {
     this.drawPreviewSprites();
   }
 
-  /** Both at once: a hovered fighter is usually picked next. Older fighters without a flex flex with their win pose. */
+  /** Both at once: a hovered fighter is usually picked next. */
   private loadWinPoses(fighter: Fighter): void {
     const blobs: [string, Blob][] = [
       [this.winKey(fighter, 0), fighter.poses.win.imageBlob],
-      [this.winKey(fighter, 1), fighter.poseVariants.win?.[0]?.imageBlob ?? fighter.poses.win.imageBlob],
+      [this.winKey(fighter, 1), fighter.poseVariants.win![0].imageBlob],
     ];
     let queued = false;
     for (const [key, blob] of blobs) {
@@ -543,25 +555,34 @@ export class CharacterSelectScene extends Phaser.Scene {
 
   /** The boot scene already added it to the registry library. */
   private onFighterReceived(fighter: Fighter): void {
-    this.voices.delete(fighter.fighterId);
+    const replacing = this.library.some((e) => e.fighter.fighterId === fighter.fighterId);
     this.library = this.registry.get(REGISTRY.library) ?? this.library;
-    this.afterLibraryGrew(fighter);
+    if (replacing) this.afterFighterReplaced(fighter);
+    else this.afterLibraryGrew(fighter);
   }
 
   private addFighter(fighter: Fighter): void {
-    this.voices.delete(fighter.fighterId);
     const replacing = this.library.some((e) => e.fighter.fighterId === fighter.fighterId);
     this.library = [{ fighter, builtIn: false }, ...this.library.filter((e) => e.fighter.fighterId !== fighter.fighterId)];
-    if (replacing) {
-      this.registry.set(REGISTRY.library, this.library);
-      this.refreshGrid();
-      return this.setToolbarStatus(`Updated ${fighter.name}`);
-    }
     this.registry.set(REGISTRY.library, this.library);
-    this.afterLibraryGrew(fighter);
+    if (replacing) this.afterFighterReplaced(fighter);
+    else this.afterLibraryGrew(fighter);
+  }
+
+  /**
+   * The same fighter again (sent or imported a second time): the cursors stay
+   * where they were (the library didn't grow), and its voice is reloaded (images
+   * are keyed by createdAt, so new photos get new textures).
+   */
+  private afterFighterReplaced(fighter: Fighter): void {
+    this.voices.delete(fighter.fighterId);
+    this.refreshGrid();
+    this.updatePreviews();
+    this.setToolbarStatus(`Updated ${fighter.name}`);
   }
 
   private afterLibraryGrew(fighter: Fighter): void {
+    this.voices.delete(fighter.fighterId);
     // Keep cursors on the same fighters.
     for (const p of this.players) if (p) p.cursor = Math.min(this.library.length - 1, p.cursor + 1);
     if (this.selected !== null) this.selected = Math.min(this.library.length - 1, this.selected + 1);
@@ -593,7 +614,7 @@ export class CharacterSelectScene extends Phaser.Scene {
     this.players[slot] = { input, source, cursor, ready: false, previous: source.read(), fresh: true };
     // "That's you": a pad buzzes when it joins.
     if (getOptions(this.registry).rumble) source.rumble?.(JOIN_RUMBLE);
-    this.playEffect("tick", 0.6);
+    playGameSound(this, "tick", 0.6);
     this.showPage(Math.floor(cursor / this.pageSize));
     this.updatePreviews();
     this.drawCursors();
@@ -604,7 +625,7 @@ export class CharacterSelectScene extends Phaser.Scene {
     const p = this.players[i];
     if (!p || p.ready === ready) return;
     p.ready = ready;
-    if (!quiet) this.playEffect(ready ? "hit" : "block", ready ? 0.6 : 0.4);
+    if (!quiet) playGameSound(this, ready ? "hit" : "block", ready ? 0.6 : 0.4);
     this.stopVoice(i);
     const entry = this.library[p.cursor];
     if (ready && entry) void this.playWinLine(i, entry.fighter);
@@ -648,12 +669,6 @@ export class CharacterSelectScene extends Phaser.Scene {
     this.tweens.add({ targets: line, volume: 0, duration: VOICE_FADE_MS, onComplete: () => { line.stop(); line.destroy(); } });
   }
 
-  /** Menu sounds: the "Game volume" setting. */
-  private playEffect(id: GameSoundId, volume: number): void {
-    const v = volume * getOptions(this.registry).gameVolume;
-    if (v > 0 && this.cache.audio.exists(gameSoundKey(id))) this.sound.play(gameSoundKey(id), { volume: v });
-  }
-
   private stopVoice(i: number): void {
     const line = this.voiceLines[i];
     this.voiceLines[i] = null;
@@ -676,6 +691,7 @@ export class CharacterSelectScene extends Phaser.Scene {
       facing: right ? -1 : 1,
       fighter: null,
       title: text(PANEL_Y + 14, { fontSize: "34px", fontStyle: "bold", color: PLAYER_CSS[i] }).setText(`P${i + 1}`),
+      record: text(PANEL_Y + 16, { fontSize: "15px", color: "#a8a196", lineSpacing: 3 }),
       name: text(PANEL_Y + 60, { fontSize: "26px", fontStyle: "bold", color: "#f3efe6" }),
       style: text(PANEL_Y + 94, { fontSize: "16px", color: "#c9c3b8" }),
       status: text(PANEL_Y + 136, { fontSize: "17px", color: PLAYER_CSS[i], lineSpacing: 4 }),
@@ -685,8 +701,9 @@ export class CharacterSelectScene extends Phaser.Scene {
       join: this.add.text(x + PANEL_W / 2, PANEL_Y + PANEL_H / 2 + 20, "", { fontSize: "20px", color: PLAYER_CSS[i], align: "center", lineSpacing: 8 }).setOrigin(0.5),
     };
     preview.title.setPosition(right ? x + PANEL_W - 20 : x + 20, PANEL_Y + 14).setOrigin(right ? 1 : 0, 0);
+    preview.record.setInteractive({ useHandCursor: true }).on("pointerdown", () => this.openStats(i));
     // One container so the intro moves the panel as a whole; above the VS dimmer.
-    const panel = this.add.container(0, 0, [preview.frame, preview.title, preview.name, preview.style, preview.status, preview.tip, preview.device, preview.join]).setDepth(PREVIEW_DEPTH);
+    const panel = this.add.container(0, 0, [preview.frame, preview.title, preview.record, preview.name, preview.style, preview.status, preview.tip, preview.device, preview.join]).setDepth(PREVIEW_DEPTH);
     this.introduce([panel], INTRO_PANELS_MS + i * 80, { y: 120 });
     return preview;
   }
@@ -699,8 +716,11 @@ export class CharacterSelectScene extends Phaser.Scene {
       v.frame.setStrokeStyle(p?.ready ? 4 : 2, p ? PLAYER_COLORS[i] : 0x3a3346, p ? 1 : 0.6);
       v.title.setAlpha(p ? 1 : 0.5);
       v.name.setText(entry ? entry.fighter.name : "");
-      const archetype = entry && ARCHETYPES[entry.fighter.archetype];
-      v.style.setText(archetype ? `${archetype.name} · ${archetype.moveName}` : "").setY(PANEL_Y + 62 + v.name.height);
+      const record = entry && recordOf(this.registry, entry.fighter.fighterId);
+      // Ready: down is free (it moves the cursor before), so it opens the career page.
+      v.record.setText(record ? `${winLoss(record)}\n${p.ready ? "down: stats ▸" : `best combo ${record.longestCombo}`}` : "");
+      // The signature move only: "Brawler · Shoulder Charge" wraps in the panel's text column.
+      v.style.setText(entry ? ARCHETYPES[entry.fighter.archetype].moveName : "").setY(PANEL_Y + 62 + v.name.height);
       v.join.setText(p ? "" : `Press any button to join\n(gamepad, ${actionKeyLabel("p1", "punch")}, or ${actionKeyLabel("p2", "punch")})`);
       // The tutorial is one player's: suggest it to anyone alone, and push it for a fighter's first fight.
       const fresh = !!entry && !hasPlayed(this.registry, entry.fighter.fighterId);
@@ -718,10 +738,52 @@ export class CharacterSelectScene extends Phaser.Scene {
         : "READY!\nkick: change",
       ).setY(v.tip.y + (v.tip.text ? v.tip.height + 10 : 0));
       v.device.setText(p ? describeInput(p.input) : "");
+      
       // Have the victory line ready by the time they pick.
       if (entry) void this.fighterVoices(entry.fighter);
     });
+    this.updateRivalry();
     this.drawPreviewSprites();
+  }
+
+  /** Between the panels, once both players are on different fighters: their head-to-head, or a first meeting. */
+  private updateRivalry(): void {
+    const [a, b] = this.players.map((p) => p && this.library[p.cursor]?.fighter.fighterId);
+    const r = this.rivalry;
+    if (!a || !b || a === b) return void r.container.setVisible(false);
+    const tally = headToHead(this.registry, a, b);
+    r.container.setVisible(true);
+    r.left.setText(tally ? String(tally.wins) : "");
+    r.right.setText(tally ? String(tally.losses) : "");
+    r.label.setText(!tally ? "FIRST MEETING" : tally.draws ? `RIVALRY · ${tally.draws} DRAW${tally.draws > 1 ? "S" : ""}` : "RIVALRY");
+    const w = r.label.width + (tally ? 100 : 36);
+    r.bg.setSize(w, 36).setOrigin(0.5);
+    r.left.setX(-w / 2 + 22);
+    r.right.setX(w / 2 - 22);
+  }
+
+  private buildRivalry(): void {
+    const x = GRID_X + PANEL_W + 10; // the gap between the two panels
+    const bg = this.add.rectangle(0, 0, 200, 36, 0x121018).setStrokeStyle(2, 0x3a3346);
+    const label = this.add.text(0, 0, "", { fontSize: "15px", fontStyle: "bold", color: "#c9c3b8" }).setOrigin(0.5);
+    const left = this.add.text(0, 0, "", { fontSize: "24px", fontStyle: "bold", color: PLAYER_CSS[0] }).setOrigin(0.5);
+    const right = this.add.text(0, 0, "", { fontSize: "24px", fontStyle: "bold", color: PLAYER_CSS[1] }).setOrigin(0.5);
+    // Straddles the panels' top edge; above the VS dimmer, so the stakes show during the countdown.
+    const container = this.add.container(x, PANEL_Y, [bg, label, left, right]).setDepth(PREVIEW_DEPTH + 1).setVisible(false);
+    this.rivalry = { container, bg, label, left, right };
+    this.introduce([container], INTRO_PANELS_MS + 80, { y: 120 });
+  }
+
+  /** A player's fighter's career page (fighter-stats-scene.ts), over this scene. */
+  private openStats(i: number): void {
+    const p = this.players[i];
+    const entry = p && this.library[p.cursor];
+    if (!entry || !recordOf(this.registry, entry.fighter.fighterId) || this.vs) return;
+    const winKey = this.winKey(entry.fighter, 0);
+    this.scene.pause();
+    this.scene.launch("fighter-stats", {
+      fighterId: entry.fighter.fighterId, texture: this.textures.exists(winKey) ? winKey : null, returnTo: "character-select",
+    } satisfies FighterStatsSceneData);
   }
 
   /**
@@ -741,16 +803,16 @@ export class CharacterSelectScene extends Phaser.Scene {
         return;
       }
       const pose: PreviewPose = p.ready ? "win" : "flex";
-      if (v.fighter?.fighterId === entry.fighter.fighterId) return v.fighter.setPose(pose, this.time.now);
+      if (v.fighter?.id === this.imageId(entry.fighter)) return v.fighter.setPose(pose, this.time.now);
       v.fighter?.destroy();
       const geometry = geometryOf(entry.fighter);
-      // Flex is the win-2 capture; fighters without one flex with their win pose.
+      // Flex is the win-2 capture.
       const capture = (variant: 0 | 1): PreviewCapture => ({
         texture: keys![variant],
         landmarks: frameGeometry(geometry, "win", variant).landmarks,
         anchor: groundAnchorFor(geometry, "win", variant),
       });
-      v.fighter = new PosePreview(this, entry.fighter.fighterId, { win: capture(0), flex: capture(1) }, v.feet,
+      v.fighter = new PosePreview(this, this.imageId(entry.fighter), { win: capture(0), flex: capture(1) }, v.feet,
         PREVIEW_SIZE / SPRITE_CANVAS_SIZE, v.facing, PREVIEW_DEPTH, pose, this.time.now);
     });
   }
@@ -772,7 +834,6 @@ export class CharacterSelectScene extends Phaser.Scene {
     this.vs = null;
   }
 
-
   // --- party modes (series) ---------------------------------------------------
 
   /** Tournament / king of the hill. Both joined players' controllers go along: P1 plays the left fighter of every match, P2 the right. */
@@ -781,14 +842,14 @@ export class CharacterSelectScene extends Phaser.Scene {
     if (!a || !b) {
       this.seriesHint.setText("Both players join first");
       this.time.delayedCall(2000, () => this.seriesHint.setText(""));
-      return this.playEffect("block", 0.4);
+      return playGameSound(this, "block", 0.4);
     }
     if (this.library.length < MIN_ENTRANTS) {
       this.seriesHint.setText(`Needs ${MIN_ENTRANTS} fighters`);
       this.time.delayedCall(2000, () => this.seriesHint.setText(""));
-      return this.playEffect("block", 0.4);
+      return playGameSound(this, "block", 0.4);
     }
-    this.playEffect("hit", 0.6);
+    playGameSound(this, "hit", 0.6);
     void setSetting("controllerMapping", { p1: a.input, p2: b.input }).catch(() => {});
     this.scene.start("series-setup", { inputs: [a.input, b.input] } satisfies SeriesSetupData);
   }
@@ -840,7 +901,7 @@ export class CharacterSelectScene extends Phaser.Scene {
         if (pressed("up") && c - this.cols >= 0) c -= this.cols;
         if (pressed("down") && c + this.cols < n) c += this.cols;
         if (c !== p.cursor) {
-          this.playEffect("tick", 0.3);
+          playGameSound(this, "tick", 0.3);
           p.cursor = c;
           this.showPage(Math.floor(c / this.pageSize));
           changed = true;
@@ -849,6 +910,9 @@ export class CharacterSelectScene extends Phaser.Scene {
       } else if (pressed("kick")) {
         this.setReady(i, false);
         changed = true;
+      } else if (pressed("down")) {
+        p.previous = now;
+        return this.openStats(i);
       } else if ((pressed("punch") || pressed("up")) && this.players.filter(Boolean).length === 1) {
         const tutorial = pressed("up"); // before `previous` moves on
         p.previous = now;
@@ -856,7 +920,7 @@ export class CharacterSelectScene extends Phaser.Scene {
       }
       if (!p.ready && pressed("kick") && !changed) {
         this.players[i] = null; // leave the slot
-        this.playEffect("block", 0.3);
+        playGameSound(this, "block", 0.3);
         changed = true;
       }
       p.previous = now;
@@ -961,11 +1025,11 @@ export class CharacterSelectScene extends Phaser.Scene {
     if (!this.textures.exists(key)) {
       const dataUrl = await QRCode.toDataURL(this.captureUrl(roomCode), { margin: 1, width: 240, color: { dark: "#121018", light: "#f3efe6" } });
       await new Promise<void>((resolve) => {
-        this.textures.once(Phaser.Textures.Events.ADD, () => resolve());
+        // This texture's own event: thumbnails and poses may be loading at the same time.
+        this.textures.once(Phaser.Textures.Events.ADD_KEY + key, () => resolve());
         this.textures.addBase64(key, dataUrl);
       });
     }
-    if (!this.alive) return;
     // The room may have changed (or the panel been rebuilt) while the QR was rendering.
     if (!this.alive || this.codeText.text !== roomCode) return;
     this.qrImage?.destroy();
@@ -1026,7 +1090,6 @@ export class CharacterSelectScene extends Phaser.Scene {
     }
     if (this.alive) this.noticeText.setText(notes.join("   "));
   }
-
 
 
   private setToolbarStatus(text: string): void {
@@ -1097,6 +1160,7 @@ export class CharacterSelectScene extends Phaser.Scene {
     const id = entry.fighter.fighterId;
     this.pendingDelete = null;
     await deleteFighter(id);
+    forgetFighterRecord(this.registry, id);
     this.library = this.library.filter((e) => e.fighter.fighterId !== id);
     this.registry.set(REGISTRY.library, this.library);
     this.selected = null;

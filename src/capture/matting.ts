@@ -105,16 +105,20 @@ export function keepConnected(mask: Uint8Array, width: number, _height: number, 
   const out = new Uint8Array(mask.length);
   const stack: number[] = seeds.filter((i) => i >= 0 && i < mask.length && mask[i]);
   for (const i of stack) out[i] = 1;
+  // Millions of pixels per capture: no per-pixel allocations.
+  const visit = (n: number) => {
+    if (mask[n] && !out[n]) {
+      out[n] = 1;
+      stack.push(n);
+    }
+  };
   while (stack.length) {
     const i = stack.pop()!;
     const x = i % width;
-    const neighbors = [x > 0 ? i - 1 : -1, x < width - 1 ? i + 1 : -1, i - width, i + width];
-    for (const n of neighbors) {
-      if (n >= 0 && n < mask.length && mask[n] && !out[n]) {
-        out[n] = 1;
-        stack.push(n);
-      }
-    }
+    if (x > 0) visit(i - 1);
+    if (x < width - 1) visit(i + 1);
+    if (i >= width) visit(i - width);
+    if (i + width < mask.length) visit(i + width);
   }
   return out;
 }
@@ -197,7 +201,7 @@ export function resampleFloat(src: Float32Array, width: number, height: number, 
 }
 
 /** The crop's colours with `alpha` as their alpha channel: the cut-out. */
-export function applyAlpha(rgba: Uint8ClampedArray, alpha: Uint8ClampedArray): Uint8ClampedArray {
+export function applyAlpha(rgba: Uint8ClampedArray, alpha: Uint8ClampedArray): Uint8ClampedArray<ArrayBuffer> {
   const out = new Uint8ClampedArray(rgba);
   for (let i = 0; i < alpha.length; i++) out[i * 4 + 3] = alpha[i];
   return out;

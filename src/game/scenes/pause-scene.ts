@@ -1,5 +1,5 @@
 import Phaser from "phaser";
-import { controlLabels, deviceName, moveGuide } from "../input/control-labels";
+import { GRAB_TIPS, GUARD_TIPS, controlLabels, deviceName, moveGuide } from "../input/control-labels";
 import { isPlayerInput } from "../input/input-descriptor";
 import { MenuInput } from "../input/menu-input";
 import { getOptions } from "../options";
@@ -83,7 +83,7 @@ export class PauseScene extends Phaser.Scene {
       );
     });
     this.controls.push(
-      this.add.text(GAME_WIDTH / 2, GAME_HEIGHT - 110, "Hold down to crouch: punches whiff over you.  Jump kick: block it standing.  Low kick: block it crouching.\nGrabbed? Press punch + kick to break free.  Punch + kick from far away = taunt.", {
+      this.add.text(GAME_WIDTH / 2, GAME_HEIGHT - 110, `${GUARD_TIPS}\n${GRAB_TIPS}`, {
         fontSize: "17px", color: "#c9c3b8", align: "center",
       }).setOrigin(0.5),
       this.add.text(GAME_WIDTH / 2, GAME_HEIGHT - 50, "Any button: back", { fontSize: "18px", color: "#a8a196" }).setOrigin(0.5),

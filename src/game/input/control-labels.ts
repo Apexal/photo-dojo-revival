@@ -31,6 +31,10 @@ export interface MoveGuide {
   how: (b: ButtonLabels) => string;
 }
 
+/** What beats what, for the footers of the pre-match screen and the pause menu's controls. */
+export const GUARD_TIPS = "Crouch: punches whiff over you.  Block standing: jump kick, flying knee.  Block crouching: low kick.";
+export const GRAB_TIPS = "Grabbed? Punch + kick breaks free (not out of a bear hug).  Punch + kick far away: taunt.";
+
 /** The shared moves, in the order the pre-match screen shows them. */
 export const MOVE_GUIDE: readonly MoveGuide[] = [
   { name: "Walk", action: "walk", how: (b) => `${b.back} / ${b.forward}` },

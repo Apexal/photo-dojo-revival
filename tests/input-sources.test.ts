@@ -221,6 +221,33 @@ describe("CPU opponent", () => {
     return t === 0 ? input({ punch: true }) : t === 60 ? input({ kick: true }) : t === 90 ? input({ down: true, kick: true }) : input();
   };
 
+  it.each([
+    ["brawler", "charge"],
+    ["grappler", "bearHug"],
+    ["guardian", "parry"],
+    ["acrobat", "flyingKnee"],
+  ] as const)("a normal %s CPU uses its signature move", (archetype, move) => {
+    const self = stickFigureGeometry(archetype);
+    // Against a player who walks in and swings, then backs off for a second (or, against the knee, crouch-blocks).
+    const player = (s: FightState, f: number) => {
+      if (f % 240 < 180) return brawler(s, f);
+      if (archetype === "acrobat") return input({ down: true });
+      return input(s.fighters[1].position.x > s.fighters[0].position.x ? { left: true } : { right: true });
+    };
+    let used = 0;
+    for (const seed of [1, 2, 3]) {
+      const sim = new FightSimulation([geo, self], { practice: true, seed });
+      const cpu = new CpuPlayer("normal", { self, opponent: geo }, createRng(seed));
+      for (let i = 0; i < ROUND_INTRO_FRAMES; i++) sim.step([input(), input()]);
+      for (let f = 0; f < 1800; f++) {
+        const s = sim.current;
+        const next = sim.step([player(s, f), cpu.read(s.fighters[1], s.fighters[0])]);
+        if (next.fighters[1].action === move && next.fighters[1].actionFrame === 0 && s.fighters[1].action !== move) used++;
+      }
+    }
+    expect(used, `${archetype} used ${move}`).toBeGreaterThan(2);
+  });
+
   it("walks in and hits an opponent that does nothing, at every level", () => {
     for (const level of ["easy", "normal", "hard"] as const) {
       expect(play(level, stand, 900).hits.byCpu, level).toBeGreaterThan(0);

@@ -26,6 +26,8 @@ export interface PlayerStats {
   longestCombo: number;
   /** The attack they landed most often (null if none landed). */
   favoriteMove: AttackId | null;
+  /** Clean hits by attack (attacks that never landed are missing). */
+  movesLanded: Partial<Record<AttackId, number>>;
 }
 
 export interface RoundSummary {
@@ -47,7 +49,7 @@ export interface MatchStats {
 
 const emptyStats = (): PlayerStats => ({
   roundsWon: 0, perfectRounds: 0, damageDealt: 0, attacks: 0, hits: 0, blockedByOpponent: 0, blocks: 0,
-  throws: 0, throwTechs: 0, knockdowns: 0, taunts: 0, longestCombo: 0, favoriteMove: null,
+  throws: 0, throwTechs: 0, knockdowns: 0, taunts: 0, longestCombo: 0, favoriteMove: null, movesLanded: {},
 });
 
 /** Still reeling from the last hit, so the next one continues the combo. */
@@ -93,7 +95,6 @@ export class MatchStatsTracker {
   private frames = 0;
   private roundFrames = 0;
   private readonly combo = new ComboCounter();
-  private readonly landed: [Map<AttackId, number>, Map<AttackId, number>] = [new Map(), new Map()];
 
   record(state: FightState): void {
     if (state.round.phase === "fighting") {
@@ -115,9 +116,8 @@ export class MatchStatsTracker {
           }
           attacker.hits++;
           attacker.longestCombo = Math.max(attacker.longestCombo, this.combo.hit(ev.attacker));
-          const counts = this.landed[ev.attacker];
-          counts.set(ev.attack, (counts.get(ev.attack) ?? 0) + 1);
-          attacker.favoriteMove = [...counts].sort((a, b) => b[1] - a[1])[0][0];
+          attacker.movesLanded[ev.attack] = (attacker.movesLanded[ev.attack] ?? 0) + 1;
+          attacker.favoriteMove = mostLanded(attacker.movesLanded);
           break;
         }
         case "parry":
@@ -172,7 +172,7 @@ export class MatchStatsTracker {
 
   get result(): MatchStats {
     return {
-      players: [{ ...this.players[0] }, { ...this.players[1] }],
+      players: [copy(this.players[0]), copy(this.players[1])],
       rounds: this.rounds.map((r) => ({ ...r, health: [...r.health] as [number, number] })),
       frames: this.frames,
     };
@@ -180,6 +180,15 @@ export class MatchStatsTracker {
 }
 
 const other = (p: PlayerIndex): PlayerIndex => (p === 0 ? 1 : 0);
+
+const copy = (s: PlayerStats): PlayerStats => ({ ...s, movesLanded: { ...s.movesLanded } });
+
+/** The attack with the most clean hits (the first to get there on a tie); null if none landed. */
+export function mostLanded(counts: Partial<Record<AttackId, number>>): AttackId | null {
+  let best: AttackId | null = null;
+  for (const [id, n] of Object.entries(counts) as [AttackId, number][]) if (n > 0 && (best === null || n > counts[best]!)) best = id;
+  return best;
+}
 
 /** Clean hits over attacks thrown, 0..1 (0 when nothing was thrown). */
 export const accuracy = (s: PlayerStats) => (s.attacks ? s.hits / s.attacks : 0);

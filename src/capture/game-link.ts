@@ -12,7 +12,7 @@ export type Connector = (roomCode: string) => Promise<PeerLink>;
 
 /**
  * The phone's connection to the game, opened as soon as the camera starts so a
- * dead room or unreachable laptop shows up before the user strikes eight poses.
+ * dead room or unreachable laptop shows up before the user strikes sixteen poses.
  * The same link is reused for sending (and for capturing another fighter).
  */
 export class GameLink {

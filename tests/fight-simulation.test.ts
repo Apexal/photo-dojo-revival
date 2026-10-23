@@ -278,17 +278,6 @@ describe("pose variants", () => {
     expect(reactionTo({ punch: true })).toEqual(reactionTo({ punch: true }));
   });
 
-  it("a fighter without the face photo always shows the main one", () => {
-    const plain = { ...varied, variants: { ...varied.variants, hurt: [] } };
-    const sim = new FightSimulation([plain, plain], { startPositions: [565, 715], seed: 3 });
-    for (let i = 0; i < ROUND_INTRO_FRAMES; i++) sim.step([idle, idle]);
-    sim.step([input({ punch: true }), idle]);
-    for (let i = 0; i < 6; i++) sim.step([idle, idle]);
-    expect(sim.current.fighters[1]).toMatchObject({ action: "hurt", variant: 0 });
-  });
-
-
-
   it("attacks are never random: a punch always shows the main punch", () => {
     const f = { ...new FightSimulation([varied, varied]).current.fighters[0], action: "punch" as const, actionFrame: 5, variant: 1 };
     expect(frameOf(f)).toEqual({ poseId: "punch", variant: 0 });

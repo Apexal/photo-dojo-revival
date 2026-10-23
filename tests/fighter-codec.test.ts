@@ -127,6 +127,14 @@ describe("fighter codec", () => {
     const { manifest } = await encodeFighter(makeFighter());
     expect(() => validateManifest({ ...manifest, schemaVersion: 1 })).toThrow(/schema version/);
     expect(() => validateManifest({ ...manifest, archetype: "ninja" })).toThrow(/archetype/);
+    // Untrusted: no parts it doesn't need, no odd types, nothing huge.
+    const pose = manifest.parts[0];
+    expect(() => validateManifest({ ...manifest, parts: [...manifest.parts, { ...pose, partId: "again" }] })).toThrow(/two parts/);
+    expect(() => validateManifest({ ...manifest, parts: [...manifest.parts, { ...pose, partId: "extra", variant: 5 }] })).toThrow(/bad pose/);
+    expect(() => validateManifest({ ...manifest, parts: [{ ...pose, mimeType: "text/html" }, ...manifest.parts.slice(1)] })).toThrow(/mimeType/);
+    expect(() => validateManifest({ ...manifest, name: "x".repeat(500) })).toThrow(/name/);
+    const big = manifest.parts.map((p) => ({ ...p, byteLength: 7 * 1024 * 1024 }));
+    expect(() => validateManifest({ ...manifest, parts: big })).toThrow(/too big/);
     expect(() => validateManifest({ ...manifest, parts: manifest.parts.filter((p) => p.poseId !== "win") })).toThrow(/win/);
     expect(() => validateManifest({ ...manifest, landmarks: { ...manifest.landmarks, idle: [] } })).toThrow(/landmarks/);
     expect(() =>

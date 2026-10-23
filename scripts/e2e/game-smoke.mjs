@@ -152,8 +152,12 @@ try {
   check(variants.punch === 1 && variants.texture, `built-in fighter has a punch alternate loaded (${JSON.stringify(variants)})`);
   step("pose alternates loaded for the built-in fighter");
   const start = await fight();
+  // Walk until in punch range (the fighters start most of the stage apart).
   await game.keyboard.down("d");
-  await game.waitForTimeout(1200);
+  await game.waitForFunction(() => {
+    const [a, b] = window.photoDojo.scene.getScene("fight").sim.current.fighters;
+    return Math.abs(b.position.x - a.position.x) < 220;
+  }, null, { timeout: 8000 }).catch(() => {});
   await game.keyboard.up("d");
   const walked = await fight();
   if (walked.f[0].x <= start.f[0].x + 100) {

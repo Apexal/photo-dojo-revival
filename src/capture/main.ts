@@ -26,14 +26,7 @@ import { assessCutout, describeCutoutIssues, type CutoutQuality } from "./cutout
 import { GhostFitter, framingAdvice, type FramingAdvice } from "./framing";
 import { personCropRect } from "./matting";
 import { BURST_FRAMES } from "./sharpness";
-import {
-  DownloadTracker,
-  MATTING_MODEL_URL,
-  ORT_WASM_URL,
-  POSE_MODEL_URL,
-  loadModelBytes,
-  prefetchWasm,
-} from "./vision-runtime";
+import { DownloadTracker } from "./vision-runtime";
 import { GRACE_MS, captureFlowReducer, isLiveScreen, initialCaptureFlow, targetAt, type CaptureEvent, type CaptureFlowState } from "./capture-flow";
 import { GhostOverlay } from "./ghost-overlay";
 import { HoldSound } from "./hold-sound";
@@ -70,8 +63,6 @@ export interface CaptureSessionData {
   previews: Partial<Record<string, string>>;
   /** Recorded takes per sound (up to MAX_SOUND_TAKES). */
   sounds: Partial<Record<SoundId, Blob[]>>;
-  sendProgress: number;
-  lastFlipped: boolean;
 }
 
 const FRAMING_HINTS: Record<Exclude<FramingAdvice, "ok">, string> = {
@@ -116,8 +107,6 @@ const newSession = (): CaptureSessionData => ({
   variants: {},
   previews: {},
   sounds: {},
-  sendProgress: 0,
-  lastFlipped: false,
 });
 
 class CaptureApp {
@@ -198,8 +187,16 @@ class CaptureApp {
     this.draftTimer = setTimeout(() => void this.saveDraftNow(), 400);
   }
 
-  private async saveDraftNow(): Promise<void> {
+  /** Saves run one after another, so they can't land out of order, and a discard waits for the one in flight. */
+  private saving: Promise<void> = Promise.resolve();
+
+  private saveDraftNow(): Promise<void> {
     this.draftTimer = null;
+    this.saving = this.saving.then(() => this.writeDraft());
+    return this.saving;
+  }
+
+  private async writeDraft(): Promise<void> {
     if (!this.captures.size) return;
     const captures: DraftCapture[] = [];
     for (const [key, c] of this.captures) {
@@ -220,18 +217,36 @@ class CaptureApp {
     if (this.draftTimer) clearTimeout(this.draftTimer);
     this.draftTimer = null;
     this.pendingDraft = null;
+    await this.saving;
     await clearDraft().catch(() => {});
   }
 
+  /** Decoding a draft's cut-outs takes a few seconds on a phone; the intro shows it and takes no other input meanwhile. */
+  private resuming = false;
+
   private async resumeDraft(): Promise<void> {
     const draft = this.pendingDraft;
-    if (!draft) return;
-    this.pendingDraft = null;
+    if (!draft || this.resuming) return;
+    this.resuming = true;
+    this.render();
+    try {
+      await this.loadDraft(draft);
+    } catch (err) {
+      console.warn("[draft] couldn't resume", err);
+      this.resetSession();
+      await this.discardDraft();
+      this.dispatch({ type: "fail", message: "Couldn't load the saved capture. Start over to capture a new fighter." });
+    } finally {
+      this.resuming = false;
+    }
+  }
+
+  private async loadDraft(draft: CaptureDraft): Promise<void> {
     this.voice.unlock();
     this.holdSound.unlock();
     this.data.fighterId = draft.fighterId;
     this.data.name = draft.name;
-    this.data.sounds = draft.sounds ?? {};
+    this.data.sounds = draft.sounds;
     for (const c of draft.captures) {
       const bitmap = await createImageBitmap(c.cutPng);
       const image = createCanvas(bitmap.width, bitmap.height);
@@ -243,9 +258,10 @@ class CaptureApp {
       });
     }
     await this.renderSprites();
+    this.pendingDraft = null;
     const roomCode = this.flow.roomCode ?? draft.roomCode;
     this.link.setRoom(roomCode);
-    this.dispatch({ type: "resume", mode: draft.mode, roomCode: draft.roomCode, archetype: draft.archetype, nextPoseIndex: summarizeDraft(draft).nextPoseIndex });
+    this.dispatch({ type: "resume", mode: draft.mode, roomCode: draft.roomCode, archetype: draft.archetype, next: summarizeDraft(draft).next });
     this.link.warmUp();
   }
 
@@ -261,6 +277,12 @@ class CaptureApp {
     const wasLive = isLiveScreen(previous.screen);
     const isLive = isLiveScreen(s);
     if (wasLive && !isLive) this.stopLive();
+    // The camera is only needed while posing (and picking a style mid-session); the mic only for the sounds.
+    if (!isLive && s.name !== "archetype" && s.name !== "loading") this.camera.stop();
+    if (previous.screen.name === "sounds" && s.name !== "sounds") {
+      this.recorder?.close();
+      this.recorder = null;
+    }
     if (s.name === "loading") {
       this.ensureModels().then(() => this.dispatch({ type: "modelsReady" }), (err) => this.failModels(err));
     }
@@ -268,8 +290,7 @@ class CaptureApp {
     if (s.name === "archetype") this.voice.say("Pick your fighting style.");
     if (s.name === "sounds" && !SoundRecorder.isSupported()) return this.dispatch({ type: "skipAllSounds" });
     if (s.name === "sending") void this.send();
-    if (s.name === "saved" && previous.screen.name === "preview") void this.saveLocal();
-    if (s.name === "error") this.stopLive();
+    if (s.name === "saved") void this.saveLocal();
     // The live capture screen keeps its DOM; only its HUD updates.
     if (!(isLive && wasLive)) this.render();
     else this.renderHud();
@@ -286,6 +307,7 @@ class CaptureApp {
       voiceSupported: this.voice.supported,
       recordingSupported: SoundRecorder.isSupported(),
       draft: this.pendingDraft ? summarizeDraft(this.pendingDraft) : null,
+      resuming: this.resuming,
       debug: DEBUG_MATTING,
     });
     if (isLiveScreen(this.flow.screen)) this.renderHud();
@@ -399,12 +421,7 @@ class CaptureApp {
     download: () => void this.download(),
     downloadDebug: () => void this.downloadDebug(),
     restart: () => {
-      Object.values(this.data.previews).forEach((u) => u && URL.revokeObjectURL(u));
-      this.data = newSession();
-      this.captures.clear();
-      this.renderedScale.clear();
-      this.debugCaptures.clear();
-      this.roughTries.clear();
+      this.resetSession();
       void this.discardDraft();
       this.dispatch({ type: "restart" });
     },
@@ -416,6 +433,7 @@ class CaptureApp {
       this.captures.delete("signature");
       this.renderedScale.delete("signature");
       this.debugCaptures.delete("signature");
+      this.roughTries.delete("signature");
       delete this.data.poses.signature;
       const url = this.data.previews.signature;
       if (url) URL.revokeObjectURL(url);
@@ -423,6 +441,16 @@ class CaptureApp {
     }
     this.dispatch({ type: "pickArchetype", archetype });
     this.saveDraftSoon();
+  }
+
+  /** Forget everything captured (not the draft in storage). */
+  private resetSession(): void {
+    Object.values(this.data.previews).forEach((u) => u && URL.revokeObjectURL(u));
+    this.data = newSession();
+    this.captures.clear();
+    this.renderedScale.clear();
+    this.debugCaptures.clear();
+    this.roughTries.clear();
   }
 
   // --- camera + models -------------------------------------------------------------
@@ -434,23 +462,14 @@ class CaptureApp {
    */
   private ensureModels(): Promise<void> {
     this.modelsPromise ??= (async () => {
-      const camera = this.camera.isRunning ? Promise.resolve() : this.camera.start("environment");
-      if (!this.tracker || !this.remover) {
-        // Estimated sizes until the real ones arrive, so the bar moves evenly.
-        const downloads = new DownloadTracker({ wasm: 13.5e6, pose: 30.7e6, ort: 28.3e6, matting: 178.6e6 }, (f) => this.setLoadProgress(f));
-        await Promise.all([
-          prefetchWasm(downloads.reporter("wasm")),
-          loadModelBytes(POSE_MODEL_URL, downloads.reporter("pose")),
-          loadModelBytes(ORT_WASM_URL, downloads.reporter("ort")),
-          loadModelBytes(MATTING_MODEL_URL, downloads.reporter("matting")),
-        ]);
-      }
-      this.setLoadProgress(1);
+      // Estimated sizes until the real ones arrive, so the bar moves evenly. Each model is read once, by what uses it.
+      const downloads = new DownloadTracker({ wasm: 13.5e6, pose: 30.7e6, ort: 28.3e6, matting: 178.6e6 }, (f) => this.setLoadProgress(f));
       const [, tracker, remover] = await Promise.all([
-        camera,
-        this.tracker ? Promise.resolve(this.tracker) : PoseTracker.create(),
-        this.remover ? Promise.resolve(this.remover) : BackgroundRemover.create(),
+        this.camera.isRunning ? Promise.resolve() : this.camera.start("environment"),
+        this.tracker ?? PoseTracker.create(downloads.reporter("pose"), downloads.reporter("wasm")),
+        this.remover ?? BackgroundRemover.create(downloads.reporter("matting"), downloads.reporter("ort")),
       ]);
+      this.setLoadProgress(1);
       this.tracker = tracker;
       this.remover = remover;
       this.canSwitchCamera = await this.camera.canSwitch();
@@ -485,7 +504,21 @@ class CaptureApp {
     this.live = { landmarks: null, update: null, framing: null };
     this.voice.say(def.voicePrompt);
     if (!this.tracker) this.ensureModels().then(() => this.render(), (err) => this.failModels(err));
+    else if (!this.camera.isRunning) void this.restartCamera();
     if (!this.stopFrames) this.stopFrames = this.camera.onFrame((now) => this.onFrame(now));
+  }
+
+  /** Back to posing (a retake) after the camera was turned off: the same camera, a fresh overlay and frame loop. */
+  private async restartCamera(): Promise<void> {
+    try {
+      await this.camera.restart();
+    } catch (err) {
+      return this.failModels(err);
+    }
+    if (!isLiveScreen(this.flow.screen)) return this.camera.stop();
+    this.render();
+    this.stopFrames?.();
+    this.stopFrames = this.camera.onFrame((now) => this.onFrame(now));
   }
 
   private stopLive(): void {
@@ -529,7 +562,6 @@ class CaptureApp {
       holdProgress: s.name === "captured" ? 1 : this.live.update?.holdProgress ?? 0,
       matching: s.name === "captured" || (this.live.update?.matching ?? false),
       large: this.flow.mode === "solo",
-      message: "",
     });
   }
 
@@ -600,9 +632,8 @@ class CaptureApp {
       });
       const plans = await this.renderSprites();
       this.saveDraftSoon();
-      this.data.lastFlipped = plans[target.key]?.flipped ?? false;
       this.renderHud();
-      if (this.data.lastFlipped) this.toast("Flipped so you face right");
+      if (plans[target.key]?.flipped) this.toast("Flipped so you face right");
       const autoRetake = this.checkQuality(target.key, quality);
       await graceDone;
       this.capturing = false;
@@ -728,14 +759,12 @@ class CaptureApp {
   private async send(): Promise<void> {
     const fighter = await this.saveLocal();
     if (!fighter || !this.flow.roomCode) return;
-    this.data.sendProgress = 0;
     try {
       const link = await this.link.ensure();
       await sendFighter(link.channel, fighter, {
         onProgress: ({ sentBytes, totalBytes }) => {
-          this.data.sendProgress = sentBytes / totalBytes;
           const bar = this.root.querySelector<HTMLElement>("[data-progress]");
-          if (bar) bar.style.width = `${Math.round(this.data.sendProgress * 100)}%`;
+          if (bar) bar.style.width = `${Math.round((sentBytes / totalBytes) * 100)}%`;
         },
       });
       // The link stays open for the next fighter.

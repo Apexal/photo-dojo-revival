@@ -26,11 +26,11 @@ export interface MatteDebug {
 export class BackgroundRemover {
   private constructor(private readonly ort: Ort, private readonly session: InferenceSession, readonly backend: MattingBackend) {}
 
-  /** `onProgress` reports the model download (instant from the model cache on later visits). */
-  static async create(onProgress?: DownloadProgress): Promise<BackgroundRemover> {
+  /** `onProgress` reports the model download (instant from the model cache on later visits), `onWasmProgress` ONNX Runtime's binary. */
+  static async create(onProgress?: DownloadProgress, onWasmProgress?: DownloadProgress): Promise<BackgroundRemover> {
     const [ort, wasm, model] = await Promise.all([
       import("onnxruntime-web"),
-      loadModelBytes(ORT_WASM_URL),
+      loadModelBytes(ORT_WASM_URL, onWasmProgress),
       loadModelBytes(MATTING_MODEL_URL, onProgress),
     ]);
     // The loader comes from the CDN; the binary from the model cache (it was downloaded with progress).
@@ -71,7 +71,7 @@ export class BackgroundRemover {
    * The cut-out (RGBA, crop-sized, alpha = person) and the crop it covers.
    * `landmarks` are MediaPipe-normalized.
    */
-  async cutout(frame: HTMLCanvasElement | OffscreenCanvas, landmarks: NormalizedLandmark[]): Promise<{ foreground: Uint8ClampedArray; debug: MatteDebug }> {
+  async cutout(frame: HTMLCanvasElement | OffscreenCanvas, landmarks: NormalizedLandmark[]): Promise<{ foreground: Uint8ClampedArray<ArrayBuffer>; debug: MatteDebug }> {
     const W = frame.width;
     const H = frame.height;
     const px = toPixelLandmarks(landmarks, W, H);

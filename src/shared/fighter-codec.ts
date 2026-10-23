@@ -3,6 +3,7 @@ import { isArchetypeId, type ArchetypeId } from "./archetypes";
 import { REQUIRED_VARIANT_POSES } from "./pose-definitions";
 import {
   LANDMARK_COUNT,
+  MAX_SOUND_TAKES,
   POSE_IDS,
   SOUND_IDS,
   isPoseId,
@@ -18,8 +19,20 @@ import {
 /** Payload bytes per binary chunk; each chunk message also carries an 8-byte header. */
 export const CHUNK_SIZE = 16 * 1024;
 export const CHUNK_HEADER_BYTES = 8;
-/** Generous cap so a malicious manifest can't make us allocate gigabytes. */
+/**
+ * Generous caps on what a manifest may claim, checked before anything is
+ * allocated: the receiver takes it from whoever has the room code.
+ */
 export const MAX_PART_BYTES = 8 * 1024 * 1024;
+export const MAX_FIGHTER_BYTES = 48 * 1024 * 1024;
+/** The fighter's name as typed on the phone (the field's maxLength), with room to spare. */
+export const MAX_NAME_LENGTH = 64;
+/** Poses and the thumbnail are PNGs; sounds whatever MediaRecorder makes. */
+const MIME_TYPES: Record<PartKind, RegExp> = {
+  pose: /^image\/png$/,
+  thumbnail: /^image\/png$/,
+  sound: /^audio\/(webm|mp4|ogg|wav)(;|$)/,
+};
 export const FIGHTER_FILE_EXTENSION = ".photodojo";
 
 export type PartKind = "pose" | "sound" | "thumbnail";
@@ -60,8 +73,6 @@ export interface VariantPoseMeta {
   attackSide?: LimbSide;
 }
 
-export const MAX_VARIANTS = 8;
-
 export type TransferMessage =
   | FighterManifest
   | { type: "done" }
@@ -98,7 +109,7 @@ export async function encodeFighter(fighter: Fighter, chunkSize = CHUNK_SIZE): P
   await push({ partId: "thumbnail", kind: "thumbnail" }, fighter.thumbnailBlob, "image/png");
   const variantPoses: VariantPoseMeta[] = [];
   for (const poseId of POSE_IDS) {
-    for (const [i, pose] of (fighter.poseVariants?.[poseId] ?? []).entries()) {
+    for (const [i, pose] of (fighter.poseVariants[poseId] ?? []).entries()) {
       const variant = i + 1;
       await push({ partId: `pose:${poseId}:${variant}`, kind: "pose", poseId, variant }, pose.imageBlob, "image/png");
       variantPoses.push({
@@ -175,36 +186,42 @@ export function validateManifest(value: unknown): FighterManifest {
   if (m.schemaVersion !== 2) fail(`unsupported schema version ${String(m.schemaVersion)}`);
   if (!isArchetypeId(m.archetype)) fail("missing or unknown archetype");
   if (typeof m.fighterId !== "string" || !m.fighterId) fail("missing fighterId");
-  if (typeof m.name !== "string") fail("missing name");
+  if (typeof m.name !== "string" || m.name.length > MAX_NAME_LENGTH) fail("missing or overlong name");
   if (!isFiniteNumber(m.createdAt)) fail("missing createdAt");
   if (!Number.isInteger(m.chunkSize) || m.chunkSize <= 0 || m.chunkSize > 256 * 1024) fail("bad chunkSize");
   if (!Array.isArray(m.parts)) fail("parts must be an array");
-  const seen = new Set<string>();
+  // Only the parts a fighter has, each once: every pose, the second versions, up to MAX_SOUND_TAKES per sound, a thumbnail.
+  const partIds = new Set<string>();
+  const slots = new Set<string>();
+  let totalBytes = 0;
   for (const part of m.parts) {
-    if (typeof part.partId !== "string" || seen.has(part.partId)) fail("duplicate or missing partId");
-    seen.add(part.partId);
+    if (typeof part.partId !== "string" || partIds.has(part.partId)) fail("duplicate or missing partId");
+    partIds.add(part.partId);
+    if (part.kind !== "pose" && part.kind !== "sound" && part.kind !== "thumbnail") fail(`bad kind for ${part.partId}`);
     if (!Number.isInteger(part.byteLength) || part.byteLength < 0 || part.byteLength > MAX_PART_BYTES) fail(`bad byteLength for ${part.partId}`);
-    if (typeof part.mimeType !== "string") fail(`bad mimeType for ${part.partId}`);
-    if (part.kind === "pose" && !isPoseId(part.poseId)) fail(`bad poseId for ${part.partId}`);
-    if (part.kind === "sound" && !isSoundId(part.soundId)) fail(`bad soundId for ${part.partId}`);
-    if (!["pose", "sound", "thumbnail"].includes(part.kind)) fail(`bad kind for ${part.partId}`);
-    if (part.variant !== undefined && (!Number.isInteger(part.variant) || part.variant < 1 || part.variant > MAX_VARIANTS)) {
-      fail(`bad variant for ${part.partId}`);
-    }
+    totalBytes += part.byteLength;
+    if (typeof part.mimeType !== "string" || !MIME_TYPES[part.kind].test(part.mimeType)) fail(`bad mimeType for ${part.partId}`);
+    const variant = part.variant ?? 0;
+    if (!Number.isInteger(variant) || variant < 0) fail(`bad variant for ${part.partId}`);
+    if (part.kind === "pose" && (!isPoseId(part.poseId) || variant > (REQUIRED_VARIANT_POSES.includes(part.poseId) ? 1 : 0))) fail(`bad pose for ${part.partId}`);
+    if (part.kind === "sound" && (!isSoundId(part.soundId) || variant >= MAX_SOUND_TAKES)) fail(`bad sound for ${part.partId}`);
+    if (part.kind === "thumbnail" && variant) fail(`bad variant for ${part.partId}`);
+    const slot = `${part.kind}:${part.poseId ?? part.soundId ?? ""}:${variant}`;
+    if (slots.has(slot)) fail(`two parts for ${slot}`);
+    slots.add(slot);
   }
-  {
-    if (!Array.isArray(m.variantPoses)) fail("variantPoses must be an array");
-    for (const poseId of REQUIRED_VARIANT_POSES) {
-      if (!m.variantPoses.some((v) => v.poseId === poseId && v.variant === 1)) fail(`missing the second ${poseId} pose`);
+  if (totalBytes > MAX_FIGHTER_BYTES) fail("too big");
+  if (!Array.isArray(m.variantPoses)) fail("variantPoses must be an array");
+  for (const poseId of REQUIRED_VARIANT_POSES) {
+    if (!m.variantPoses.some((v) => v.poseId === poseId && v.variant === 1)) fail(`missing the second ${poseId} pose`);
+  }
+  if (m.variantPoses.length !== REQUIRED_VARIANT_POSES.length) fail("unexpected second poses");
+  for (const v of m.variantPoses) {
+    if (!Array.isArray(v.landmarks) || v.landmarks.length !== LANDMARK_COUNT || !v.landmarks.every((l) => isPoint(l) && isFiniteNumber(l.visibility))) {
+      fail(`bad landmarks for ${v.poseId} variant ${v.variant}`);
     }
-    for (const v of m.variantPoses) {
-      if (!isPoseId(v.poseId) || !Number.isInteger(v.variant) || v.variant < 1 || v.variant > MAX_VARIANTS) fail("bad pose variant");
-      if (!Array.isArray(v.landmarks) || v.landmarks.length !== LANDMARK_COUNT || !v.landmarks.every((l) => isPoint(l) && isFiniteNumber(l.visibility))) {
-        fail(`bad landmarks for ${v.poseId} variant ${v.variant}`);
-      }
-      if (!isPoint(v.anchor) || !isFiniteNumber(v.capturedAt)) fail(`bad metadata for ${v.poseId} variant ${v.variant}`);
-      if (!m.parts.some((p) => p.kind === "pose" && p.poseId === v.poseId && p.variant === v.variant)) fail(`no image for ${v.poseId} variant ${v.variant}`);
-    }
+    if (!isPoint(v.anchor) || !isFiniteNumber(v.capturedAt)) fail(`bad metadata for ${v.poseId} variant ${v.variant}`);
+    if (!slots.has(`pose:${v.poseId}:${v.variant}`)) fail(`no image for ${v.poseId} variant ${v.variant}`);
   }
   for (const poseId of POSE_IDS) {
     if (!m.parts.some((p) => p.kind === "pose" && p.poseId === poseId && !p.variant)) fail(`no image for pose ${poseId}`);
@@ -302,10 +319,6 @@ export class FighterAssembler {
     return this.manifest?.parts.reduce((sum, p) => sum + p.byteLength, 0) ?? 0;
   }
 
-  get fighterName(): string | null {
-    return this.manifest?.name ?? null;
-  }
-
   get isDone(): boolean {
     return this.done;
   }
@@ -376,6 +389,9 @@ export class FighterAssembler {
 // ---------------------------------------------------------------------------
 // .photodojo file: a zip with fighter.json + PNGs + audio clips.
 
+/** fighter.json and every part a fighter can have, with room to spare. */
+const MAX_FILE_ENTRIES = 64;
+
 const extensionFor = (mime: string) =>
   mime.includes("png") ? "png" : mime.includes("webm") ? "webm" : mime.includes("mp4") ? "m4a" : mime.includes("ogg") ? "ogg" : mime.includes("wav") ? "wav" : "bin";
 
@@ -390,7 +406,7 @@ function pathFor(part: ManifestPart): string {
 export async function exportFighterFile(fighter: Fighter): Promise<Blob> {
   const { manifest, parts } = await encodeFighter(fighter);
   const files: Zippable = {
-    "fighter.json": strToU8(JSON.stringify({ ...manifest, files: manifest.parts.map(pathFor) }, null, 1)),
+    "fighter.json": strToU8(JSON.stringify(manifest, null, 1)),
   };
   manifest.parts.forEach((part, i) => {
     // Images and opus are already compressed.
@@ -402,25 +418,24 @@ export async function exportFighterFile(fighter: Fighter): Promise<Blob> {
 export async function importFighterFile(data: Blob | ArrayBuffer | Uint8Array): Promise<Fighter> {
   const bytes = data instanceof Blob ? await bytesOf(data) : data instanceof Uint8Array ? data : new Uint8Array(data);
   let entries: Record<string, Uint8Array>;
+  let count = 0;
   try {
-    entries = unzipSync(bytes);
+    // A zip bomb shouldn't get inflated: only fighter-sized entries, and not too many.
+    entries = unzipSync(bytes, { filter: (f) => ++count <= MAX_FILE_ENTRIES && f.originalSize <= MAX_PART_BYTES });
   } catch {
     throw new FighterCodecError("Not a fighter file (couldn't unzip)");
   }
   const json = entries["fighter.json"];
   if (!json) throw new FighterCodecError("Not a fighter file (no fighter.json)");
-  let parsed: FighterManifest & { files?: unknown };
+  let parsed: unknown;
   try {
     parsed = JSON.parse(strFromU8(json));
   } catch {
     throw new FighterCodecError("fighter.json is not valid JSON");
   }
-  const { files, ...rest } = parsed;
-  const manifest = validateManifest(rest);
-  const paths = Array.isArray(files) ? (files as unknown[]) : manifest.parts.map(pathFor);
-  const parts = manifest.parts.map((part, i) => {
-    const path = paths[i];
-    const entry = typeof path === "string" ? entries[path] : undefined;
+  const manifest = validateManifest(parsed);
+  const parts = manifest.parts.map((part) => {
+    const entry = entries[pathFor(part)];
     if (!entry) throw new FighterCodecError(`Fighter file is missing ${part.partId}`);
     return entry;
   });

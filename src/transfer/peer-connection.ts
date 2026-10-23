@@ -17,9 +17,8 @@ export async function fetchIceServers(httpBase = signalingHttpBase(), timeoutMs 
   try {
     const res = await fetch(`${httpBase}/turn-credentials`, { signal: AbortSignal.timeout(timeoutMs) });
     if (!res.ok) return DEFAULT_ICE_SERVERS;
-    const body = (await res.json()) as { iceServers?: RTCIceServer[] | RTCIceServer };
-    const servers = Array.isArray(body.iceServers) ? body.iceServers : body.iceServers ? [body.iceServers] : [];
-    return servers.length ? [...DEFAULT_ICE_SERVERS, ...servers] : DEFAULT_ICE_SERVERS;
+    const { iceServers } = (await res.json()) as { iceServers: RTCIceServer[] };
+    return [...DEFAULT_ICE_SERVERS, ...iceServers];
   } catch {
     return DEFAULT_ICE_SERVERS;
   }
@@ -89,15 +88,15 @@ export function connectAsGuest(
 export interface HostListener {
   /** Stop answering new phones; already-open links stay up (e.g. when the room code refreshes). */
   stopListening(): void;
-  /** Also close every open link. */
-  closeAll(): void;
 }
 
 /**
  * Laptop side: answer each offer that arrives through the room and hand the
  * resulting data channel to `onChannel`. Several phones can stay connected:
  * a new offer only replaces a peer that hasn't opened its channel yet, and a
- * phone leaving the signaling room doesn't close an open link.
+ * phone leaving the signaling room doesn't close anything (the phone leaves it
+ * as soon as its channel opens, which may be before ours does). A peer that
+ * never connects is dropped after CHANNEL_OPEN_TIMEOUT_MS.
  */
 export function acceptAsHost(
   signaling: SignalingClient,
@@ -106,24 +105,23 @@ export function acceptAsHost(
 ): HostListener {
   let pending: RTCPeerConnection | null = null;
   let offIce: (() => void) | null = null;
-  const open = new Set<RTCPeerConnection>();
-  const closePending = () => { offIce?.(); offIce = null; pending?.close(); pending = null; };
+  let pendingTimer: ReturnType<typeof setTimeout> | undefined;
+  const closePending = () => { clearTimeout(pendingTimer); offIce?.(); offIce = null; pending?.close(); pending = null; };
 
   const offSignal = signaling.onMessage(async (msg) => {
-    if (msg.type === "peer-left") return closePending();
     if (msg.type !== "offer") return;
     closePending();
     const conn = new RTCPeerConnection({ iceServers });
     pending = conn;
     offIce = wireIce(conn, signaling);
+    pendingTimer = setTimeout(() => { if (pending === conn) closePending(); }, CHANNEL_OPEN_TIMEOUT_MS);
     conn.ondatachannel = (ev) => {
       if (ev.channel.label !== DATA_CHANNEL_LABEL) return;
       ev.channel.binaryType = "arraybuffer";
       const onOpen = () => {
         // Connected: this peer no longer depends on signaling.
-        if (pending === conn) { offIce?.(); offIce = null; pending = null; }
-        open.add(conn);
-        ev.channel.addEventListener("close", () => { open.delete(conn); conn.close(); });
+        if (pending === conn) { clearTimeout(pendingTimer); offIce?.(); offIce = null; pending = null; }
+        ev.channel.addEventListener("close", () => conn.close());
         onChannel({ pc: conn, channel: ev.channel, close: () => { ev.channel.close(); conn.close(); } });
       };
       if (ev.channel.readyState === "open") onOpen();
@@ -138,8 +136,5 @@ export function acceptAsHost(
       if (pending === conn) closePending();
     }
   });
-  return {
-    stopListening: () => { offSignal(); closePending(); },
-    closeAll: () => { offSignal(); closePending(); for (const c of open) c.close(); open.clear(); },
-  };
+  return { stopListening: () => { offSignal(); closePending(); } };
 }

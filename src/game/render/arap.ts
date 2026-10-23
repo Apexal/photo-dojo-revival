@@ -109,9 +109,9 @@ class BandedCholesky {
     }
   }
 
-  solve(rhs: Float64Array): Float64Array {
+  /** Solves in place: `x` comes in as the right-hand side and leaves as the solution. */
+  solveInPlace(x: Float64Array): Float64Array {
     const { size, bandwidth } = this;
-    const x = Float64Array.from(rhs);
     for (let i = 0; i < size; i++) {
       for (let k = Math.max(0, i - bandwidth); k < i; k++) x[i] -= this.at(i, k) * x[k];
       x[i] /= this.at(i, i);
@@ -230,12 +230,16 @@ export class ArapDeformer {
     }
   }
 
+  /** Scratch space for deform(), which runs for every morphing fighter every frame. */
+  private scratch: { rhs1: Float64Array; rhsX: Float64Array; rhsY: Float64Array } | null = null;
+
   /** Vertex positions (x/y interleaved) with each bound handle pulled toward its target. */
   deform(targets: readonly Point[]): Float64Array {
     const { positions, triangles } = this.mesh;
     const n = positions.length / 2;
+    this.scratch ??= { rhs1: new Float64Array(2 * n), rhsX: new Float64Array(n), rhsY: new Float64Array(n) };
+    const { rhs1, rhsX, rhsY } = this.scratch;
 
-    const rhs1 = new Float64Array(2 * n);
     for (let i = 0; i < 2 * n; i++) rhs1[i] = REGULARIZATION * positions[i];
     this.bindings.forEach((binding, h) => {
       if (!binding) return;
@@ -244,9 +248,8 @@ export class ArapDeformer {
         rhs1[2 * p + 1] += this.weight * binding.weights[a] * (targets[h].y + binding.offset.y);
       });
     });
-    const similar = this.step1.solve(rhs1);
+    const similar = this.step1.solveInPlace(rhs1);
 
-    const rhsX = new Float64Array(n), rhsY = new Float64Array(n);
     for (let i = 0; i < n; i++) {
       rhsX[i] = REGULARIZATION * similar[2 * i];
       rhsY[i] = REGULARIZATION * similar[2 * i + 1];
@@ -284,7 +287,8 @@ export class ArapDeformer {
         rhsY[p] += this.weight * binding.weights[a] * (targets[h].y + binding.offset.y);
       });
     });
-    const xs = this.step2.solve(rhsX), ys = this.step2.solve(rhsY);
+    const xs = this.step2.solveInPlace(rhsX), ys = this.step2.solveInPlace(rhsY);
+    // A fresh result: callers keep it (a fighter's last morph is reused while it holds still).
     const out = new Float64Array(2 * n);
     for (let i = 0; i < n; i++) { out[2 * i] = xs[i]; out[2 * i + 1] = ys[i]; }
     return out;

@@ -1,6 +1,6 @@
 import type { ArchetypeId } from "../shared/archetypes";
 import type { LimbSide, SoundId } from "../shared/fighter-model";
-import { captureTargetsFor } from "../shared/pose-definitions";
+import { CAPTURE_KEYS } from "../shared/pose-definitions";
 import type { CaptureMode } from "./capture-flow";
 import type { PoseCaptureGeometry } from "./sprite-normalizer";
 
@@ -32,23 +32,26 @@ export interface CaptureDraft {
   sounds: Partial<Record<SoundId, Blob[]>>;
 }
 
+/**
+ * Where a resumed capture carries on: the first missing pose, as a retake
+ * (back to the review afterwards) when it's the only one missing and poses
+ * after it are in, e.g. a signature pose dropped by a change of archetype.
+ */
+export interface ResumePoint { poseIndex: number; retake: boolean }
+
 export interface DraftSummary {
   captured: number;
-  /** All sixteen poses are in. */
-  complete: boolean;
-  /** First pose still missing (null when complete). */
-  nextPoseIndex: number | null;
+  /** Null when all sixteen poses are in. */
+  next: ResumePoint | null;
   ageMs: number;
 }
 
 export function summarizeDraft(draft: CaptureDraft, now = Date.now()): DraftSummary {
   const keys = new Set(draft.captures.map((c) => c.key));
-  const targets = captureTargetsFor(draft.archetype ?? "brawler"); // the keys are the same for every archetype
-  const missing = targets.findIndex((t) => !keys.has(t.key));
+  const missing = CAPTURE_KEYS.findIndex((k) => !keys.has(k));
   return {
-    captured: targets.filter((t) => keys.has(t.key)).length,
-    complete: missing < 0,
-    nextPoseIndex: missing < 0 ? null : missing,
+    captured: CAPTURE_KEYS.filter((k) => keys.has(k)).length,
+    next: missing < 0 ? null : { poseIndex: missing, retake: missing < CAPTURE_KEYS.length - 1 && CAPTURE_KEYS.slice(missing + 1).every((k) => keys.has(k)) },
     ageMs: now - draft.savedAt,
   };
 }

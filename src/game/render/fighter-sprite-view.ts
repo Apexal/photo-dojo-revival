@@ -8,7 +8,7 @@ import { allTweens, frameOf, handshakeShakeOf, idleSwayOf, tweenOf, type FrameTw
 import type { FighterState } from "../../simulation/fighter-state-machine";
 import { fallPose, hitShake, holdsStruckPose } from "./hit-feel";
 import { PoseTransitions } from "./pose-transitions";
-import { PoseTweener, breathingStance, type FrameRef, type TweenLayer, type TweenSource } from "./pose-tweener";
+import { PoseTweener, type FrameRef, type TweenLayer, type TweenSource } from "./pose-tweener";
 import { worldToScreen } from "./stage";
 import { TweenMeshes, readAlpha } from "./tween-meshes";
 
@@ -20,7 +20,7 @@ export const fallbackSoundKey = (soundId: SoundId) => `fallback:${soundId}`;
 export function fighterTextureKeys(fighter: Fighter, prefix: string): string[] {
   return POSE_IDS.flatMap((poseId) => [
     textureKey(prefix, poseId),
-    ...(fighter.poseVariants?.[poseId] ?? []).map((_, i) => textureKey(prefix, poseId, i + 1)),
+    ...(fighter.poseVariants[poseId] ?? []).map((_, i) => textureKey(prefix, poseId, i + 1)),
   ]);
 }
 
@@ -38,7 +38,7 @@ export function preloadFighterTextures(scene: Phaser.Scene, fighter: Fighter, pr
   };
   for (const poseId of POSE_IDS) {
     queue(textureKey(prefix, poseId), fighter.poses[poseId].imageBlob);
-    fighter.poseVariants?.[poseId]?.forEach((pose, i) => queue(textureKey(prefix, poseId, i + 1), pose.imageBlob));
+    fighter.poseVariants[poseId]?.forEach((pose, i) => queue(textureKey(prefix, poseId, i + 1), pose.imageBlob));
   }
   return urls;
 }
@@ -125,14 +125,15 @@ export class FighterSpriteView {
 
   /**
    * `frame` is the simulation frame (soft cuts between actions are timed by it).
-   * `tweening` off shows every tween as the hard cut it replaces.
+   * `tweening` off shows every tween as the hard cut it replaces. `opponent`: the
+   * other fighter, so a hit that lands shakes the attacker too.
    */
-  render(state: FighterState, frame: number, tweening = true): void {
+  render(state: FighterState, frame: number, tweening = true, opponent?: FighterState): void {
     let tween: FrameTween | null = null;
     if (tweening && this.tweener) tween = this.transitions.update(frame, frameOf(state), tweenOf(state) ?? (this.grip ? handshakeShakeOf(state, this.grip.offeredAt) : null), idleSwayOf(state));
     else this.transitions.reset();
     const p = worldToScreen(state.position);
-    p.x += hitShake(state, frame);
+    p.x += hitShake(state, frame, opponent);
     // Just hit: the struck pose holds through most of the freeze (hit-feel.ts).
     const struck = holdsStruckPose(state) && this.lastShown;
     // Knocked down / KO'd: the plain photo, tipped over (no morphs while falling or lying).
@@ -232,28 +233,21 @@ export class FighterSpriteView {
     return this.lastTween!.layers;
   }
 
-  /** The texture for a frame; a missing alternate falls back to the main capture. */
+  /** The texture for a frame. The handshake's made-up versions (the pumping hand) show its one capture. */
   private frameTexture(frame: FrameRef): string {
-    const key = textureKey(this.prefix, frame.poseId, frame.variant);
-    return this.sprite.scene.textures.exists(key) ? key : textureKey(this.prefix, frame.poseId);
+    return textureKey(this.prefix, frame.poseId, frame.poseId === "handshake" ? 0 : frame.variant);
   }
 
   /**
    * A capture's landmarks, anchor and alpha mask (read back from its loaded
-   * texture). A fighter from before the second stance gets a stand-in for it;
-   * the shaking hand is the handshake capture warped onto a raised (variant 1)
-   * and a lowered (variant 2) hand.
+   * texture). The shaking hand is the handshake capture warped onto a raised
+   * (variant 1) and a lowered (variant 2) hand.
    */
   private tweenSource(frame: FrameRef): TweenSource | null {
     if (frame.poseId === "handshake" && frame.variant > 0) {
       const grip = this.grip;
       const capture = grip && this.tweenSource({ poseId: "handshake", variant: 0 });
       return capture ? { ...capture, landmarks: shakenGrip(grip, frame.variant === 1 ? -1 : 1), standIn: true } : null;
-    }
-    if (frame.variant > 0 && !this.geometry.variants?.[frame.poseId]?.[frame.variant - 1]) {
-      if (frame.poseId !== "idle" || frame.variant !== 1) return null;
-      const stance = this.tweenSource({ poseId: "idle", variant: 0 });
-      return stance && { ...stance, landmarks: breathingStance(stance.landmarks), standIn: true };
     }
     const mask = readAlpha(this.sprite.scene, this.frameTexture(frame));
     if (!mask) return null;

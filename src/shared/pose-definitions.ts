@@ -286,11 +286,11 @@ export interface CaptureTarget {
  * signature (once the archetype is picked, after the win poses), and the
  * handshake (the round intro) closes the session. Alternates come right after their main pose.
  */
-const CAPTURE_ORDER = ["idle", "idle-2", "walk", "block", "crouch", "punch", "punch-2", "kick", "kick-2", "jump", "hurt", "hurt-2", "win", "win-2", "signature", "handshake"] as const;
+export const CAPTURE_KEYS = ["idle", "idle-2", "walk", "block", "crouch", "punch", "punch-2", "kick", "kick-2", "jump", "hurt", "hurt-2", "win", "win-2", "signature", "handshake"] as const;
 
-export const CAPTURE_TARGET_COUNT = CAPTURE_ORDER.length;
+export const CAPTURE_TARGET_COUNT = CAPTURE_KEYS.length;
 /** Where the signature pose sits in the capture order: the archetype is picked just before it. */
-export const SIGNATURE_TARGET_INDEX = CAPTURE_ORDER.indexOf("signature");
+export const SIGNATURE_TARGET_INDEX = CAPTURE_KEYS.indexOf("signature");
 
 /** What to capture, in order, for a fighter of this archetype. */
 export function captureTargetsFor(archetype: ArchetypeId): readonly CaptureTarget[] {
@@ -299,7 +299,7 @@ export function captureTargetsFor(archetype: ArchetypeId): readonly CaptureTarge
 
 const CAPTURE_TARGETS = Object.fromEntries(ARCHETYPE_IDS.map((archetype) => [
   archetype,
-  CAPTURE_ORDER.map((key): CaptureTarget => {
+  CAPTURE_KEYS.map((key): CaptureTarget => {
     const alternate = ALTERNATE_DEFINITIONS[key];
     return alternate
       ? { key, poseId: alternate.poseId, variant: Number(key.split("-")[1]) - 1, definition: alternate }

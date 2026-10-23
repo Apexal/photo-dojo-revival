@@ -273,20 +273,34 @@ export interface FighterBoxes {
   hitbox: Box | null;
 }
 
+const pushBoxCache = new WeakMap<FighterGeometry, { box: Box; anchor: { x: number; y: number } }>();
+
+/**
+ * A fighter's push box in the world. It comes from the idle pose for every frame:
+ * per-pose boxes jump around on hard cuts (a walk stride's box sits well behind
+ * the feet), which let fighters tunnel through each other. So it only depends on
+ * where they stand, and the sprite-space box is worked out once per fighter.
+ */
+export function bodyBoxOf(geometry: FighterGeometry, state: FighterState): Box {
+  let idle = pushBoxCache.get(geometry);
+  if (!idle) pushBoxCache.set(geometry, (idle = { box: bodyBoxFor(geometry.idle), anchor: groundAnchorFor(geometry, "idle") }));
+  return toWorldBox(idle.box, { position: state.position, facing: state.facing, anchor: idle.anchor });
+}
+
 /** World-space boxes for a fighter's current frame (used by collision and the debug overlay). */
 export function worldBoxesOf(geometry: FighterGeometry, state: FighterState): FighterBoxes {
-  const pose = currentGeometry(geometry, state);
-  const placement = placementOf(geometry, state);
   const hurt = hurtboxesOf(geometry, state);
   const active = isAttack(state.action) && currentAttackPhase(state) === "active";
-  // The push box comes from the idle pose for every frame: per-pose boxes jump around
-  // on hard cuts (a walk stride's box sits well behind the feet), which let fighters tunnel through each other.
-  const idlePlacement = { position: state.position, facing: state.facing, anchor: groundAnchorFor(geometry, "idle") };
   return {
     hurtboxes: hurt.boxes.map((b) => toWorldBox(b, hurt.placement)),
-    bodyBox: toWorldBox(bodyBoxFor(geometry.idle), idlePlacement),
-    hitbox: active && isAttack(state.action) ? toWorldBox(hitboxFor(state.action, pose), placement) : null,
+    bodyBox: bodyBoxOf(geometry, state),
+    hitbox: active ? toWorldBox(hitboxFor(state.action as AttackId, currentGeometry(geometry, state)), placementOf(geometry, state)) : null,
   };
+}
+
+/** Grabbed fighters go free (the round ended mid-hold). */
+function releaseGrabs(fighters: [FighterState, FighterState]): [FighterState, FighterState] {
+  return fighters.map((f) => (f.action === "grabbed" ? { ...f, action: "idle", actionFrame: 0, stunFrames: 0 } : f)) as [FighterState, FighterState];
 }
 
 export class FightSimulation {
@@ -420,7 +434,8 @@ export class FightSimulation {
     if (controllable) fighters = this.resolveGrabs(fighters, events);
     // A press that started a move is used up; others count down.
     for (const i of [0, 1] as const) {
-      const started = isCommitted(fighters[i].action) && fighters[i].action !== prev.fighters[i].action;
+      // actionFrame 0: also a move recovered straight into the same move again (a parry pressed twice).
+      const started = isCommitted(fighters[i].action) && fighters[i].actionFrame === 0;
       for (const button of ["punch", "kick"] as const) {
         this.buffers[i][button] = started ? 0 : Math.max(0, this.buffers[i][button] - 1);
       }
@@ -451,6 +466,8 @@ export class FightSimulation {
       events.push({ type: "roundEnd", outcome: round.roundWinner!, reason: round.roundEndReason! });
     }
     if (round.phase === "matchOver" && prev.round.phase !== "matchOver") events.push({ type: "matchEnd", winner: round.matchWinner! });
+    // The bell during a grab: nobody gets thrown after it, the grabbed fighter just goes free.
+    if (round.phase === "outro" && prev.round.phase === "fighting") fighters = releaseGrabs(fighters);
     if (round.phase === "outro") fighters = this.applyOutroPoses(fighters, round);
 
     this.state = { frame, fighters, round, events };
@@ -485,11 +502,10 @@ export class FightSimulation {
     }) as [FighterState, FighterState];
   }
 
-  /** Pick which captured version of the new action's pose this fighter shows. */
   /** A random captured version for a new action (taunt / win). Hit reactions are chosen by where the hit lands instead. */
   private withVariant(player: PlayerIndex, f: FighterState): FighterState {
-    if (variantPoseFor(f.action) === "hurt") return f;
     const poseId = variantPoseFor(f.action);
+    if (poseId === "hurt") return f;
     const n = poseId ? variantCount(this.geometry[player], poseId) : 1;
     const variant = n > 1 ? Math.floor(this.random() * n) : 0;
     return variant === f.variant ? f : { ...f, variant };
@@ -502,7 +518,6 @@ export class FightSimulation {
    * Cosmetic: hurtboxes always come from the main hurt pose.
    */
   private reactionVariant(player: PlayerIndex, defender: FighterState, at: { x: number; y: number }): number {
-    if (variantCount(this.geometry[player], "hurt") < 2) return 0;
     return at.y < headHitLineY(this.geometry[player], defender) ? 1 : 0;
   }
 
@@ -516,12 +531,12 @@ export class FightSimulation {
       if (attacker.hasHit || attacker.actionFrame !== grab.startup) continue;
       const d = (1 - a) as PlayerIndex;
       if (!isThrowable(fighters[d])) continue;
-      const ab = worldBoxesOf(this.geometry[a], attacker).bodyBox;
-      const db = worldBoxesOf(this.geometry[d], fighters[d]).bodyBox;
+      const ab = bodyBoxOf(this.geometry[a], attacker);
+      const db = bodyBoxOf(this.geometry[d], fighters[d]);
       const gap = Math.max(db.x - (ab.x + ab.width), ab.x - (db.x + db.width));
       if (gap > grab.range) continue;
       next[a] = { ...attacker, hasHit: true };
-      next[d] = this.withVariant(d, { ...fighters[d], action: "grabbed", actionFrame: 0, stunFrames: grab.holdFrames, velocity: { x: 0, y: 0 } });
+      next[d] = this.withVariant(d, { ...fighters[d], action: "grabbed", actionFrame: 0, stunFrames: grab.holdFrames, grabbedBy: attacker.action, velocity: { x: 0, y: 0 } });
       this.buffers[d] = { punch: 0, kick: 0 }; // only presses during the grab count as a tech
       events.push({ type: "grab", attacker: a, defender: d, grab: attacker.action });
     }
@@ -536,8 +551,7 @@ export class FightSimulation {
       if (grabbed.action !== "grabbed") continue;
       const a = (1 - d) as PlayerIndex;
       const thrower = fighters[a];
-      // The thrower is still in the grab that caught them (a grab's recovery outlasts the hold).
-      const grabId: GrabId = thrower.action === "bearHug" ? "bearHug" : "throw";
+      const grabId = grabbed.grabbedBy;
       const grab = GRABS[grabId];
       const away = (Math.sign(grabbed.position.x - thrower.position.x) || thrower.facing) as 1 | -1;
       if (grab.techable && this.buffers[d].punch > 0 && this.buffers[d].kick > 0) {
@@ -632,8 +646,8 @@ export class FightSimulation {
     // Airborne fighters pass over each other (cross-ups); landing on someone pushes apart again.
     // Nobody pushes against someone knocked down or KO'd: walk over them (getting up pushes apart again).
     if (fighters.some((f) => f.position.y < FLOOR_Y || isUntouchable(f))) return fighters;
-    const a = worldBoxesOf(this.geometry[0], fighters[0]).bodyBox;
-    const b = worldBoxesOf(this.geometry[1], fighters[1]).bodyBox;
+    const a = bodyBoxOf(this.geometry[0], fighters[0]);
+    const b = bodyBoxOf(this.geometry[1], fighters[1]);
     const overlap = horizontalOverlap(a, b);
     if (overlap <= 0) return fighters;
     const leftIsP1 = boxCenterX(a) !== boxCenterX(b) ? boxCenterX(a) < boxCenterX(b) : fighters[0].position.x <= fighters[1].position.x;

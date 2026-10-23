@@ -37,6 +37,7 @@ describe("MatchStatsTracker", () => {
     expect(s.damageDealt).toBe(MAX_HEALTH - sim.current.fighters[1].health);
     expect(s.damageDealt).toBeGreaterThan(0);
     expect(s.favoriteMove).toBe("punch");
+    expect(s.movesLanded).toEqual({ punch: 1 });
     expect(accuracy(s)).toBe(1);
     expect(stats.result.players[1].hits).toBe(0);
   });

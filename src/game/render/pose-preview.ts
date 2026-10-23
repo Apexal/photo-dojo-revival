@@ -44,7 +44,8 @@ export class PosePreview {
 
   constructor(
     scene: Phaser.Scene,
-    readonly fighterId: string,
+    /** Which fighter (and version of it) this shows. */
+    readonly id: string,
     private readonly captures: Record<PreviewPose, PreviewCapture>,
     private readonly at: Point,
     private readonly scale: number,
