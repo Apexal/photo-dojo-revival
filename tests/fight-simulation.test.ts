@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
-import { ATTACKS, THROW } from "../src/shared/frame-data";
+import { ATTACKS, KNOCKDOWN, THROW } from "../src/shared/frame-data";
 import { stickFigureGeometry } from "../src/shared/stick-figure";
-import { FightSimulation, antiAirImmune, frameOf, hurtboxesOf, worldBoxesOf, type FightEvent, type FightState } from "../src/simulation/fight-simulation";
+import { FightSimulation, antiAirImmune, frameOf, hurtboxesOf, headHitLineY, worldBoxesOf, type FightEvent, type FightState } from "../src/simulation/fight-simulation";
 import { createFighterState, currentAttackPhase } from "../src/simulation/fighter-state-machine";
 import { JUMP_IMPULSE, WALK_SPEED, blockedDamage } from "../src/simulation/fighter-state-machine";
 import { JUMP_SQUAT_FRAMES } from "../src/shared/frame-data";
@@ -78,7 +78,13 @@ describe("FightSimulation", () => {
     expect(states.map((s) => s.fighters[0].action)).toEqual(["punch", "punch", "punch", "punch"]);
 
     const hitFrame = sim.step([idle, idle]); // frame 5
-    expect(hitFrame.events).toContainEqual({ type: "hit", attacker: 0, defender: 1, attack: "punch", blocked: false, damage: 8 });
+    expect(hitFrame.events).toContainEqual({ type: "hit", attacker: 0, defender: 1, attack: "punch", blocked: false, damage: 8, at: expect.any(Object) });
+    // The hit marker goes where fist met body: between the two, at head-and-shoulders height.
+    const at = hitFrame.events.find((e) => e.type === "hit")!.at;
+    const [p1, p2] = states[3].fighters.map((f) => f.position.x);
+    expect(at.x).toBeGreaterThan(p1);
+    expect(at.x).toBeLessThan(p2);
+    expect(at.y).toBeLessThan(-150); // above the floor (y = 0), up where a high punch lands
     expect(hitFrame.fighters[1].health).toBe(MAX_HEALTH - ATTACKS.punch.damage);
     expect(hitFrame.fighters[1].action).toBe("hurt");
     expect(hitFrame.fighters[1].stunFrames).toBe(ATTACKS.punch.hitstun);
@@ -99,13 +105,13 @@ describe("FightSimulation", () => {
     expect(sim.current.fighters[0].action).toBe("idle");
   });
 
-  it("hitstop freezes both fighters for 4 frames", () => {
+  it("hitstop freezes both fighters for 6 frames", () => {
     const sim = fightingSim(150);
     run(sim, 5, input({ punch: true }), idle);
     const atHit = sim.current;
-    expect(atHit.fighters[0].hitstopFrames).toBe(4);
-    expect(atHit.fighters[1].hitstopFrames).toBe(4);
-    for (let i = 0; i < 4; i++) {
+    expect(atHit.fighters[0].hitstopFrames).toBe(6);
+    expect(atHit.fighters[1].hitstopFrames).toBe(6);
+    for (let i = 0; i < 6; i++) {
       const s = sim.step([input({ right: true }), input({ right: true })]);
       expect(s.fighters[0].position).toEqual(atHit.fighters[0].position);
       expect(s.fighters[1].position).toEqual(atHit.fighters[1].position);
@@ -130,7 +136,7 @@ describe("FightSimulation", () => {
     // P2 faces left, so "back" is right.
     const events = run(sim, 10, input({ punch: true }), input({ right: true }));
     const hit = events.find((e) => e.type === "hit");
-    expect(hit).toEqual({ type: "hit", attacker: 0, defender: 1, attack: "punch", blocked: true, damage: blockedDamage(ATTACKS.punch.damage) });
+    expect(hit).toEqual({ type: "hit", attacker: 0, defender: 1, attack: "punch", blocked: true, damage: blockedDamage(ATTACKS.punch.damage), at: expect.any(Object) });
     expect(blockedDamage(ATTACKS.punch.damage)).toBe(2);
     expect(sim.current.fighters[1].health).toBe(MAX_HEALTH - 2);
     expect(sim.current.fighters[1].action).toBe("blockstun");
@@ -244,27 +250,43 @@ describe("FightSimulation", () => {
 describe("pose variants", () => {
   const varied = stickFigureGeometry();
 
-  function hurtVariants(seed: number, geometry = varied): number[] {
-    const sim = new FightSimulation([geometry, geometry], { startPositions: [565, 715], seed });
+  /** P1 lands `press` on a standing P2 from close range; returns P2's hurt photo version. */
+  function reactionTo(press: Partial<InputFrame>, gap = 150): { action: string; variant: number; at: { x: number; y: number } } {
+    const sim = new FightSimulation([varied, varied], { startPositions: [640 - gap / 2, 640 + gap / 2], seed: 3 });
     for (let i = 0; i < ROUND_INTRO_FRAMES; i++) sim.step([idle, idle]);
-    const seen: number[] = [];
-    for (let n = 0; n < 12; n++) {
-      sim.step([input({ punch: true }), idle]);
-      for (let i = 0; i < 5; i++) sim.step([idle, idle]);
-      seen.push(sim.current.fighters[1].variant);
-      for (let i = 0; i < 25; i++) sim.step([input({ right: true }), idle]);
+    sim.step([input(press), idle]);
+    for (let i = 0; i < 20; i++) {
+      const s = sim.step([idle, idle]);
+      const hit = s.events.find((e) => e.type === "hit");
+      if (hit) return { action: s.fighters[1].action, variant: s.fighters[1].variant, at: hit.at };
     }
-    return seen;
+    throw new Error("no hit");
   }
 
-  it("hit reactions pick randomly between the main pose and its alternates", () => {
-    expect(new Set(hurtVariants(7))).toEqual(new Set([0, 1]));
+  it("hit reactions show where the hit landed: hands on the face for a head hit, the main photo below", () => {
+    const line = headHitLineY(varied, { ...createFighterState(0, -1, MAX_HEALTH) });
+    const punch = reactionTo({ punch: true });
+    expect(punch.at.y).toBeLessThan(line);
+    expect(punch).toMatchObject({ action: "hurt", variant: 1 });
+    const kick = reactionTo({ kick: true }, 260);
+    expect(kick.at.y).toBeGreaterThan(line);
+    expect(kick).toMatchObject({ action: "hurt", variant: 0 });
+    expect(reactionTo({ down: true, kick: true })).toMatchObject({ action: "hurt", variant: 0 }); // low kick
   });
 
-  it("is deterministic per seed", () => {
-    expect(hurtVariants(7)).toEqual(hurtVariants(7));
-    expect(hurtVariants(7)).not.toEqual(hurtVariants(9));
+  it("is the same every time, whatever the seed", () => {
+    expect(reactionTo({ punch: true })).toEqual(reactionTo({ punch: true }));
   });
+
+  it("a fighter without the face photo always shows the main one", () => {
+    const plain = { ...varied, variants: { ...varied.variants, hurt: [] } };
+    const sim = new FightSimulation([plain, plain], { startPositions: [565, 715], seed: 3 });
+    for (let i = 0; i < ROUND_INTRO_FRAMES; i++) sim.step([idle, idle]);
+    sim.step([input({ punch: true }), idle]);
+    for (let i = 0; i < 6; i++) sim.step([idle, idle]);
+    expect(sim.current.fighters[1]).toMatchObject({ action: "hurt", variant: 0 });
+  });
+
 
 
   it("attacks are never random: a punch always shows the main punch", () => {
@@ -349,7 +371,7 @@ describe("frame advantage", () => {
 });
 
 describe("air recovery", () => {
-  it("a fighter hit out of a jump can't jump again or attack before landing", () => {
+  it("a fighter hit out of a jump is knocked down: can't jump again or attack before landing", () => {
     const sim = fightingSim(150);
     sim.step([idle, input({ up: true })]);
     run(sim, 2, idle, idle);
@@ -360,7 +382,7 @@ describe("air recovery", () => {
     for (let i = 0; i < 60 && sim.current.fighters[1].position.y < 0; i++) {
       const s = sim.step([idle, input({ up: true, punch: i % 2 === 0 })]);
       const f = s.fighters[1];
-      if (f.position.y < 0) expect(["hurt", "jump", "ko"]).toContain(f.action);
+      if (f.position.y < 0) expect(f.action).toBe("knockdown");
       expect(f.velocity.y).toBeGreaterThanOrEqual(-Math.abs(JUMP_IMPULSE) + 0.6);
     }
   });
@@ -406,7 +428,7 @@ describe("throws", () => {
     expect(sim.current.fighters[0].action).toBe("throw");
   });
 
-  it("beats block: grab, tech window, then damage and a big push", () => {
+  it("beats block: grab, tech window, then damage and a knockdown", () => {
     const sim = fightingSim(80);
     const events = run(sim, THROW.startup + 1, input({ punch: true, kick: true }), input({ down: true }));
     expect(events).toContainEqual({ type: "grab", attacker: 0, defender: 1 });
@@ -414,9 +436,14 @@ describe("throws", () => {
     const x = sim.current.fighters[1].position.x;
     const later = run(sim, THROW.techWindow + 1, idle, input({ down: true }));
     expect(later).toContainEqual({ type: "throw", attacker: 0, defender: 1, damage: THROW.damage });
+    expect(later).toContainEqual({ type: "knockdown", player: 1 });
     expect(sim.current.fighters[1].health).toBe(MAX_HEALTH - THROW.damage);
-    expect(sim.current.fighters[1].action).toBe("hurt");
-    expect(sim.current.fighters[1].position.x).toBeGreaterThan(x + 60);
+    expect(sim.current.fighters[1].action).toBe("knockdown");
+    // Flung through the air, landing throwDistance away.
+    const landing = run(sim, 60, idle, input({ down: true }));
+    expect(landing).toContainEqual({ type: "landed", player: 1 });
+    expect(sim.current.fighters[1].action).toBe("downed");
+    expect(sim.current.fighters[1].position.x).toBeCloseTo(x + THROW.throwDistance, 6);
   });
 
   it("can be teched with punch + kick during the grab", () => {
@@ -764,5 +791,96 @@ describe("spacing: the punch is fast, the kick is long", () => {
   it("a kick blocked up close is punishable; blocked at the tip of its range it's safe", () => {
     expect(punishedAfterBlock(150)).toBe(true);
     expect(punishedAfterBlock(330)).toBe(false);
+  });
+});
+
+describe("knockdown", () => {
+  /** P1 throws a standing P2; returns the sim on the frame P2 is launched. */
+  function thrown(gap = 80) {
+    const sim = fightingSim(gap);
+    run(sim, THROW.startup + 1, input({ punch: true, kick: true }), idle);
+    for (let i = 0; i < 30 && sim.current.fighters[1].action !== "knockdown"; i++) sim.step([idle, idle]);
+    expect(sim.current.fighters[1].action).toBe("knockdown");
+    return sim;
+  }
+  const stages = (sim: FightSimulation, frames: number, p1: InputFrame = idle, p2: InputFrame = idle) =>
+    Array.from({ length: frames }, () => sim.step([p1, p2]).fighters[1].action);
+
+  it("flies, lies on the floor for floorFrames, gets up over wakeFrames, then is free", () => {
+    const sim = thrown();
+    const seen = stages(sim, 120);
+    const downed = seen.filter((a) => a === "downed").length, waking = seen.filter((a) => a === "wakeup").length;
+    expect(downed).toBe(KNOCKDOWN.floorFrames);
+    expect(waking).toBe(KNOCKDOWN.wakeFrames);
+    expect(seen.indexOf("downed")).toBeGreaterThan(seen.lastIndexOf("knockdown"));
+    expect(seen.indexOf("wakeup")).toBe(seen.lastIndexOf("downed") + 1);
+    expect(seen.at(-1)).toBe("idle");
+  });
+
+  it("can't be hit or thrown while down, and has no push box", () => {
+    const sim = thrown();
+    for (let i = 0; i < 120 && sim.current.fighters[1].action !== "idle"; i++) {
+      const f = sim.current.fighters[1];
+      expect(hurtboxesOf(stickFigureGeometry(), f).boxes).toEqual([]);
+      const s = sim.step([input({ punch: i % 6 === 0, right: true }), idle]); // walk in, jab away, walk over them
+      expect(s.events.some((e) => e.type === "hit" || e.type === "grab")).toBe(false);
+    }
+  });
+
+  it("the attacker is free long before they're up: wake-up is the guessing game", () => {
+    const sim = thrown();
+    let attackerFree = -1, defenderFree = -1;
+    for (let i = 0; i < 150 && defenderFree < 0; i++) {
+      const s = sim.step([idle, idle]);
+      if (attackerFree < 0 && s.fighters[0].action === "idle") attackerFree = i;
+      if (s.fighters[1].action === "idle") defenderFree = i;
+    }
+    expect(defenderFree - attackerFree).toBeGreaterThan(KNOCKDOWN.floorFrames);
+  });
+
+  it("a press while getting up comes out on the first free frame (a wake-up attack)", () => {
+    const sim = thrown();
+    while (sim.current.fighters[1].action !== "wakeup") sim.step([idle, idle]);
+    while (sim.current.fighters[1].actionFrame < KNOCKDOWN.wakeFrames - 3) sim.step([idle, idle]);
+    sim.step([idle, input({ punch: true })]);
+    const after = stages(sim, 4);
+    expect(after).toContain("punch");
+  });
+
+  it("an anti-air hit knocks down; a grounded hit doesn't; a KO falls and lands", () => {
+    const air = fightingSim(150);
+    air.step([idle, input({ up: true })]);
+    run(air, 2, idle, idle);
+    const events = run(air, ATTACKS.uppercut.startup + 1, input({ punch: true, down: true }), idle);
+    expect(events).toContainEqual({ type: "knockdown", player: 1 });
+
+    const ground = fightingSim(150);
+    run(ground, ATTACKS.punch.startup + 2, input({ punch: true }), idle);
+    expect(ground.current.fighters[1].action).toBe("hurt");
+
+    const ko = fightingSim(150);
+    ko.current.fighters[1].health = 5; // one punch from a KO
+    run(ko, ATTACKS.punch.startup + 2, input({ punch: true }), idle);
+    expect(ko.current.fighters[1].action).toBe("ko");
+    expect(ko.current.fighters[1].velocity.y).toBeLessThan(0); // launched (flying once the hit freeze ends)
+    const fall = run(ko, 40);
+    expect(fall).toContainEqual({ type: "landed", player: 1 });
+  });
+});
+
+describe("knockdowns stay rare", () => {
+  it("only the anti-air knocks down in the air: a punch or kick to a jumper is a plain hit", () => {
+    const jumper = (press: Partial<InputFrame>, gap: number) => {
+      const sim = fightingSim(gap);
+      sim.step([idle, input({ up: true })]);
+      run(sim, 4, idle, idle);
+      const events = run(sim, 12, input(press), idle);
+      return { hit: events.some((e) => e.type === "hit" && !e.blocked), knockdown: events.some((e) => e.type === "knockdown") };
+    };
+    expect(jumper({ punch: true, down: true }, 150)).toEqual({ hit: true, knockdown: true }); // uppercut
+    const plain = [{ punch: true }, { kick: true }].flatMap((press) => [120, 150, 200].map((gap) => jumper(press, gap))).filter((r) => r.hit);
+    expect(plain.length).toBeGreaterThan(0);
+    expect(plain.every((r) => !r.knockdown)).toBe(true);
+    expect(Object.entries(ATTACKS).filter(([, a]) => a.knocksDownInAir).map(([id]) => id)).toEqual(["uppercut"]);
   });
 });

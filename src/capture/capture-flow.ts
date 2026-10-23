@@ -62,7 +62,7 @@ export function initialCaptureFlow(roomCode: string | null): CaptureFlowState {
   return { screen: { name: "intro" }, mode: "friend", roomCode };
 }
 
-/** Index into CAPTURE_TARGETS (all thirteen poses, in capture order). */
+/** Index into CAPTURE_TARGETS (all fourteen poses, in capture order). */
 export const targetAt = (index: number): CaptureTarget => CAPTURE_TARGETS[index];
 const targetIndex = (key: string) => CAPTURE_TARGETS.findIndex((t) => t.key === key);
 /** Screens that show the live camera (they share one DOM; only the HUD changes between them). */

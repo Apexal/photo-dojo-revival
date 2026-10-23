@@ -45,7 +45,7 @@ try {
     navigator.getGamepads = () => (window.__unplugged ? [null, null, null, null] : [null, (window.__pad = snapshot()), null, null]);
   });
   await page.goto(BASE + "/");
-  await page.waitForFunction(() => window.photoDojo?.scene.isActive("character-select"), null, { timeout: 20000 });
+  await page.waitForFunction(() => window.photoDojo?.scene.isActive("title"), null, { timeout: 20000 });
   await page.evaluate(() => window.dispatchEvent(Object.assign(new Event("gamepadconnected"), { gamepad: window.__pad })));
   const tap = async (button) => {
     await page.evaluate((b) => window.__press(b, true), button);
@@ -55,8 +55,9 @@ try {
   };
   const sel = () => page.evaluate(() => window.photoDojo.scene.getScene("character-select").players[0]);
 
-  await tap(0); // A: join
-  await page.waitForFunction(() => window.photoDojo.scene.getScene("character-select").players[0]?.input.kind === "pad", null, { timeout: 3000 });
+  await tap(0); // A on the title: straight to fighter select, joined as P1
+  await page.waitForFunction(() => window.photoDojo.scene.isActive("character-select") && window.photoDojo.scene.getScene("character-select").players[0]?.input.kind === "pad", null, { timeout: 3000 });
+  check(!(await page.evaluate(() => window.photoDojo.scene.getScene("character-select").players[0].ready)), "the start press doesn't also pick");
   check((await page.evaluate(() => window.__rumbles.length)) >= 1, "joining buzzes the pad");
   step(`pad joined as P1 (${JSON.stringify((await sel()).input)}), with a confirmation rumble`);
 

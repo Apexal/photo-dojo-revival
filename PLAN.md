@@ -7,7 +7,7 @@ Decisions already made:
 - Entirely browser-based. Static hosting on Cloudflare Pages. The only server code is a Cloudflare Worker for WebRTC signaling (and optionally TURN credentials). It stores nothing.
 - Phaser 3 for rendering and input. Game logic lives in plain TypeScript modules with no Phaser imports so it is unit-testable.
 - TypeScript + Vite + Vitest.
-- Pose captures are shown as hard cuts (Photo Dojo style). Keypoints are stored per pose so ARAP tweening can be added later without a data migration.
+- Pose captures are shown as hard cuts (Photo Dojo style). Keypoints are stored per pose, which is what ARAP tweening (§9, now implemented for attack wind-ups and retractions) needed.
 - v1 gameplay: walk, jump, punch, kick, block, health bars, 60s round timer, best of 3 rounds, two gamepads. No specials, no throws, no CPU opponent.
 
 ---
@@ -133,7 +133,7 @@ export interface Fighter {
   createdAt: number;
   facingDirection: "right";               // all captures face right; renderer flips for P2
   poses: Record<PoseId, CapturedPose>;
-  sounds: Record<SoundId, Blob | null>;   // webm/opus, ≤2 s each
+  sounds: Record<SoundId, Blob | null>;   // webm/opus, ≤2 s each (victory line ≤5 s)
   thumbnailBlob: Blob;                    // idle pose downscaled, for character select
 }
 ```
@@ -311,7 +311,7 @@ Rules in v1:
 - Walk speed 4 px/frame. Block = hold back while grounded (classic), also down for crouch-block. Blocking takes 25 % damage and no hitstun.
 - Punch: startup 4f, active 3f, recovery 10f, damage 8, hitstun 12f, pushback 6 px.
 - Kick: startup 7f, active 4f, recovery 16f, damage 12, hitstun 16f, pushback 10 px.
-- Hitstop 4f on every hit (both fighters freeze; this is what makes hard cuts feel good).
+- Hitstop 6f on every hit, 8f on a throw (both fighters freeze; this is what makes hard cuts feel good). It's excluded from frame advantage, and buffered presses don't expire during it, so its length is feel only.
 - Hurt lasts the hitstun; KO when health ≤ 0; round timer 60 s; best of 3.
 - Fighters push each other apart if their body boxes overlap.
 
@@ -342,8 +342,12 @@ Boxes are derived from stored landmarks, so every fighter gets hitboxes that mat
 - `fighter-sprite-view.ts` turns each pose `Blob` into an object URL and loads it with `this.load.image` in the scene's preload; 8 textures per fighter, no atlas.
 - Sprite origin = `anchorPoint` so feet stay planted when poses swap.
 - P2 (or whoever is on the right) gets `flipX = true`. Because all captures face right, flipping is correct and hitboxes mirror around the anchor.
-- On hard cuts for attacks, draw 2–3 procedural motion lines (Phaser `Graphics`) between the previous and current wrist/ankle landmark positions for the active frames. Cheap, sells the motion.
+- On hard cuts for attacks, draw 2–3 procedural motion lines (Phaser `Graphics`) between the previous and current wrist/ankle landmark positions for the active frames. Cheap, sells the motion. With smooth motion on (§9) the poses morph and the lines are left out; they come back when it's off or the browser has no WebGL.
 - Hitstop: skip rendering updates while `hitstopFrames > 0`; add a 2 px screen shake on kick hits.
+- Hit weight, Street Fighter II style (`src/game/render/hit-feel.ts`, rendering only): the struck fighter keeps the pose they were hit in for the first 4 of the 6 hitstop frames, shaking sideways (4 px on a hit, 2 px on a block), then snaps into the hurt pose. A marker shows where the hit landed (the hit event's `at`: the middle of the hitbox's overlap with the hurtbox it overlaps most), in the attacker's colour (P1 red, P2 blue, as on fighter select, with a pale centre) and with a symbol per kind: a spiky burst for a hit, a bigger burst in a ring for a KO, a ring with four ticks (a struck shield) for a block, double chevrons pointing the way the victim flies for a throw. It pops out, holds through the freeze and fades over 16 frames.
+- Hit reactions show where the hit landed: a clean hit above `headHitLineY` (a quarter torso below the shoulders, since the contact point is the middle of the biggest overlap, usually with the torso box) shows the hands-on-face capture (hurt variant 1), anything lower the main hurt photo. KOs too; throws always show the main one. Decided in the simulation from the hit's `at`, so it's deterministic and replays the same; still cosmetic, since hurtboxes come from the main hurt pose. Win and taunt photos stay random.
+- Knockdowns (`KNOCKDOWN` in `frame-data.ts`, `docs/fighting-mechanics.md` §2.4): throws and uppercut hits on airborne opponents (`knocksDownInAir`) knock down: `knockdown` → `downed` (40f) → `wakeup` (12f), untouchable and without a push box throughout; KO'd fighters fall the same way. Events `knockdown` and `landed` (dust, `thud` sound, a small shake). Drawn by rotating the hurt photo (`fallPose` in `hit-feel.ts`; the turn lays the photo's own feet-to-head line flat, and it's lifted so its lowest joint rests on the floor).
+- Fight camera (`src/game/render/fight-camera.ts`, rendering only; Settings → Dynamic camera): frames both fighters, from the whole stage when they're 620 px apart or more to 1.22× when they're 240 px or closer, centred between them with the floor pinned to the bottom and never past the stage's edges. It zooms out as far as needed to keep both whole (170 px beside each, 540 px above the feet, so a jump with arms up fits), eases 10% of the way per frame, and punches in briefly on a clean hit, throw or KO. It snaps at each round start and when the KO replay begins. The HUD is drawn by a second, fixed camera: everything at depth ≥ 100 is HUD, the rest is world (the hitbox overlay moved from depth 1000 to 90 for this).
 - Sounds: `attack` on active frame 1, `hurt` on hit, `win` on round end, played through Phaser's Web Audio sound manager from object URLs. Missing clips fall back to bundled generic sounds.
 
 ### 6.5 Input
@@ -390,18 +394,26 @@ Durable Object signaling, WebRTC data channel, codec, QR flow. Test on iOS Safar
 **M4 — Feel and robustness (2 days)**
 Gamepads, friend/solo modes, voice prompts, tolerance widening, storage persistence warning, bundled fallback sounds, TURN if cross-network testing demands it, debug hitbox overlay.
 
-**M5 — ARAP hook (later)**
+**M5 — ARAP tweening (done)**
 See §9.
 
 ---
 
-## 9. ARAP tweening hook (future)
+## 9. ARAP tweening
 
-Nothing in v1 depends on this, but the data model is ready for it:
+Implemented; no data migration was needed, since every `CapturedPose` already stored its 33 landmarks.
 
-- Every `CapturedPose` stores 33 landmarks in sprite-canvas space, which is exactly the control-point set an as-rigid-as-possible mesh warp needs.
-- `frame-data.ts` entries are `{ poseId, frames }`; a future entry type `{ fromPoseId, toPoseId, frames }` would ask the renderer for interpolated frames.
-- Implementation would live in `src/game/render/pose-tweener.ts`: triangulate the idle pose alpha mask once per fighter, bind triangles to nearest landmarks, interpolate landmark positions per frame, and warp on a WebGL mesh (Phaser's `Rope`/`Mesh` or a custom pipeline). Only short side-view-to-side-view tweens, which is where this technique works.
+- **Frame data.** Sequence entries are `{ poseId, frames }` (hold) or `{ fromPoseId, toPoseId, frames }` (tween). A tween is rendering only: the simulation plays it as `fromPoseId`, so hurt/hit/body boxes and frame advantage are exactly what the hard cut gave. Punch, kick, low kick and throw tween idle → strike during startup and strike → idle on the first recovery entry; the uppercut only tweens its recovery (the crouch → pop-up cut is what reads as an anti-air); the jump kick tweens jump → kick during startup. `tweenOf(state)` (`fight-simulation.ts`) gives `{ from, to, t }` with the captured versions resolved like `frameOf`; t steps by 1/(frames + 1), so neither end repeats the neighbouring hard-cut frame.
+- **Mesh** (`src/game/render/arap.ts`, pure TS). Each capture's alpha mask gets two triangles per 12 px grid cell holding opaque pixels (no dilation, so legs a few px apart stay separate). The texture's own alpha draws the outline.
+- **Between actions.** `SOFT_CUTS` (`frame-data.ts`) lists pose pairs whose hard cut between actions morphs over 3–8 frames instead, eased out so the new pose reads almost at once: the walk cycle (a real stride), guard and crouch in and out, take-off and landing, the jump kick folding back, recovering from a hit, and taunt/win. Nothing morphs into `hurt` (impacts snap). The simulation only knows the current pose, so `PoseTransitions` (`src/game/render/pose-transitions.ts`) remembers what was on screen and times the morph by the simulation frame.
+- **Idle sway.** Standing still, a fighter sways between its stance and a second stance (`idle-2`, captured right after the stance: knees a little softer, breathing in) once every 100 frames (`idleSwayOf`), a cosine ease so it starts and ends at rest. Hurtboxes stay the main stance's. Fighters captured before `idle-2` existed (it's optional in the codec) get a stand-in: their idle photo warped onto `breathingStance` (knees soften, body sinks ~5% of a torso, fists drop a touch, feet fixed), drawn as one warped layer with no cross-fade.
+- **Left/right flips.** MediaPipe sometimes swaps left and right on a side-on body. If shoulders *and* hips both fit the other capture much better swapped (`sidesFlipped`), one capture is relabelled for that pair. One arm fitting better swapped isn't a flip (a cross does that), so that case is left alone.
+- **Moving limbs are cut loose.** An arm or leg whose elbow/wrist (knee/ankle) moves more than 0.35 torso lengths relative to its shoulder (hip), and that both captures can see, gets its own piece of mesh: triangles nearer its centre line than any other bone (within 0.3 / 0.45 torso lengths) and with their own vertex copies, so a forearm across the chest no longer drags the chest or the other fist along. It stays attached within 0.2 torso lengths of where the cut starts (30% down the upper arm / thigh), so it hinges instead of tearing off, and it's drawn over the body. Cut vertices are renumbered next to their originals so the solver's matrices stay banded (otherwise building is ~15× slower).
+- **Handles.** 17 joints plus points ⅓ and ⅔ along each limb bone and torso side, kept when both captures' landmarks are ≥ 0.5 visible. Each binds only inside its own piece (a cut limb's handles to the limb, the rest to the body), barycentrically in the triangle it falls in, else to the nearest vertex within 3 cells, keeping its offset. Mesh pieces no handle reaches are dropped.
+- **Skeleton interpolation** (`pose-tweener.ts`). The pelvis moves linearly; every other landmark is placed from its parent with the bone turning the short way round and its length interpolated, so a straightening arm doesn't shrink through the elbow.
+- **Warp.** Igarashi et al. 2005 two-step ARAP (similarity step, then per-triangle rotation fit and edge-matching step), soft handles, both matrices factored once per capture-and-partner as banded Cholesky (row-by-row vertex numbering keeps them banded). Every pair a fighter can show is built at fight start: ≈ 100 ms per fighter in Chrome for a captured fighter; a solve is well under a millisecond.
+- **Drawing** (`fighter-sprite-view.ts`). Both captures are warped onto the in-between skeleton and drawn as Phaser `Mesh`es (WebGL only; the canvas renderer keeps hard cuts): the arriving capture on top fading in at 2t, the leaving one under it fading out from halfway, so the body never goes see-through. Under both, the fainter capture's body (without its cut-loose limbs) is drawn solid: it fills the hole a moved limb leaves (a photo has nothing behind an arm). Settings → "Smooth motion" turns all of it off.
+- **Limits.** Where two limbs overlap in a photo (a rear forearm across a lead forearm), the cut has to guess which pixels belong to which, so the edge of the moving limb can look ragged for a frame or two. Limbs that don't move between the two captures aren't cut, so they still bend with the body. Body-part segmentation models (BodyPix, human parsing) would give cleaner cuts but are large to run on a phone and don't fill what's hidden behind a limb; the backing layer does that from the other photo. Keep tweens short.
 
 ---
 

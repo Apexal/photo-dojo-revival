@@ -182,18 +182,21 @@ describe("second-version poses", () => {
       const lm = buildStickFigureLandmarks(def.poseId, STICK_BONUS_POSES[key]);
       expect(evaluatePose(lm, def).score, key).toBeLessThan(0.9);
       for (const poseId of POSE_IDS) {
+        // The second stance is meant to look like the first; the matcher's "relax, then strike
+        // the pose" rule between similar poses is what stops it being captured by accident.
+        if (key === "idle-2" && poseId === "idle") continue;
         expect(evaluatePose(buildStickFigureLandmarks(poseId), def).score, `${poseId} vs ${key}`).toBeGreaterThan(1);
       }
     }
   });
 
-  it("capture targets: all thirteen, each second version right after its main pose", () => {
+  it("capture targets: all fourteen, each second version right after its main pose", () => {
     expect(CAPTURE_TARGETS.map((t) => [t.key, t.poseId, t.variant])).toEqual([
-      ["idle", "idle", 0], ["walk", "walk", 0], ["block", "block", 0], ["crouch", "crouch", 0],
+      ["idle", "idle", 0], ["idle-2", "idle", 1], ["walk", "walk", 0], ["block", "block", 0], ["crouch", "crouch", 0],
       ["punch", "punch", 0], ["punch-2", "punch", 1], ["kick", "kick", 0], ["kick-2", "kick", 1],
       ["jump", "jump", 0], ["hurt", "hurt", 0], ["hurt-2", "hurt", 1], ["win", "win", 0], ["win-2", "win", 1],
     ]);
-    expect(REQUIRED_VARIANT_POSES).toEqual(["punch", "kick", "hurt", "win"]);
+    expect(REQUIRED_VARIANT_POSES).toEqual(["punch", "kick", "hurt", "win"]); // the second stance is optional
     expect(ALTERNATE_DEFINITIONS["punch-2"].attackLimb).toBe("arm");
     expect(ALTERNATE_DEFINITIONS["kick-2"].attackLimb).toBe("leg");
   });

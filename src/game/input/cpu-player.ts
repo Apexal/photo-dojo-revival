@@ -1,6 +1,6 @@
-import { ATTACKS, TAUNT, THROW, THROW_TOTAL_FRAMES, attackTotalFrames, type AttackId, type FighterGeometry } from "../../shared/frame-data";
+import { ATTACKS, KNOCKDOWN, TAUNT, THROW, THROW_TOTAL_FRAMES, attackTotalFrames, type AttackId, type FighterGeometry } from "../../shared/frame-data";
 import { worldBoxesOf } from "../../simulation/fight-simulation";
-import { createFighterState, currentAttackPhase, isAttack, isGrounded, type FighterState } from "../../simulation/fighter-state-machine";
+import { createFighterState, currentAttackPhase, isAttack, isDown, isGrounded, type FighterState } from "../../simulation/fighter-state-machine";
 import { EMPTY_INPUT, type InputFrame } from "../../simulation/input-frame";
 
 export type CpuLevel = "easy" | "normal" | "hard";
@@ -64,6 +64,12 @@ function rangesFor(self: FighterGeometry, opponent: FighterGeometry): Ranges {
  * succeed with per-level odds. Output is plain InputFrames, so it plays by
  * exactly the same rules as a person.
  */
+/** Startup frames of the attack an input makes (punch, kick, or with down held, uppercut / low kick). */
+function startupOf(move: Partial<InputFrame>): number {
+  const attack: AttackId = move.punch ? (move.down ? "uppercut" : "punch") : move.down ? "lowKick" : "kick";
+  return ATTACKS[attack].startup;
+}
+
 export class CpuPlayer {
   private readonly tuning: CpuTuning;
   private readonly ranges: Ranges;
@@ -134,6 +140,18 @@ export class CpuPlayer {
       return level === "low" || level === "high" ? { ...EMPTY_INPUT, down: true } : { ...EMPTY_INPUT, [back]: true };
     }
 
+    // Knocked down: nothing to hit yet. Walk in, and (more often the harder it is) time an
+    // attack so it's already out when they get up.
+    if (isDown(opp)) {
+      if (!free) return this.stanceInput(forward, back);
+      const move = this.bestAttack(distance);
+      const wakeLeft = this.wakeLeft(opp);
+      if (move && this.cooldown === 0 && wakeLeft >= 0 && wakeLeft <= startupOf(move) && this.roll(`meaty:${this.moveId(opp)}`, this.tuning.punish)) {
+        return this.attack(move);
+      }
+      return distance > this.ranges.attack.punch ? { ...EMPTY_INPUT, [forward]: true } : { ...EMPTY_INPUT };
+    }
+
     // Hit or blocked: maybe keep the guard up for what comes next.
     if (self.action === "hurt" || self.action === "blockstun") {
       return this.roll(`stun:${this.frame - self.actionFrame}`, this.tuning.block) ? { ...EMPTY_INPUT, down: true } : this.stanceInput(forward, back);
@@ -195,6 +213,14 @@ export class CpuPlayer {
     if (distance <= attack.lowKick && varied && this.random() < 0.4) return { down: true, kick: true };
     if (distance <= attack.kick) return { kick: true };
     return null;
+  }
+
+  /** Frames until a knocked-down opponent is free, judging from what the CPU saw `reaction` frames ago (-1: still flying, unknown). */
+  private wakeLeft(opp: FighterState): number {
+    const late = this.seen.length - 1;
+    if (opp.action === "downed") return KNOCKDOWN.floorFrames - opp.actionFrame + KNOCKDOWN.wakeFrames - late;
+    if (opp.action === "wakeup") return KNOCKDOWN.wakeFrames - opp.actionFrame - late;
+    return -1;
   }
 
   /** Frames the opponent is still stuck for now, judging from what the CPU saw `reaction` frames ago. */

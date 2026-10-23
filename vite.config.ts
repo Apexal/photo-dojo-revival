@@ -1,17 +1,18 @@
-import { createReadStream, existsSync, statSync } from "node:fs";
+import { createReadStream, existsSync, readFileSync, statSync } from "node:fs";
 import { resolve } from "node:path";
 import basicSsl from "@vitejs/plugin-basic-ssl";
 import { defaultClientConditions, type Connect, type Plugin } from "vite";
 import { defineConfig } from "vitest/config";
 
-/** Serve /capture like Cloudflare Pages does (pretty URL for capture.html). */
-function prettyCaptureUrl(): Plugin {
+/** Serve /capture and /about like Cloudflare Pages does (pretty URLs for capture.html, about.html). */
+function prettyUrls(): Plugin {
   const rewrite: Connect.NextHandleFunction = (req, _res, next) => {
-    if (req.url && /^\/capture\/?(\?|$)/.test(req.url)) req.url = req.url.replace(/^\/capture\/?/, "/capture.html");
+    const match = req.url?.match(/^\/(capture|about)\/?(\?.*)?$/);
+    if (match) req.url = `/${match[1]}.html${match[2] ?? ""}`;
     next();
   };
   return {
-    name: "pretty-capture-url",
+    name: "pretty-urls",
     configureServer: (server) => { server.middlewares.use(rewrite); },
     configurePreviewServer: (server) => { server.middlewares.use(rewrite); },
   };
@@ -38,6 +39,20 @@ function localModels(): Plugin {
   };
 }
 
+/**
+ * HTML placeholders: __APP_VERSION__ (package.json) and __SITE_URL__ (VITE_SITE_URL,
+ * e.g. https://photo-dojo.pages.dev: link previews need an absolute image URL;
+ * without it they fall back to a relative one, which some apps ignore).
+ */
+function htmlPlaceholders(): Plugin {
+  const { version } = JSON.parse(readFileSync(resolve(import.meta.dirname, "package.json"), "utf8")) as { version: string };
+  const siteUrl = (process.env.VITE_SITE_URL ?? "").replace(/\/$/, "");
+  return {
+    name: "html-placeholders",
+    transformIndexHtml: (html) => html.replaceAll("__APP_VERSION__", version).replaceAll("__SITE_URL__", siteUrl),
+  };
+}
+
 const workerProxy = {
   "/room": { target: "http://localhost:8787", ws: true, changeOrigin: true },
   "/turn-credentials": { target: "http://localhost:8787", changeOrigin: true },
@@ -45,7 +60,7 @@ const workerProxy = {
 
 export default defineConfig({
   // HTTPS=1 npm run dev: self-signed HTTPS so phones on the LAN get camera access.
-  plugins: [prettyCaptureUrl(), localModels(), ...(process.env.HTTPS ? [basicSsl()] : [])],
+  plugins: [prettyUrls(), htmlPlaceholders(), localModels(), ...(process.env.HTTPS ? [basicSsl()] : [])],
   server: {
     host: true,
     // The signaling Worker (wrangler dev on :8787) is proxied through the dev server, so pages
@@ -66,6 +81,7 @@ export default defineConfig({
       input: {
         main: resolve(import.meta.dirname, "index.html"),
         capture: resolve(import.meta.dirname, "capture.html"),
+        about: resolve(import.meta.dirname, "about.html"),
       },
     },
   },

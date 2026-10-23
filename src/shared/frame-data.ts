@@ -6,7 +6,20 @@ import { headCenter, stickFigureGeometry } from "./stick-figure";
 export interface Box { x: number; y: number; width: number; height: number }
 
 export type MovePhase = "startup" | "active" | "recovery";
-export interface PoseFrame { poseId: PoseId; frames: number; phase?: MovePhase }
+/** Show one captured pose for some frames (a hard cut into it). */
+export interface HoldFrame { poseId: PoseId; frames: number; phase?: MovePhase }
+/**
+ * Morph one capture into the next over some frames (ARAP mesh warp, see
+ * src/game/render/pose-tweener.ts). Purely visual: hurtboxes, hitboxes and body
+ * boxes stay those of `fromPoseId`, so a tween never changes how a move plays.
+ * Keep them between side-view poses and short, which is where the warp holds up.
+ */
+export interface TweenFrame { fromPoseId: PoseId; toPoseId: PoseId; frames: number; phase?: MovePhase }
+export type PoseFrame = HoldFrame | TweenFrame;
+
+export const isTween = (entry: PoseFrame): entry is TweenFrame => "fromPoseId" in entry;
+/** The pose whose geometry counts for an entry: a tween plays as the pose it leaves. */
+export const gameplayPoseOf = (entry: PoseFrame): PoseId => (isTween(entry) ? entry.fromPoseId : entry.poseId);
 
 export type AttackId = "punch" | "kick" | "uppercut" | "lowKick" | "jumpKick";
 
@@ -29,6 +42,8 @@ export interface AttackData {
   advance?: number;
   /** Which limb carries the hitbox. */
   limb: "arm" | "leg";
+  /** A clean hit on someone in the air knocks them down (the anti-air's reward); other air hits are plain hits. */
+  knocksDownInAir?: boolean;
   level: HitLevel;
   /** The pose (and captured version) shown on active frames: uppercut / low kick use the second punch / kick captures. */
   pose: { poseId: PoseId; variant: number };
@@ -54,9 +69,9 @@ export const ATTACKS: Record<AttackId, AttackData> = {
     startup: 4, active: 3, recovery: 10, damage: 8, hitstun: 16, blockstun: 10, pushback: 6,
     limb: "arm", level: "high", pose: { poseId: "punch", variant: 0 },
     sequence: [
-      { poseId: "idle", frames: 4, phase: "startup" },
+      { fromPoseId: "idle", toPoseId: "punch", frames: 4, phase: "startup" },
       { poseId: "punch", frames: 3, phase: "active" },
-      { poseId: "punch", frames: 4, phase: "recovery" },
+      { fromPoseId: "punch", toPoseId: "idle", frames: 4, phase: "recovery" },
       { poseId: "idle", frames: 6, phase: "recovery" },
     ],
   },
@@ -64,19 +79,20 @@ export const ATTACKS: Record<AttackId, AttackData> = {
     startup: 7, active: 4, recovery: 16, damage: 12, hitstun: 22, blockstun: 14, pushback: 20, advance: 60,
     limb: "leg", level: "mid", pose: { poseId: "kick", variant: 0 },
     sequence: [
-      { poseId: "idle", frames: 7, phase: "startup" },
+      { fromPoseId: "idle", toPoseId: "kick", frames: 7, phase: "startup" },
       { poseId: "kick", frames: 4, phase: "active" },
-      { poseId: "kick", frames: 6, phase: "recovery" },
+      { fromPoseId: "kick", toPoseId: "idle", frames: 6, phase: "recovery" },
       { poseId: "idle", frames: 10, phase: "recovery" },
     ],
   },
   uppercut: {
     startup: 6, active: 4, recovery: 18, damage: 11, hitstun: 24, blockstun: 14, pushback: 12,
-    limb: "arm", level: "mid", pose: { poseId: "punch", variant: 1 },
+    limb: "arm", level: "mid", pose: { poseId: "punch", variant: 1 }, knocksDownInAir: true,
     sequence: [
+      // Hard cut out of the crouch: the pop up is what reads as an anti-air.
       { poseId: "block", frames: 6, phase: "startup" },
       { poseId: "punch", frames: 4, phase: "active" },
-      { poseId: "punch", frames: 6, phase: "recovery" },
+      { fromPoseId: "punch", toPoseId: "idle", frames: 6, phase: "recovery" },
       { poseId: "idle", frames: 12, phase: "recovery" },
     ],
   },
@@ -84,9 +100,9 @@ export const ATTACKS: Record<AttackId, AttackData> = {
     startup: 6, active: 3, recovery: 12, damage: 7, hitstun: 16, blockstun: 11, pushback: 8, advance: 20,
     limb: "leg", level: "low", pose: { poseId: "kick", variant: 1 },
     sequence: [
-      { poseId: "idle", frames: 6, phase: "startup" },
+      { fromPoseId: "idle", toPoseId: "kick", frames: 6, phase: "startup" },
       { poseId: "kick", frames: 3, phase: "active" },
-      { poseId: "kick", frames: 5, phase: "recovery" },
+      { fromPoseId: "kick", toPoseId: "idle", frames: 5, phase: "recovery" },
       { poseId: "idle", frames: 7, phase: "recovery" },
     ],
   },
@@ -99,7 +115,7 @@ export const ATTACKS: Record<AttackId, AttackData> = {
     startup: 5, active: 40, recovery: 4, damage: 10, hitstun: 18, blockstun: 12, pushback: 8,
     limb: "leg", level: "overhead", pose: { poseId: "kick", variant: 0 },
     sequence: [
-      { poseId: "jump", frames: 5, phase: "startup" },
+      { fromPoseId: "jump", toPoseId: "kick", frames: 5, phase: "startup" },
       { poseId: "kick", frames: 40, phase: "active" },
       { poseId: "jump", frames: 4, phase: "recovery" },
     ],
@@ -126,7 +142,8 @@ export const BLOCK_LENIENCY_FRAMES = 3;
 /**
  * Throw: beats block, loses to attacks (a fighter in an attack's startup or
  * active frames can't be grabbed), whiffs into long recovery. The grabbed
- * fighter can break it by pressing punch + kick during the tech window.
+ * fighter can break it by pressing punch + kick during the tech window. A
+ * throw that lands knocks down (KNOCKDOWN), flinging the victim throwDistance.
  */
 export const THROW = {
   startup: 5,
@@ -135,20 +152,36 @@ export const THROW = {
   damage: 12,
   /** Frames the grabbed fighter has to press punch + kick and break free. */
   techWindow: 8,
-  /** Hurt frames after the throw lands; leaves the thrower well ahead. */
-  releaseHitstun: 26,
+  /** How far the thrown fighter lands from where they were grabbed (px). */
   throwDistance: 90,
   /** Max gap between the two push boxes for the grab to connect. */
   range: 40,
   sequence: [
-    { poseId: "idle", frames: 5, phase: "startup" },
+    { fromPoseId: "idle", toPoseId: "punch", frames: 5, phase: "startup" },
     { poseId: "punch", frames: 1, phase: "active" },
-    { poseId: "punch", frames: 6, phase: "recovery" },
+    { fromPoseId: "punch", toPoseId: "idle", frames: 6, phase: "recovery" },
     { poseId: "idle", frames: 14, phase: "recovery" },
   ] as PoseFrame[],
 } as const;
 
 export const THROW_TOTAL_FRAMES = THROW.startup + THROW.active + THROW.recovery;
+
+/**
+ * Knockdown, Street Fighter style: a throw, or an anti-air (uppercut) hit on
+ * someone in the air, sends them flying back to the floor (other air hits are
+ * plain hits: knockdowns should be an event, not every exchange); they lie there, then get up. All
+ * the while they can't be hit or thrown and have no push box (walk over them):
+ * no juggles, just a reset to neutral with the attacker free first. The fixed
+ * wake-up timing is the guessing game: attack as they rise, or wait.
+ */
+export const KNOCKDOWN = {
+  /** Launch velocity (px/frame): back, and up. */
+  launch: { x: 3.5, y: -7 },
+  /** Frames lying on the floor after landing. */
+  floorFrames: 40,
+  /** Frames getting up; free (and buffered presses come out) on the next. */
+  wakeFrames: 12,
+} as const;
 /** Pressing the second button this many frames into a punch/kick turns it into a throw. */
 export const THROW_LENIENCY_FRAMES = 2;
 /** A punch/kick press is remembered this long, so pressing a little early still works. */
@@ -166,24 +199,98 @@ export function attackPhaseAt(attack: AttackData, actionFrame: number): MovePhas
   return null;
 }
 
-/** The pose shown on a given frame of a sequence; the last entry holds if the frame runs past the end. */
+/** The sequence entry on a given frame; the last entry holds if the frame runs past the end. */
 export function poseAtFrame(sequence: PoseFrame[], actionFrame: number): PoseFrame {
+  return entryAtFrame(sequence, actionFrame).entry;
+}
+
+function entryAtFrame(sequence: PoseFrame[], actionFrame: number): { entry: PoseFrame; frame: number } {
   let f = actionFrame;
   for (const entry of sequence) {
-    if (f < entry.frames) return entry;
+    if (f < entry.frames) return { entry, frame: f };
     f -= entry.frames;
   }
-  return sequence[sequence.length - 1];
+  const last = sequence[sequence.length - 1];
+  return { entry: last, frame: last.frames - 1 };
+}
+
+/** A tween in progress: morph `from` toward `to`; t is in (0, 1), exclusive at both ends. */
+export interface PoseTween { from: PoseId; to: PoseId; t: number }
+
+/**
+ * The tween shown on a given frame, or null on a hard-cut frame. t steps by
+ * 1 / (frames + 1), so its first frame already moves off the pose before it and
+ * its last stops short of the pose after it.
+ */
+export function tweenAtFrame(sequence: PoseFrame[], actionFrame: number): PoseTween | null {
+  const { entry, frame } = entryAtFrame(sequence, actionFrame);
+  return isTween(entry) ? { from: entry.fromPoseId, to: entry.toPoseId, t: (frame + 1) / (entry.frames + 1) } : null;
+}
+
+/** The sequence an action plays, if it has one (attacks and the throw). */
+export function sequenceFor(action: FighterAction): PoseFrame[] | null {
+  switch (action) {
+    case "punch":
+    case "kick":
+    case "uppercut":
+    case "lowKick":
+    case "jumpKick":
+      return ATTACKS[action].sequence;
+    case "throw":
+      return THROW.sequence;
+    default:
+      return null;
+  }
+}
+
+/**
+ * Rendering only, like tween entries: when the shown capture cuts from one pose
+ * to another between actions (or along the walk cycle), these pairs morph over
+ * a few frames instead, easing out so the new pose reads almost at once.
+ * Deliberately missing: anything into "hurt" (an impact should snap) and
+ * block → punch (the uppercut's pop). Attack sequences carry their own tweens.
+ */
+export const SOFT_CUTS: readonly { from: PoseId; to: PoseId; frames: number }[] = [
+  // A stride: the walk cycle swaps captures every 10 frames.
+  { from: "idle", to: "walk", frames: 8 }, { from: "walk", to: "idle", frames: 8 },
+  // Guarding.
+  { from: "idle", to: "block", frames: 4 }, { from: "block", to: "idle", frames: 5 },
+  { from: "walk", to: "block", frames: 4 }, { from: "block", to: "walk", frames: 5 },
+  { from: "idle", to: "crouch", frames: 4 }, { from: "crouch", to: "idle", frames: 5 },
+  { from: "walk", to: "crouch", frames: 4 },
+  { from: "block", to: "crouch", frames: 3 }, { from: "crouch", to: "block", frames: 3 },
+  // Take-off (the squat shows the block capture), landing, and the jump kick folding back.
+  { from: "block", to: "jump", frames: 3 }, { from: "jump", to: "idle", frames: 5 },
+  { from: "jump", to: "block", frames: 4 }, { from: "jump", to: "walk", frames: 5 },
+  { from: "kick", to: "jump", frames: 3 }, { from: "kick", to: "idle", frames: 5 },
+  // Getting over a hit.
+  { from: "hurt", to: "idle", frames: 6 }, { from: "hurt", to: "block", frames: 4 },
+  // Taunts and the win pose.
+  { from: "idle", to: "win", frames: 8 }, { from: "walk", to: "win", frames: 8 }, { from: "win", to: "idle", frames: 6 },
+];
+
+export function softCut(from: PoseId, to: PoseId): { frames: number } | null {
+  return SOFT_CUTS.find((c) => c.from === from && c.to === to) ?? null;
+}
+
+/** Standing still, the fighter sways from its stance to the second stance and back once every this many frames. Rendering only. */
+export const IDLE_SWAY_FRAMES = 100;
+
+/** How far into the second stance (0..1) the sway is on a given frame of standing still: a smooth breath that starts at 0. */
+export function idleSwayAt(actionFrame: number): number {
+  return (1 - Math.cos((2 * Math.PI * actionFrame) / IDLE_SWAY_FRAMES)) / 2;
 }
 
 export type FighterAction =
   | "idle" | "walk" | "jump" | "block" | "blockstun"
   | "jumpSquat"
   | "punch" | "kick" | "uppercut" | "lowKick" | "jumpKick" | "throw" | "taunt"
-  | "grabbed" | "hurt" | "ko" | "win";
+  | "grabbed" | "hurt" | "ko" | "win"
+  /** Knocked down: flying (knockdown), on the floor (downed), getting up (wakeup). */
+  | "knockdown" | "downed" | "wakeup";
 
 /** Walk alternates between the walk and idle captures for a hard-cut stride. */
-export const WALK_CYCLE: PoseFrame[] = [
+export const WALK_CYCLE: HoldFrame[] = [
   { poseId: "walk", frames: 10 },
   { poseId: "idle", frames: 10 },
 ];
@@ -195,21 +302,23 @@ export function poseForAction(action: FighterAction, actionFrame: number): PoseI
     case "uppercut":
     case "lowKick":
     case "jumpKick":
-      return poseAtFrame(ATTACKS[action].sequence, actionFrame).poseId;
+    case "throw":
+      return gameplayPoseOf(poseAtFrame(sequenceFor(action)!, actionFrame));
     case "jumpSquat":
       return "block"; // the crouch before the jump
     case "taunt":
       return "win";
-    case "throw":
-      return poseAtFrame(THROW.sequence, actionFrame).poseId;
     case "grabbed":
       return "hurt";
     case "blockstun":
       return "block";
     case "walk":
-      return poseAtFrame(WALK_CYCLE, actionFrame % (WALK_CYCLE[0].frames + WALK_CYCLE[1].frames)).poseId;
+      return gameplayPoseOf(poseAtFrame(WALK_CYCLE, actionFrame % (WALK_CYCLE[0].frames + WALK_CYCLE[1].frames)));
     case "ko":
-      return "hurt";
+    case "knockdown":
+    case "downed":
+    case "wakeup":
+      return "hurt"; // drawn lying down / getting up by rotating it (fighter-sprite-view.ts)
     default:
       return action;
   }
@@ -251,7 +360,10 @@ export function variantCount(geometry: FighterGeometry, poseId: PoseId): number 
 export function variantPoseFor(action: FighterAction): PoseId | null {
   switch (action) {
     case "hurt":
-    case "ko": return "hurt";
+    case "ko":
+    case "knockdown":
+    case "downed":
+    case "wakeup": return "hurt";
     case "win":
     case "taunt": return "win";
     // Grabbed always shows the main hurt pose, so the throw animation always reads the same.

@@ -1,5 +1,4 @@
 import { leadingSilenceSamples, trimLeadingSilence } from "../shared/audio-trim";
-import { MAX_SOUND_SECONDS } from "../shared/fighter-model";
 
 export const PREFERRED_AUDIO_TYPES = ["audio/webm;codecs=opus", "audio/webm", "audio/mp4", "audio/ogg;codecs=opus"];
 export const TARGET_PEAK = 0.9;
@@ -54,7 +53,7 @@ function recordStream(stream: MediaStream, mimeType: string, maxMs: number, onSt
   });
 }
 
-/** MediaRecorder for the three voice clips: one tap to start, auto-stop at 2 s. */
+/** MediaRecorder for the three voice clips: one tap to start, auto-stop at the line's limit. */
 export class SoundRecorder {
   private stopCurrent: (() => void) | null = null;
   private meter: { ctx: AudioContext; analyser: AnalyserNode; samples: Float32Array<ArrayBuffer> } | null = null;
@@ -73,8 +72,8 @@ export class SoundRecorder {
     return new SoundRecorder(stream);
   }
 
-  /** Records up to 2 s (or until stop()) and returns a peak-normalized clip. `onLevel` gets the live input level each frame. */
-  async record(maxMs = MAX_SOUND_SECONDS * 1000, onLevel?: (level: AudioLevel) => void): Promise<Blob> {
+  /** Records up to `maxMs` (or until stop()) and returns a peak-normalized clip. `onLevel` gets the live input level each frame. */
+  async record(maxMs: number, onLevel?: (level: AudioLevel) => void): Promise<Blob> {
     const stopMeter = onLevel ? this.startMeter(onLevel) : null;
     let raw: Blob;
     try {
@@ -131,7 +130,7 @@ export class SoundRecorder {
 /**
  * Normalize peak gain and drop leading silence with Web Audio: decode, compute
  * gain and start offset, and re-record the clip through a GainNode (in real
- * time; clips are ≤2 s). Re-recording can add a few ms of startup silence back,
+ * time; clips are ≤5 s). Re-recording can add a few ms of startup silence back,
  * so playback trims again (see audio-trim.ts).
  */
 export async function normalizePeak(blob: Blob, mimeType: string): Promise<Blob> {

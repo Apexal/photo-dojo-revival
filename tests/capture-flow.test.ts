@@ -146,9 +146,10 @@ describe("draft summary", () => {
   });
 
   it("counts captured poses and finds the next missing one", () => {
-    expect(summarizeDraft(draft(["idle", "walk", "block"]), 2000)).toEqual({ captured: 3, complete: false, nextPoseIndex: 3, ageMs: 1000 });
-    const all = ["idle", "walk", "block", "crouch", "punch", "punch-2", "kick", "kick-2", "jump", "hurt", "hurt-2", "win", "win-2"];
-    expect(summarizeDraft(draft(all))).toMatchObject({ captured: 13, complete: true, nextPoseIndex: null });
+    // A draft from before the second stance existed picks up there.
+    expect(summarizeDraft(draft(["idle", "walk", "block"]), 2000)).toEqual({ captured: 3, complete: false, nextPoseIndex: 1, ageMs: 1000 });
+    const all = ["idle", "idle-2", "walk", "block", "crouch", "punch", "punch-2", "kick", "kick-2", "jump", "hurt", "hurt-2", "win", "win-2"];
+    expect(summarizeDraft(draft(all))).toMatchObject({ captured: 14, complete: true, nextPoseIndex: null });
     expect(summarizeDraft(draft(all.filter((k) => k !== "kick-2")))).toMatchObject({ complete: false, nextPoseIndex: indexOf("kick-2") });
   });
 

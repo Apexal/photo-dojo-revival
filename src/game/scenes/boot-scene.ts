@@ -34,7 +34,7 @@ export class BootScene extends Phaser.Scene {
       try {
         this.registry.set(REGISTRY.library, await loadLibrary());
         this.startHosting();
-        this.scene.start("character-select");
+        this.scene.start("title");
       } catch (err) {
         text.setText(`Couldn't load fighters:\n${(err as Error).message}`).setAlign("center");
       }

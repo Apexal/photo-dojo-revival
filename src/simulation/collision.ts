@@ -43,6 +43,22 @@ export function boxCenterX(b: Box): number {
 
 /** Attacker hitbox vs any of the defender's hurtboxes, all in sprite space, resolved in world space. */
 export function hitConnects(hitbox: Box, attacker: Placement, hurtboxes: readonly Box[], defender: Placement): boolean {
+  return contactPoint(hitbox, attacker, hurtboxes, defender) !== null;
+}
+
+/**
+ * Where a hit lands (world space): the middle of the hitbox's overlap with the
+ * hurtbox it overlaps most. Null if it overlaps none.
+ */
+export function contactPoint(hitbox: Box, attacker: Placement, hurtboxes: readonly Box[], defender: Placement): { x: number; y: number } | null {
   const hit = toWorldBox(hitbox, attacker);
-  return hurtboxes.some((h) => boxesOverlap(hit, toWorldBox(h, defender)));
+  let best: Box | null = null;
+  for (const h of hurtboxes) {
+    const w = toWorldBox(h, defender);
+    if (!boxesOverlap(hit, w)) continue;
+    const x = Math.max(hit.x, w.x), y = Math.max(hit.y, w.y);
+    const overlap = { x, y, width: Math.min(hit.x + hit.width, w.x + w.width) - x, height: Math.min(hit.y + hit.height, w.y + w.height) - y };
+    if (!best || overlap.width * overlap.height > best.width * best.height) best = overlap;
+  }
+  return best && { x: best.x + best.width / 2, y: best.y + best.height / 2 };
 }

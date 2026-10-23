@@ -9,3 +9,15 @@ body { display: flex; flex-direction: column; }
 #toolbar button { font: inherit; padding: 6px 12px; border-radius: 6px; border: 1px solid #555; background: #222; color: var(--fg); cursor: pointer; }
 #toolbar button:hover { border-color: var(--accent); }
 #toolbar-status { min-width: 12em; opacity: 0.85; }
+#toolbar a { color: var(--fg); opacity: 0.85; }
+#toolbar a:hover { color: var(--accent); opacity: 1; }
+
+/* Shown instead of the game on a phone (device-gate.ts). */
+#phone-gate { position: fixed; inset: 0; overflow: auto; display: flex; flex-direction: column; gap: 16px; padding: 24px max(20px, env(safe-area-inset-left)); max-width: 520px; margin: 0 auto; font-size: 17px; line-height: 1.45; }
+#phone-gate h1 { margin: 12px 0 0; color: var(--accent); font-size: 32px; line-height: 1.1; }
+#phone-gate h1 span { display: block; color: #e8483b; font-size: 18px; letter-spacing: 0.2em; margin-top: 4px; }
+#phone-gate p { margin: 0; }
+#phone-gate .muted { color: #a8a196; font-size: 15px; }
+#phone-gate a.button, #phone-gate button { font: inherit; font-weight: 600; padding: 14px 18px; border-radius: 12px; border: 2px solid #3a3346; background: #1c1824; color: var(--fg); text-align: center; text-decoration: none; cursor: pointer; }
+#phone-gate a.button.primary { background: var(--accent); border-color: var(--accent); color: #1a1410; }
+#phone-gate a { color: var(--accent); }

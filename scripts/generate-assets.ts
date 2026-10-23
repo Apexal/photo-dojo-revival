@@ -177,9 +177,16 @@ const block = synth(0.16, (t) => {
 });
 // tick: a short wooden click for the last 10 seconds
 const tick = synth(0.08, (t) => env(t, 0.001, 0.012) * (0.6 * Math.sin(2 * Math.PI * 1800 * t) + 0.3 * Math.sin(2 * Math.PI * 900 * t)));
+// thud: a body hitting the floor — a deep sine drop under a muffled rumble (made last, so the others' noise stays the same)
+let lpt = 0;
+const thud = synth(0.35, (t) => {
+  lpt += (noise() - lpt) * 0.04;
+  const f = 90 * Math.exp(-t * 9) + 32;
+  return env(t, 0.003, 0.11) * (0.9 * Math.sin(2 * Math.PI * f * t) + 1.8 * lpt * Math.exp(-t * 14));
+});
 
 mkdirSync(join(OUT, "sounds"), { recursive: true });
-for (const [name, samples] of Object.entries({ attack, hurt, win, hit, block, tick })) {
+for (const [name, samples] of Object.entries({ attack, hurt, win, hit, block, tick, thud })) {
   writeFileSync(join(OUT, "sounds", `${name}.wav`), encodeWav(samples, RATE));
 }
 console.log("wrote", join(OUT, "sounds"));

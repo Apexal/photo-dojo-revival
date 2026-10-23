@@ -134,7 +134,7 @@ import { DummyInputSource, nextCpuBehavior } from "../src/game/input/dummy-input
 import { CpuPlayer, type CpuLevel } from "../src/game/input/cpu-player";
 import { stickFigureGeometry } from "../src/shared/stick-figure";
 import { FightSimulation, createRng, type FightState } from "../src/simulation/fight-simulation";
-import { createFighterState } from "../src/simulation/fighter-state-machine";
+import { createFighterState, isDown } from "../src/simulation/fighter-state-machine";
 import { input, type InputFrame } from "../src/simulation/input-frame";
 import { ROUND_INTRO_FRAMES } from "../src/simulation/round-rules";
 
@@ -261,26 +261,29 @@ describe("CPU opponent", () => {
     expect(hits.byCpu).toBeGreaterThan(5);
   });
 
-  it("uppercuts jump-ins on hard far more often than on easy", () => {
-    const uppercuts = (level: CpuLevel) => {
-      let count = 0;
+  it("stops jump-ins on hard far more often than on easy", () => {
+    // A jump-in it answers: any clean hit on the jumper while they're in the air.
+    const stopped = (level: CpuLevel) => {
+      let jumps = 0, answered = 0;
       for (const seed of [1, 2, 3, 4, 5, 6]) {
         const sim = new FightSimulation([geo, geo], { practice: true, seed, startPositions: [440, 700] });
         const cpu = new CpuPlayer(level, { self: geo, opponent: geo }, createRng(seed));
         for (let i = 0; i < ROUND_INTRO_FRAMES; i++) sim.step([input(), input()]);
+        // Jump in with a kick, then walk back out; start over once back up after a knockdown (an uppercut).
+        let t = 0;
         for (let f = 0; f < 600; f++) {
           const s = sim.current;
-          const t = f % 90;
-          // Jump in with a kick, then walk back out.
+          t = isDown(s.fighters[0]) ? 0 : (t + 1) % 90;
           const p1 = t < 40 ? input({ right: t < 30, up: t < 3, kick: t === 18 }) : input({ left: t < 70 });
-          const before = s.fighters[1].action;
           const next = sim.step([p1, cpu.read(s.fighters[1], s.fighters[0])]);
-          if (next.fighters[1].action === "uppercut" && before !== "uppercut") count++;
+          if (next.fighters[0].action === "jump" && s.fighters[0].action === "jumpSquat") jumps++;
+          const airborne = s.fighters[0].position.y < 0;
+          if (airborne && next.events.some((e) => e.type === "hit" && e.defender === 0 && !e.blocked)) answered++;
         }
       }
-      return count;
+      return answered / jumps;
     };
-    expect(uppercuts("hard")).toBeGreaterThan(uppercuts("easy") * 2);
+    expect(stopped("hard")).toBeGreaterThan(stopped("easy") * 2);
   });
 });
 

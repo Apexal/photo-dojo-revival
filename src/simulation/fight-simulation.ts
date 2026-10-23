@@ -7,9 +7,13 @@ import {
   BLOCK_LENIENCY_FRAMES,
   guardBlocks,
   INPUT_BUFFER_FRAMES,
+  KNOCKDOWN,
   THROW,
   hurtboxesFor,
+  idleSwayAt,
   poseForAction,
+  sequenceFor,
+  tweenAtFrame,
   variantCount,
   variantPoseFor,
   whiffsOverCrouch,
@@ -19,7 +23,8 @@ import {
   type PoseGeometry,
 } from "../shared/frame-data";
 import type { PoseId } from "../shared/fighter-model";
-import { boxCenterX, hitConnects, horizontalOverlap, toWorldBox, type Placement } from "./collision";
+import { midShoulder, torsoLength } from "../shared/pose-geometry";
+import { boxCenterX, contactPoint, horizontalOverlap, toWorldBox, type Placement } from "./collision";
 import {
   FLOOR_Y,
   HITSTOP_FRAMES,
@@ -35,7 +40,11 @@ import {
   isThrowable,
   type Presses,
   isCrouching,
+  isDown,
   isGrounded,
+  isUntouchable,
+  airFrames,
+  knockDown,
   stepFighter,
   type FighterState,
 } from "./fighter-state-machine";
@@ -56,12 +65,16 @@ export type FightEvent =
   | { type: "roundStart"; round: number }
   | { type: "fight" }
   | { type: "attackActive"; player: PlayerIndex; attack: AttackId }
-  | { type: "hit"; attacker: PlayerIndex; defender: PlayerIndex; attack: AttackId; blocked: boolean; damage: number }
+  /** `at`: where it landed (world space), for the hit marker. */
+  | { type: "hit"; attacker: PlayerIndex; defender: PlayerIndex; attack: AttackId; blocked: boolean; damage: number; at: { x: number; y: number } }
   | { type: "grab"; attacker: PlayerIndex; defender: PlayerIndex }
   | { type: "throw"; attacker: PlayerIndex; defender: PlayerIndex; damage: number }
   | { type: "throwTech"; attacker: PlayerIndex; defender: PlayerIndex }
   | { type: "taunt"; player: PlayerIndex }
   | { type: "ko"; player: PlayerIndex }
+  /** Sent flying by a throw or a hit in the air; `landed` when they (or a KO'd fighter) hit the floor. */
+  | { type: "knockdown"; player: PlayerIndex }
+  | { type: "landed"; player: PlayerIndex }
   | { type: "roundEnd"; outcome: RoundOutcome; reason: RoundEndReason }
   | { type: "matchEnd"; winner: RoundOutcome };
 
@@ -94,6 +107,45 @@ export function frameOf(state: FighterState): { poseId: PoseId; variant: number 
   return { poseId, variant: poseId === variantPoseFor(state.action) ? state.variant : 0 };
 }
 
+export interface FrameTween { from: { poseId: PoseId; variant: number }; to: { poseId: PoseId; variant: number }; t: number }
+
+/**
+ * The tween to draw this frame instead of frameOf's capture, or null for a hard
+ * cut. Rendering only: frameOf (the tween's from-pose) stays what collides.
+ */
+export function tweenOf(state: FighterState): FrameTween | null {
+  const sequence = isCrouching(state) ? null : sequenceFor(state.action);
+  const tween = sequence && tweenAtFrame(sequence, state.actionFrame);
+  if (!tween) return null;
+  const shown = isAttack(state.action) ? ATTACKS[state.action].pose : null;
+  const end = (poseId: PoseId) => ({ poseId, variant: poseId === shown?.poseId ? shown.variant : 0 });
+  return { from: end(tween.from), to: end(tween.to), t: tween.t };
+}
+
+/**
+ * Standing still: sway between the stance and the second stance. Rendering
+ * only; hurtboxes stay the main stance's (frameOf never shows variant 1 of idle).
+ */
+export function idleSwayOf(state: FighterState): FrameTween | null {
+  if (state.action !== "idle" || isCrouching(state)) return null;
+  return { from: { poseId: "idle", variant: 0 }, to: { poseId: "idle", variant: 1 }, t: idleSwayAt(state.actionFrame) };
+}
+
+/** Every from/to pair a move can tween between (t is that pair's first frame), to build meshes before the fight. */
+export function allTweens(): FrameTween[] {
+  const found = new Map<string, FrameTween>();
+  for (const action of ["punch", "kick", "uppercut", "lowKick", "jumpKick", "throw"] as const) {
+    const frames = sequenceFor(action)!.reduce((sum, e) => sum + e.frames, 0);
+    for (let actionFrame = 0; actionFrame < frames; actionFrame++) {
+      const tween = tweenOf({ ...createFighterState(0, 1, MAX_HEALTH), action, actionFrame });
+      if (!tween) continue;
+      const key = `${tween.from.poseId}#${tween.from.variant}>${tween.to.poseId}#${tween.to.variant}`;
+      if (!found.has(key)) found.set(key, tween);
+    }
+  }
+  return [...found.values()];
+}
+
 export function currentGeometry(geometry: FighterGeometry, state: FighterState): PoseGeometry {
   const { poseId, variant } = frameOf(state);
   return frameGeometry(geometry, poseId, variant);
@@ -117,11 +169,26 @@ export function hurtFrameOf(state: FighterState): { poseId: PoseId; variant: num
   return variantPoseFor(state.action) === null ? frame : { ...frame, variant: 0 };
 }
 
+/** How far below the shoulders (in torso lengths) a hit still counts as a head hit: the upper chest. */
+export const HEAD_HIT_BELOW_SHOULDERS = 0.25;
+
+/**
+ * World y above which a hit on this fighter, in the pose they're in now, is a
+ * head hit. A hit's contact point is the middle of its biggest overlap, usually
+ * with the torso box, so a punch to the face lands around shoulder height.
+ */
+export function headHitLineY(geometry: FighterGeometry, state: FighterState): number {
+  const { landmarks } = currentGeometry(geometry, state);
+  const { anchor, position } = placementOf(geometry, state);
+  return position.y + (midShoulder(landmarks).y - anchor.y) + HEAD_HIT_BELOW_SHOULDERS * torsoLength(landmarks);
+}
+
 /** A fighter's hurtboxes (sprite space) and where they're placed in the world. */
 export function hurtboxesOf(geometry: FighterGeometry, state: FighterState): { boxes: Box[]; placement: Placement } {
   const frame = hurtFrameOf(state);
   return {
-    boxes: hurtboxesFor(frameGeometry(geometry, frame.poseId, frame.variant), frame),
+    // Knocked down or KO'd: nothing to hit.
+    boxes: isUntouchable(state) ? [] : hurtboxesFor(frameGeometry(geometry, frame.poseId, frame.variant), frame),
     placement: { position: state.position, facing: state.facing, anchor: groundAnchorFor(geometry, frame.poseId, frame.variant) },
   };
 }
@@ -296,8 +363,10 @@ export class FightSimulation {
     fighters = fighters.map((f, i) => (f.action !== prev.fighters[i].action ? this.withVariant(i as PlayerIndex, f) : f)) as [FighterState, FighterState];
 
     for (const i of [0, 1] as const) {
-      const f = fighters[i];
-      if (f.action === "taunt" && prev.fighters[i].action !== "taunt") events.push({ type: "taunt", player: i });
+      const f = fighters[i], was = prev.fighters[i];
+      if (f.action === "taunt" && was.action !== "taunt") events.push({ type: "taunt", player: i });
+      const fell = (was.action === "knockdown" && f.action === "downed") || (f.action === "ko" && !isGrounded(was) && isGrounded(f));
+      if (fell) events.push({ type: "landed", player: i });
       if (isAttack(f.action) && f.actionFrame === ATTACKS[f.action].startup) {
         events.push({ type: "attackActive", player: i, attack: f.action });
       }
@@ -334,11 +403,24 @@ export class FightSimulation {
   }
 
   /** Pick which captured version of the new action's pose this fighter shows. */
+  /** A random captured version for a new action (taunt / win). Hit reactions are chosen by where the hit lands instead. */
   private withVariant(player: PlayerIndex, f: FighterState): FighterState {
+    if (variantPoseFor(f.action) === "hurt") return f;
     const poseId = variantPoseFor(f.action);
     const n = poseId ? variantCount(this.geometry[player], poseId) : 1;
     const variant = n > 1 ? Math.floor(this.random() * n) : 0;
     return variant === f.variant ? f : { ...f, variant };
+  }
+
+  /**
+   * Which hurt photo a clean hit shows: hit in the head (`at`, world space,
+   * above headHitLineY) and it's the second one, hands on the face; anywhere
+   * else, the main one.
+   * Cosmetic: hurtboxes always come from the main hurt pose.
+   */
+  private reactionVariant(player: PlayerIndex, defender: FighterState, at: { x: number; y: number }): number {
+    if (variantCount(this.geometry[player], "hurt") < 2) return 0;
+    return at.y < headHitLineY(this.geometry[player], defender) ? 1 : 0;
   }
 
   /** On a throw's active frame: grab a throwable opponent within range. */
@@ -369,7 +451,7 @@ export class FightSimulation {
       if (grabbed.action !== "grabbed") continue;
       const a = (1 - d) as PlayerIndex;
       const thrower = fighters[a];
-      const away = Math.sign(grabbed.position.x - thrower.position.x) || thrower.facing;
+      const away = (Math.sign(grabbed.position.x - thrower.position.x) || thrower.facing) as 1 | -1;
       if (this.buffers[d].punch > 0 && this.buffers[d].kick > 0) {
         // Tech: both back to neutral, a little apart.
         this.buffers[d] = { punch: 0, kick: 0 };
@@ -380,11 +462,12 @@ export class FightSimulation {
       }
       if (grabbed.actionFrame < grabbed.stunFrames) continue;
       const health = Math.max(this.practice ? 1 : 0, grabbed.health - THROW.damage);
-      const pushed = clampToStage(grabbed.position.x + away * THROW.throwDistance);
-      const remainder = away * THROW.throwDistance - (pushed - grabbed.position.x);
-      next[d] = health <= 0
-        ? { ...grabbed, health, action: "ko", actionFrame: 0, stunFrames: 0, position: { ...grabbed.position, x: pushed }, hitstopFrames: HITSTOP_FRAMES + 2 }
-        : { ...grabbed, health, action: "hurt", actionFrame: 0, stunFrames: THROW.releaseHitstun, position: { ...grabbed.position, x: pushed }, hitstopFrames: HITSTOP_FRAMES + 2 };
+      const lands = clampToStage(grabbed.position.x + away * THROW.throwDistance);
+      const remainder = away * THROW.throwDistance - (lands - grabbed.position.x);
+      // Flung, not teleported: the sideways speed is aimed so they land `throwDistance` away.
+      const thrown = knockDown({ ...grabbed, health, variant: 0, hitstopFrames: HITSTOP_FRAMES + 2 }, away, (lands - grabbed.position.x) / airFrames(KNOCKDOWN.launch.y));
+      next[d] = health <= 0 ? { ...thrown, action: "ko" } : thrown;
+      if (health > 0) events.push({ type: "knockdown", player: d });
       next[a] = { ...thrower, hitstopFrames: HITSTOP_FRAMES + 2, position: { ...thrower.position, x: clampToStage(thrower.position.x - remainder) } };
       events.push({ type: "throw", attacker: a, defender: d, damage: grabbed.health - health });
       if (health <= 0) events.push({ type: "ko", player: d });
@@ -393,7 +476,7 @@ export class FightSimulation {
   }
 
   private resolveHits(fighters: [FighterState, FighterState], events: FightEvent[]): [FighterState, FighterState] {
-    const hits: { attacker: PlayerIndex; attack: AttackId }[] = [];
+    const hits: { attacker: PlayerIndex; attack: AttackId; at: { x: number; y: number } }[] = [];
     for (const a of [0, 1] as const) {
       const attacker = fighters[a];
       if (!isAttack(attacker.action) || attacker.hasHit || currentAttackPhase(attacker) !== "active") continue;
@@ -406,13 +489,12 @@ export class FightSimulation {
       if (antiAirImmune(defender, attacker)) continue;
       if (whiffsOverCrouch(ATTACKS[attacker.action].level) && isCrouching(defender)) continue;
       const hurt = hurtboxesOf(defGeo, defender);
-      if (hitConnects(hitbox, placementOf(atkGeo, attacker), hurt.boxes, hurt.placement)) {
-        hits.push({ attacker: a, attack: attacker.action });
-      }
+      const at = contactPoint(hitbox, placementOf(atkGeo, attacker), hurt.boxes, hurt.placement);
+      if (at) hits.push({ attacker: a, attack: attacker.action, at });
     }
     // Resolve simultaneously so trades are symmetric.
     const next: [FighterState, FighterState] = [fighters[0], fighters[1]];
-    for (const { attacker: a, attack } of hits) {
+    for (const { attacker: a, attack, at } of hits) {
       const d = (1 - a) as PlayerIndex;
       const defender = next[d];
       const level = ATTACKS[attack].level;
@@ -423,8 +505,14 @@ export class FightSimulation {
       const blocked = (isGuarding(defender) || lenient) && isGrounded(defender) && guardBlocks(level, crouching);
       const before = defender.health;
       let hitDefender = applyHit({ ...defender, crouching }, attack, blocked, this.practice ? 1 : 0);
-      if (!blocked) hitDefender = this.withVariant(d, hitDefender); // new hurt/ko reaction
-      const away = Math.sign(defender.position.x - fighters[a].position.x) || fighters[a].facing; // cross-ups push the right way
+      if (!blocked) hitDefender = { ...hitDefender, variant: this.reactionVariant(d, defender, at) };
+      const away = (Math.sign(defender.position.x - fighters[a].position.x) || fighters[a].facing) as 1 | -1; // cross-ups push the right way
+      // A KO'd fighter falls back; an anti-air hit knocks down (no juggles: they can't be hit again till they're up).
+      if (hitDefender.action === "ko") hitDefender = { ...knockDown(hitDefender, away), action: "ko" };
+      else if (!blocked && !isGrounded(defender) && ATTACKS[attack].knocksDownInAir) {
+        hitDefender = knockDown(hitDefender, away);
+        events.push({ type: "knockdown", player: d });
+      }
       const pushed = clampToStage(hitDefender.position.x + away * ATTACKS[attack].pushback);
       const remainder = away * ATTACKS[attack].pushback - (pushed - hitDefender.position.x);
       hitDefender = { ...hitDefender, position: { ...hitDefender.position, x: pushed } };
@@ -434,7 +522,7 @@ export class FightSimulation {
         next[a] = { ...next[a], position: { ...next[a].position, x: clampToStage(next[a].position.x - remainder) } };
       }
       next[a] = { ...next[a], hasHit: true };
-      events.push({ type: "hit", attacker: a, defender: d, attack, blocked, damage: before - hitDefender.health });
+      events.push({ type: "hit", attacker: a, defender: d, attack, blocked, damage: before - hitDefender.health, at });
       if (hitDefender.action === "ko") events.push({ type: "ko", player: d });
     }
     if (hits.length) {
@@ -447,7 +535,8 @@ export class FightSimulation {
   /** Body boxes can't overlap: split the overlap between both fighters, respecting the walls. */
   private pushApart(fighters: [FighterState, FighterState]): [FighterState, FighterState] {
     // Airborne fighters pass over each other (cross-ups); landing on someone pushes apart again.
-    if (fighters.some((f) => f.position.y < FLOOR_Y)) return fighters;
+    // Nobody pushes against someone knocked down or KO'd: walk over them (getting up pushes apart again).
+    if (fighters.some((f) => f.position.y < FLOOR_Y || isUntouchable(f))) return fighters;
     const a = worldBoxesOf(this.geometry[0], fighters[0]).bodyBox;
     const b = worldBoxesOf(this.geometry[1], fighters[1]).bodyBox;
     const overlap = horizontalOverlap(a, b);
@@ -470,7 +559,7 @@ export class FightSimulation {
     if (round.roundWinner === "draw" || round.roundWinner === null) return fighters;
     const w = round.roundWinner;
     const winner = fighters[w];
-    if (winner.action === "win" || winner.action === "ko" || !isGrounded(winner) || isCommitted(winner.action) || winner.action === "hurt") return fighters;
+    if (winner.action === "win" || winner.action === "ko" || !isGrounded(winner) || isCommitted(winner.action) || winner.action === "hurt" || isDown(winner)) return fighters;
     const next: [FighterState, FighterState] = [fighters[0], fighters[1]];
     next[w] = this.withVariant(w, { ...winner, action: "win", actionFrame: 0, velocity: { x: 0, y: 0 } });
     return next;

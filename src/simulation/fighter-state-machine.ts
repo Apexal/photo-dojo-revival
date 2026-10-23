@@ -1,6 +1,7 @@
 import {
   ATTACKS,
   JUMP_SQUAT_FRAMES,
+  KNOCKDOWN,
   TAUNT,
   THROW_LENIENCY_FRAMES,
   THROW_TOTAL_FRAMES,
@@ -19,7 +20,7 @@ export const GRAVITY = 0.6;
 export const JUMP_IMPULSE = -14;
 export const WALK_SPEED = 4;
 export const BLOCK_DAMAGE_FRACTION = 0.25;
-export const HITSTOP_FRAMES = 4;
+export const HITSTOP_FRAMES = 6;
 
 export interface FighterState {
   position: { x: number; y: number };
@@ -81,6 +82,10 @@ export const isAttack = (a: FighterAction): a is AttackId =>
 export const isCommitted = (a: FighterAction) => isAttack(a) || a === "throw" || a === "taunt";
 /** Holding a guard: free block or locked blockstun. */
 export const isGuarding = (s: FighterState) => s.action === "block" || s.action === "blockstun";
+/** Knocked down: flying, lying on the floor, or getting up. */
+export const isDown = (s: FighterState) => s.action === "knockdown" || s.action === "downed" || s.action === "wakeup";
+/** Can't be hit or thrown, and has no push box: knocked down, or KO'd. */
+export const isUntouchable = (s: FighterState) => isDown(s) || s.action === "ko";
 /** Guarding low on the ground: shown with the crouch capture, and high attacks pass over it. */
 export const isCrouching = (s: FighterState) => isGuarding(s) && s.crouching && isGrounded(s);
 
@@ -122,6 +127,29 @@ function applyPhysics(s: FighterState): FighterState {
     if (next.action === "jump" || next.action === "jumpKick") next = { ...next, action: "idle", actionFrame: 0, hasHit: false };
   }
   return next;
+}
+
+/** Frames from leaving the floor with vertical speed `vy` (negative: up) to landing again. */
+export function airFrames(vy: number): number {
+  let y = FLOOR_Y, v = vy, frames = 0;
+  do {
+    v += GRAVITY;
+    y += v;
+    frames++;
+  } while (y < FLOOR_Y && frames < 1000);
+  return frames;
+}
+
+/**
+ * Knock a fighter down: launched `away` (1 right, -1 left) and up, they fly
+ * until they land, lie on the floor, then get up (stepFighter). `vx` overrides
+ * the sideways speed (a throw aims for where they land).
+ */
+export function knockDown(s: FighterState, away: 1 | -1, vx: number = away * KNOCKDOWN.launch.x): FighterState {
+  return {
+    ...s, action: "knockdown", actionFrame: 0, stunFrames: 0, hasHit: false, crouching: false, retreating: false,
+    velocity: { x: vx, y: KNOCKDOWN.launch.y },
+  };
 }
 
 const startMove = (s: FighterState, action: FighterAction): FighterState =>
@@ -171,6 +199,22 @@ export function stepFighter(s: FighterState, ctx: StepContext): FighterState {
     case "ko":
     case "win":
       next = { ...s, actionFrame: s.actionFrame + 1, velocity: { x: isGrounded(s) ? 0 : s.velocity.x, y: s.velocity.y } };
+      break;
+    case "knockdown":
+      // Flying: physics carries them; landing puts them on the floor.
+      next = isGrounded(s) && s.actionFrame > 0
+        ? { ...s, action: "downed", actionFrame: 0, velocity: { x: 0, y: 0 } }
+        : { ...s, actionFrame: s.actionFrame + 1 };
+      break;
+    case "downed":
+      next = s.actionFrame + 1 >= KNOCKDOWN.floorFrames
+        ? { ...s, action: "wakeup", actionFrame: 0, velocity: { x: 0, y: 0 } }
+        : { ...s, actionFrame: s.actionFrame + 1, velocity: { x: 0, y: 0 } };
+      break;
+    case "wakeup":
+      next = s.actionFrame + 1 >= KNOCKDOWN.wakeFrames
+        ? recover(s, ctx)
+        : { ...s, actionFrame: s.actionFrame + 1, velocity: { x: 0, y: 0 } };
       break;
     case "blockstun":
       // Locked in guard after a blocked hit; ends exactly like hitstun does.

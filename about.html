@@ -1,0 +1,121 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <meta name="theme-color" content="#121018" />
+    <title>About · Photo Dojo: Revival</title>
+    <meta name="description" content="How Photo Dojo: Revival works, what happens to your photos, answers to common questions, and credits." />
+    <meta property="og:title" content="About Photo Dojo: Revival" />
+    <meta property="og:description" content="A free browser fighting game made of your own photos. How it works, privacy, FAQ and credits." />
+    <meta property="og:image" content="__SITE_URL__/og-image.png" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+    <link rel="stylesheet" href="/src/about/about.css" />
+  </head>
+  <body>
+    <main>
+      <header>
+        <h1>Photo Dojo<span>Revival</span></h1>
+        <p class="lead">Snap yourself with your phone, then fight your friends on the big screen. A free fighting game made of your own photos, in the browser.</p>
+        <p class="actions">
+          <a class="button primary" href="/">Play</a>
+          <a class="button" href="/capture">Become a fighter</a>
+          <a class="button" href="https://github.com/Apexal/photo-dojo-revival">Source on GitHub</a>
+        </p>
+      </header>
+
+      <section id="how">
+        <h2>How it works</h2>
+        <ol class="steps">
+          <li><strong>Open the game on a laptop or TV.</strong> It shows a code and a QR code.</li>
+          <li><strong>Scan it with a phone.</strong> A friend holds the phone (or prop it up) while you strike 14 poses: stance, punches, kicks, getting hit, and a victory pose. Then record three battle cries.</li>
+          <li><strong>Your fighter appears on the big screen.</strong> Pick it and fight, two players on one keyboard or with game controllers. Alone? Practice against the computer.</li>
+        </ol>
+      </section>
+
+      <section id="privacy">
+        <h2>Your photos stay yours</h2>
+        <ul>
+          <li>The camera, the pose detection and the background removal all run <strong>on your phone</strong>. Nothing is uploaded for processing.</li>
+          <li>The finished fighter goes <strong>straight from your phone to the game screen</strong> over an encrypted peer-to-peer connection (WebRTC). A small server only introduces the two devices; it never sees your photos or voice. On networks that block direct connections, the encrypted data may pass through a relay, which can't read it and doesn't keep it.</li>
+          <li>Fighters are kept in the browser on the devices you used, and nowhere else. There are <strong>no accounts, no cloud storage, no analytics</strong>.</li>
+          <li>Delete a fighter from the game's fighter select (click it, then 🗑), or clear the site's data in your browser.</li>
+        </ul>
+      </section>
+
+      <section id="controls">
+        <h2>Controls</h2>
+        <div class="table-wrap"><table>
+          <thead><tr><th></th><th>Move</th><th>Punch</th><th>Kick</th><th>Pause</th></tr></thead>
+          <tbody>
+            <tr><th>Player 1 keyboard</th><td>W A S D</td><td>J</td><td>K</td><td>Esc</td></tr>
+            <tr><th>Player 2 keyboard</th><td>Arrows</td><td>, (comma)</td><td>. (period)</td><td>Esc</td></tr>
+            <tr><th>Game controller</th><td>D-pad / left stick</td><td>A / ✕</td><td>B / ○</td><td>Start</td></tr>
+          </tbody>
+        </table></div>
+        <p>Down + punch is an uppercut, down + kick a low kick, punch + kick together a throw. Hold back to block. Keys can be remapped in Settings.</p>
+      </section>
+
+      <section id="faq">
+        <h2>FAQ</h2>
+        <details>
+          <summary>What do I need?</summary>
+          <p>A laptop or a computer hooked up to a TV, with a recent Chrome, Edge, Firefox or Safari. A phone with a camera. Two players can share one keyboard, or plug in game controllers (Xbox, PlayStation and most others work).</p>
+        </details>
+        <details>
+          <summary>Do I have to install anything or sign up?</summary>
+          <p>No. Everything runs in the browser, and there are no accounts.</p>
+        </details>
+        <details>
+          <summary>Are my photos uploaded anywhere?</summary>
+          <p>No. See <a href="#privacy">Your photos stay yours</a> above.</p>
+        </details>
+        <details>
+          <summary>Why does the first capture take a while to start?</summary>
+          <p>The phone downloads about 250 MB of AI models the first time (pose detection and background removal), so use Wi-Fi if you can. They're stored on the phone, so after that it starts in seconds.</p>
+        </details>
+        <details>
+          <summary>My phone won't connect to the game.</summary>
+          <p>Being on the same Wi-Fi as the game helps. Some networks (offices, hotels, schools) block direct connections between devices; try another network or a phone hotspot. If the game screen was reloaded, it shows a new code: enter that one. You can always download your fighter as a file on the phone and use “Import fighter file” on the game screen instead.</p>
+        </details>
+        <details>
+          <summary>How do I get a clean cut-out?</summary>
+          <p>Stand in front of a plain wall in good, even light, with your whole body in the frame (about 3–4 m from the camera), sideways, facing right. Avoid clothes the same colour as the wall. Any pose can be retaken before you send the fighter.</p>
+        </details>
+        <details>
+          <summary>Where are my fighters saved? Can I back them up?</summary>
+          <p>In the browser on the game screen (and the phone keeps the last one it captured). Browsers, especially on iPhone and iPad, can clear site data when storage runs low, so use “Export” to keep a <code>.photodojo</code> file of fighters you love. Import it later, on any computer.</p>
+        </details>
+        <details>
+          <summary>Can I play with friends over the internet?</summary>
+          <p>Not yet: it's a couch game, with both players at the same screen. You can send a friend your fighter file, though.</p>
+        </details>
+        <details>
+          <summary>Is this Nintendo's Photo Dojo?</summary>
+          <p>No. It's an unofficial fan project inspired by <em>Photo Dojo</em>, a 2009 DSiWare game by Nintendo. It isn't affiliated with or endorsed by Nintendo, and contains no Nintendo code or assets.</p>
+        </details>
+      </section>
+
+      <section id="credits">
+        <h2>Credits</h2>
+        <p>Made by <strong>Frank Matranga</strong>. Free and open source under the MIT license: <a href="https://github.com/Apexal/photo-dojo-revival">github.com/Apexal/photo-dojo-revival</a>. Bug reports and ideas are welcome there.</p>
+        <p>Inspired by <em>Photo Dojo</em> (Nintendo, 2009).</p>
+        <p>Built with:</p>
+        <ul class="credits">
+          <li><a href="https://ai.google.dev/edge/mediapipe/solutions/vision/pose_landmarker">MediaPipe Pose Landmarker</a> by Google (Apache-2.0): finds your body in each photo.</li>
+          <li><a href="https://github.com/xuebinqin/DIS">IS-Net (DIS)</a> by Xuebin Qin et al. (Apache-2.0), in the version packaged by <a href="https://github.com/danielgatis/rembg">rembg</a> (MIT): removes the background.</li>
+          <li><a href="https://onnxruntime.ai/">ONNX Runtime Web</a> by Microsoft (MIT): runs the background removal on your phone.</li>
+          <li><a href="https://phaser.io/">Phaser</a> (MIT): the game engine.</li>
+          <li><a href="https://github.com/101arrowz/fflate">fflate</a> (MIT), <a href="https://github.com/jakearchibald/idb">idb</a> (ISC) and <a href="https://github.com/soldair/node-qrcode">node-qrcode</a> (MIT).</li>
+          <li><a href="https://www.cloudflare.com/">Cloudflare</a> Pages, Workers and Realtime TURN: hosting, and introducing phones to games.</li>
+        </ul>
+        <p>The sound effects and the stick-figure fighters are generated by the project's own scripts.</p>
+      </section>
+
+      <footer>
+        <p>Photo Dojo: Revival v__APP_VERSION__ · <a href="https://github.com/Apexal/photo-dojo-revival">GitHub</a> · An unofficial fan project, not affiliated with Nintendo.</p>
+      </footer>
+    </main>
+  </body>
+</html>

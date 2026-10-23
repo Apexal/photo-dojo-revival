@@ -10,7 +10,7 @@ export class HitboxDebugView {
   visible = false;
 
   constructor(scene: Phaser.Scene) {
-    this.g = scene.add.graphics().setDepth(1000);
+    this.g = scene.add.graphics().setDepth(90); // over the fight, under the HUD (which the zooming camera leaves alone)
   }
 
   private box(b: Box, color: number, fillAlpha: number): void {

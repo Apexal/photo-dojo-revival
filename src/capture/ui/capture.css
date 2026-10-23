@@ -62,3 +62,7 @@ ul.tips { margin: 0; padding-left: 1.2em; display: grid; gap: 8px; }
 .link-chip[data-state="connected"] { color: var(--ok); }
 .link-chip[data-state="failed"], .link-chip[data-state="closed"] { color: var(--bad); }
 .resume { padding: 14px; border-radius: 12px; border: 2px solid var(--accent); background: var(--panel); display: grid; gap: 8px; }
+h1 .kicker { display: block; margin-top: 2px; font-size: 15px; letter-spacing: 0.3em; text-transform: uppercase; color: var(--bad); }
+.privacy { padding: 12px 14px; border-radius: 10px; border: 1px solid #3a3346; font-size: 15px; color: var(--muted); }
+.privacy strong { color: var(--fg); }
+a { color: var(--accent); }

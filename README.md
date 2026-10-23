@@ -1,6 +1,6 @@
-# Photo Dojo Revival
+# Photo Dojo: Revival
 
-A browser-only 2D fighting game. Pose for thirteen photos on a phone, the phone turns them into a sprite fighter locally, sends it to a laptop over WebRTC, and two people fight with controllers or a shared keyboard. No accounts, no backend storage: fighters live in each browser's IndexedDB. See [PLAN.md](PLAN.md) for the design.
+A browser-only 2D fighting game. Pose for fourteen photos on a phone, the phone turns them into a sprite fighter locally, sends it to a laptop over WebRTC, and two people fight with controllers or a shared keyboard. No accounts, no backend storage: fighters live in each browser's IndexedDB. See [PLAN.md](PLAN.md) for the design.
 
 ## Run it
 
@@ -19,6 +19,8 @@ Without a phone, open `/capture` on the laptop to capture with its webcam (it sa
 
 ### Controls
 
+The game opens on a title screen with a demo fight between fighters from your library; press any button to start (a controller's press joins it as P1).
+
 | | Move | Punch | Kick | Pause |
 |---|---|---|---|---|
 | P1 keyboard | WASD | J | K | Esc |
@@ -31,19 +33,20 @@ Keyboard keys can be remapped in **Settings** (Tab or a pad's Select button on f
 - Hold **back** to block standing, or hold **down** to crouch-block. Punches pass right over a crouch; kicks and uppercuts can be blocked either way. The **low kick** has to be blocked crouching, and the **jump kick** (kick in the air, once per jump) has to be blocked standing.
 - The **kick** lunges forward, so it reaches further than a punch but is slower. Hold **back** while kicking to kick in place instead (shorter, keeps your distance).
 - **Down + punch** is an uppercut: the anti-air. Jumping attacks can't hit you while it comes out, so it beats a jump-in timed right, but it's very punishable if blocked. **Down + kick** is a quick low kick.
-- **Punch + kick** together throws when you're close (it beats blocking), and taunts when you're far away. Press punch + kick while grabbed to break free.
+- **Punch + kick** together throws when you're close (it beats blocking) and knocks them down, and taunts when you're far away. Press punch + kick while grabbed to break free.
+- **Knockdowns:** a throw, or an uppercut that catches someone in the air, knocks them down. Nobody can touch them while they're down; get ready for when they stand up.
 - A press up to 5 frames early still counts, and a block still works if you let go of back within the last 3 frames. Blocked hits can't KO.
 - Players swap sides every round.
 - Gamepads rumble when you get hit (heavier for kicks and throws, a light tick when blocking, a long one on a KO) and buzz once when they join. Turn it off in Settings (or press R in the pause menu). Rumble uses the browser's Gamepad haptics (Chrome/Edge dual-rumble, Firefox pulse), and pads without it just don't rumble.
 - **Pause menu** (Esc / Start): Resume, Controls (each player's moves for their device), Settings, Restart round, Quit to fighter select. Any controller can drive it; kick, Esc or Start resumes.
-- **Settings:** game volume (hits, blocks, the clock) and voice volume (the fighters' clips) separately, screen shake on/off, rumble on/off, and keyboard remapping for each keyboard half. Everything is remembered. Throws need punch + kick at once, and some keyboards can't register that while a direction is held, so remap to keys further apart if throws don't come out.
+- **Settings:** game volume (hits, blocks, the clock) and voice volume (the fighters' clips) separately, screen shake on/off, dynamic camera on/off (zooms in when the fighters are close), rumble on/off, smooth motion on/off (moves, walking, guarding, jumps, hit recoveries and the idle sway morph between photos instead of cutting; with it off you get Photo Dojo hard cuts and motion streaks instead; visual only), and keyboard remapping for each keyboard half. Everything is remembered. Throws need punch + kick at once, and some keyboards can't register that while a direction is held, so remap to keys further apart if throws don't come out.
 - If a gamepad disconnects mid-fight, the game pauses and says whose it was. Pressing any button on a pad (or keyboard half) the other player isn't using takes over.
 - A health bar pulses when it's low, and the clock flashes and ticks in the last 10 seconds.
 - F1 toggles the hitbox overlay.
 - Before each match, a "How to fight" screen shows each player's controls with slow-motion previews of their fighter's moves.
-- **Practice:** join with one controller, pick a fighter, and press punch again. You play against a training dummy with no clock and health that refills. Keys 1–8 (or Tab / Select) set what the dummy does, including jumping in with a kick to practice anti-airs, and hitboxes are shown. Key 9 makes it a CPU opponent that actually fights back; press 9 again to cycle easy → normal → hard. Harder levels react faster, block, anti-air and punish more often, and throw or jump in on a player who just crouch-blocks.
+- **Practice:** join with one controller, pick a fighter, and press punch again. You play against an easy CPU with no clock and health that refills. Key 9 cycles the CPU easy → normal → hard; keys 1–8 (or Tab / Select) turn it into a scripted training dummy instead, including jumping in with a kick to practice anti-airs. F1 shows hitboxes. Harder levels react faster, block, anti-air and punish more often, and throw or jump in on a player who just crouch-blocks.
 - A knockout plays back in slow motion before the round result. Press any button to skip.
-- Fighter select works with a mouse or touch too. Click a tile to select it, then use the tile's Export or 🗑 button. Clicking a selected tile again picks it for a player who has joined.
+- Fighter select works with a mouse or touch too. Click a tile to select it, then use the tile's Export or 🗑 button. Clicking a selected tile again picks it for a player who has joined. With more than 12 fighters the grid pages: move past the last row, or click ◀ ▶.
 
 The frame data and the reasoning behind it are in [docs/fighting-mechanics.md](docs/fighting-mechanics.md).
 
@@ -63,10 +66,11 @@ Anything that needs a real person, phone, gamepad or another network is in [docs
 
 ## Deploy
 
-- **Site**: static, `npm run build` → `dist/`, hosted on Cloudflare Pages (`/capture` is served from `capture.html`).
+- **Site**: static, `npm run build` → `dist/`, hosted on Cloudflare Pages (`/capture` and `/about` are served from `capture.html` and `about.html`).
+- **Link previews**: set `VITE_SITE_URL` (e.g. `https://photo-dojo.pages.dev`, the repo variable `SITE_URL` in CI) so the Open Graph image URL is absolute. `public/og-image.png` is a shot of the title screen: regenerate it with `node scripts/generate-og-image.mjs` while `npm run dev` runs.
 - **Signaling**: `worker/`, a Worker plus a `SignalingRoom` Durable Object. It relays SDP/ICE between at most two sockets per room code and stores nothing. Rooms expire after 10 minutes.
 - Build the site with `VITE_SIGNALING_URL=wss://<your-worker>.workers.dev`.
-- `.github/workflows/deploy.yml` tests every push and deploys both on `main`. It needs the repo secrets `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID`, and the repo variables `VITE_SIGNALING_URL` and optionally `PAGES_PROJECT`.
+- `.github/workflows/deploy.yml` tests every push and deploys both on `main`. It needs the repo secrets `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID`, and the repo variables `VITE_SIGNALING_URL` and optionally `PAGES_PROJECT` and `SITE_URL`.
 - **TURN (optional)**: phones on cellular may need TURN. Create a Cloudflare Realtime TURN key, then run `wrangler secret put TURN_KEY_ID` and `wrangler secret put TURN_KEY_API_TOKEN` in `worker/`. Clients fetch short-lived credentials from `/turn-credentials` and fall back to STUN only when it isn't configured.
 
 Background removal runs ISNet (a 1024×1024 background-removal model) on a crop around the person, with ONNX Runtime Web on WebGPU (falling back to WASM, which is much slower), and keeps only what's attached to the detected skeleton (`src/capture/background-remover.ts`, `src/capture/matting.ts`). `/capture?debug=1` adds an export of the model's output and the final alpha.
@@ -88,7 +92,6 @@ Each capture takes the sharpest of a short burst of 1080p frames.
 ## Known limits
 
 - iOS may evict IndexedDB under storage pressure, so export fighters you care about. There is no cloud backup by design.
-- Every captured pose is stored with its 33 landmarks so ARAP tweening (PLAN §9) can be added later without a data migration.
 
 ## License
 

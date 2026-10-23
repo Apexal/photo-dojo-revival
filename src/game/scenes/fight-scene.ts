@@ -2,7 +2,7 @@ import Phaser from "phaser";
 import { ATTACKS, frameGeometry, groundAnchorFor, type FighterGeometry } from "../../shared/frame-data";
 import { LANDMARK, type PoseId, type SoundId } from "../../shared/fighter-model";
 import { setSetting } from "../../shared/fighter-storage";
-import { FightSimulation, frameOf, type FightEvent, type FightState } from "../../simulation/fight-simulation";
+import { FightSimulation, frameOf, type FightState } from "../../simulation/fight-simulation";
 import { currentAttackPhase, isAttack, type FighterState } from "../../simulation/fighter-state-machine";
 import type { InputFrame } from "../../simulation/input-frame";
 import { MAX_HEALTH, secondsRemaining, type PlayerIndex } from "../../simulation/round-rules";
@@ -13,6 +13,8 @@ import { PAD_BUTTON } from "../input/gamepad-input-source";
 import type { InputSource } from "../input/input-source";
 import { layoutForKey } from "../input/key-bindings";
 import { FighterSpriteView, loadFighterSounds, preloadFighterTextures } from "../render/fighter-sprite-view";
+import { FightCamera, FULL_VIEW, type CameraImpact } from "../render/fight-camera";
+import { HitMarkers } from "../render/hit-markers";
 import { REPLAY_SPEED, ReplayBuffer } from "../replay-buffer";
 import { pickTake } from "../sound-choice";
 import { JOIN_RUMBLE, RumbleScheduler, rumbleFor } from "../input/rumble";
@@ -20,7 +22,7 @@ import { gameSoundKey, type GameSoundId } from "../game-sounds";
 import { getOptions, setOption } from "../options";
 import { HitboxDebugView } from "../render/hitbox-debug-view";
 import { LOW_HEALTH, clockCue, clockTicked, lowHealthPulse } from "../render/hud-cues";
-import { FLOOR_SCREEN_Y, GAME_HEIGHT, GAME_WIDTH, worldToScreen } from "../render/stage";
+import { GAME_HEIGHT, GAME_WIDTH, drawStage, worldToScreen } from "../render/stage";
 import { REGISTRY } from "./boot-scene";
 import { MIRROR_TINT } from "./controls-scene";
 import type { RoundResultData } from "./round-result-scene";
@@ -37,6 +39,10 @@ const MAX_FRAME_MS = 100;
 const PREFIXES = ["p0", "p1"] as const;
 const BAR_W = 520;
 const BAR_H = 26;
+/** Objects at this depth or above are HUD: drawn by the fixed HUD camera, not the zooming fight camera. */
+const HUD_DEPTH = 100;
+/** How far above a thrown fighter's feet (px) the throw spark goes: about mid-body. */
+const THROW_MARKER_HEIGHT = 160;
 
 /**
  * Owns a FightSimulation, steps it at a fixed 60 Hz with an accumulator, and
@@ -60,6 +66,11 @@ export class FightScene extends Phaser.Scene {
   private paused = false;
   private waitingForResult = false;
   private motion!: Phaser.GameObjects.Graphics;
+  private markers!: HitMarkers;
+  /** Follows the fight on the main camera; the HUD camera stays put (HUD objects: depth ≥ HUD_DEPTH). */
+  private camera = new FightCamera();
+  private hudCamera!: Phaser.Cameras.Scene2D.Camera;
+  private lastCameraUpdate = 0;
   private hud!: Phaser.GameObjects.Graphics;
   private debug!: HitboxDebugView;
   private timerText!: Phaser.GameObjects.Text;
@@ -103,17 +114,19 @@ export class FightScene extends Phaser.Scene {
     this.sources = this.setup.inputs.map((d) =>
       isPlayerInput(d) ? createInputSource(this, d) : (this.dummy = new DummyInputSource(this.sim, 1)),
     );
+    // Practice opens against an easy CPU; 1–8 / Tab switch to the scripted dummies.
+    this.dummy?.setBehavior("cpuEasy");
     void Promise.all(this.setup.entries.map((e, i) => loadFighterSounds(this, e.fighter, PREFIXES[i]))).then((s) => { this.sounds = s; });
 
-    this.drawStage();
+    drawStage(this);
     const mirrorMatch = a.fighter.fighterId === b.fighter.fighterId;
     this.views = [0, 1].map((i) => new FighterSpriteView(this, PREFIXES[i], this.geometry[i], i === 1 && mirrorMatch ? MIRROR_TINT : undefined));
     this.views.forEach((v, i) => v.setDepth(10 + i));
     this.motion = this.add.graphics().setDepth(20);
+    this.markers = new HitMarkers(this.add.graphics().setDepth(25));
     this.hud = this.add.graphics().setDepth(100);
     this.debug = new HitboxDebugView(this);
-    // Practice shows hitboxes by default: it's for learning the moves.
-    this.debug.visible = this.setup.practice || Boolean(this.registry.get(REGISTRY.debugHitboxes));
+    this.debug.visible = Boolean(this.registry.get(REGISTRY.debugHitboxes));
 
     const label = { fontSize: "22px", color: "#f3efe6", fontStyle: "bold" };
     this.add.text(40, 62, a.fighter.name, label).setDepth(100);
@@ -152,8 +165,31 @@ export class FightScene extends Phaser.Scene {
       this.objectUrls.forEach((u) => URL.revokeObjectURL(u));
       this.objectUrls = [];
     });
-    this.handleEvents(this.sim.current.events);
+    this.hudCamera = this.cameras.add(0, 0, GAME_WIDTH, GAME_HEIGHT);
+    this.camera = new FightCamera();
+    this.camera.snap(this.sim.current.fighters.map((f) => worldToScreen(f.position)));
+    this.handleEvents(this.sim.current);
     this.renderState(this.sim.current);
+  }
+
+  /** Frame the fight on the main camera, and split objects between it and the HUD camera. */
+  private updateCamera(state: FightState): void {
+    const now = performance.now();
+    const frames = this.lastCameraUpdate ? Math.min(6, (now - this.lastCameraUpdate) / STEP_MS) : 1;
+    this.lastCameraUpdate = now;
+    const view = getOptions(this.registry).dynamicCamera
+      ? this.camera.update(state.fighters.map((f) => worldToScreen(f.position)), frames)
+      : FULL_VIEW;
+    this.cameras.main.setZoom(view.zoom).centerOn(view.centerX, view.centerY);
+    // Re-done every frame: some world objects (the fighters' morph meshes) appear mid-fight.
+    for (const child of this.children.list) {
+      const hud = (child as Phaser.GameObjects.GameObject & { depth: number }).depth >= HUD_DEPTH;
+      child.cameraFilter = hud ? this.cameras.main.id : this.hudCamera.id;
+    }
+  }
+
+  private cameraImpact(kind: CameraImpact): void {
+    if (getOptions(this.registry).dynamicCamera) this.camera.kick(kind);
   }
 
   /** Practice: dummy behavior picker (1–8, 9 for the CPU levels, Tab, or a pad's Select button). */
@@ -189,14 +225,6 @@ export class FightScene extends Phaser.Scene {
     show();
   }
 
-  private drawStage(): void {
-    const g = this.add.graphics();
-    g.fillGradientStyle(0x2b2140, 0x2b2140, 0x6b4a5e, 0x6b4a5e, 1).fillRect(0, 0, GAME_WIDTH, FLOOR_SCREEN_Y);
-    g.fillStyle(0x3b2f2a, 1).fillRect(0, FLOOR_SCREEN_Y, GAME_WIDTH, GAME_HEIGHT - FLOOR_SCREEN_Y);
-    g.lineStyle(3, 0xf2c14e, 0.6).lineBetween(0, FLOOR_SCREEN_Y, GAME_WIDTH, FLOOR_SCREEN_Y);
-    for (let x = 0; x < GAME_WIDTH; x += 80) g.lineStyle(1, 0x000000, 0.25).lineBetween(x, FLOOR_SCREEN_Y, x - 60, GAME_HEIGHT);
-  }
-
   update(_time: number, delta: number): void {
     if (this.replay) return this.updateReplay(delta);
     if (this.waitingForResult) return;
@@ -217,7 +245,7 @@ export class FightScene extends Phaser.Scene {
       if (!this.setup.practice && clockTicked(before.round, state.round)) this.playEffect("tick", 0.7);
       this.replayBuffer.push(state);
       if (state.events.some((e) => e.type === "ko")) this.replayBuffer.markFinish();
-      this.handleEvents(state.events);
+      this.handleEvents(state);
       this.accumulator -= STEP_MS;
       if (state.round.phase === "roundOver" || state.round.phase === "matchOver") break;
     }
@@ -239,6 +267,7 @@ export class FightScene extends Phaser.Scene {
       return;
     }
     this.replay = { states, position: 0, shown: -1 };
+    this.camera.snap(states[0].fighters.map((f) => worldToScreen(f.position)));
     const bar = (y: number) => this.add.rectangle(0, y, GAME_WIDTH, 56, 0x000000, 0.85).setOrigin(0).setDepth(400);
     this.replayUi = [
       bar(0),
@@ -260,7 +289,7 @@ export class FightScene extends Phaser.Scene {
     replay.position += (Math.min(delta, MAX_FRAME_MS) / STEP_MS) * REPLAY_SPEED;
     const index = Math.min(replay.states.length - 1, Math.floor(replay.position));
     // Replay the sounds and shakes of every frame we pass (no banners).
-    for (let i = replay.shown + 1; i <= index; i++) this.handleEvents(replay.states[i].events, { replay: true });
+    for (let i = replay.shown + 1; i <= index; i++) this.handleEvents(replay.states[i], { replay: true });
     replay.shown = index;
     const state = replay.states[index];
     this.shownHealth = [state.fighters[0].health, state.fighters[1].health];
@@ -327,7 +356,7 @@ export class FightScene extends Phaser.Scene {
     this.shownHealth = [MAX_HEALTH, MAX_HEALTH];
     this.accumulator = 0;
     this.maskHeldButtons();
-    this.handleEvents(this.sim.current.events);
+    this.handleEvents(this.sim.current);
     this.renderState(this.sim.current);
   }
 
@@ -405,7 +434,7 @@ export class FightScene extends Phaser.Scene {
     this.shownHealth = [MAX_HEALTH, MAX_HEALTH];
     this.waitingForResult = false;
     this.accumulator = 0;
-    this.handleEvents(this.sim.current.events);
+    this.handleEvents(this.sim.current);
   }
 
   rematch(): void {
@@ -466,7 +495,8 @@ export class FightScene extends Phaser.Scene {
     });
   }
 
-  private handleEvents(events: FightEvent[], options: { replay?: boolean } = {}): void {
+  private handleEvents(state: FightState, options: { replay?: boolean } = {}): void {
+    const events = state.events;
     for (const ev of events) {
       if (getOptions(this.registry).rumble && !options.replay) {
         this.rumbles.forEach((queue, i) => {
@@ -477,25 +507,48 @@ export class FightScene extends Phaser.Scene {
       // In a replay only the sounds and shakes come back, not the announcer banners.
       if (options.replay && (ev.type === "roundStart" || ev.type === "fight" || ev.type === "roundEnd" || ev.type === "matchEnd" || ev.type === "throwTech")) continue;
       switch (ev.type) {
-        case "roundStart": this.banner(this.setup.practice ? "PRACTICE" : `ROUND ${ev.round}`, 900); break;
+        case "roundStart":
+          this.banner(this.setup.practice ? "PRACTICE" : `ROUND ${ev.round}`, 900);
+          this.camera.snap(state.fighters.map((f) => worldToScreen(f.position)));
+          break;
         case "fight": this.banner("FIGHT!", 700); break;
         case "attackActive": this.play(ev.player, "attack", 0.6); break;
-        case "hit":
+        case "hit": {
+          const ko = events.some((e) => e.type === "ko" && e.player === ev.defender);
+          const at = worldToScreen(ev.at);
+          const dir = state.fighters[ev.defender].position.x >= state.fighters[ev.attacker].position.x ? 1 : -1;
+          this.markers.add(ev.blocked ? "block" : ko ? "ko" : "hit", ev.attacker, at.x, at.y, state.frame, dir);
+          if (!ev.blocked) this.cameraImpact(ko ? "ko" : "hit");
           this.playEffect(ev.blocked ? "block" : "hit", ATTACKS[ev.attack].limb === "leg" ? 0.9 : 0.7);
           if (!ev.blocked) this.play(ev.defender, "hurt");
           if (ATTACKS[ev.attack].limb === "leg" && !ev.blocked) this.shake(90, 2);
           break;
+        }
         case "grab": this.play(ev.attacker, "attack", 0.6); break;
-        case "throw":
+        case "throw": {
+          // Mid-body of whoever got thrown, where they are now.
+          const at = worldToScreen({ x: state.fighters[ev.defender].position.x, y: state.fighters[ev.defender].position.y - THROW_MARKER_HEIGHT });
+          const dir = state.fighters[ev.defender].position.x >= state.fighters[ev.attacker].position.x ? 1 : -1;
+          this.markers.add("throw", ev.attacker, at.x, at.y, state.frame, dir);
+          this.cameraImpact(events.some((e) => e.type === "ko") ? "ko" : "throw");
           this.playEffect("hit", 1);
           this.play(ev.defender, "hurt");
           this.shake(140, 4);
           break;
+        }
         case "throwTech": this.banner("BREAK!", 500); break;
         case "taunt": this.play(ev.player, "win", 0.9); break;
         case "ko":
           if (!options.replay) this.banner("K.O.", 2000);
           break;
+        case "landed": {
+          // Hitting the floor after a knockdown (or a KO): dust, a thud, a jolt.
+          const at = worldToScreen(state.fighters[ev.player].position);
+          this.markers.add("dust", ev.player, at.x, at.y, state.frame, 1);
+          this.playEffect("thud", 0.9);
+          this.shake(120, 3);
+          break;
+        }
         case "roundEnd":
           if (ev.reason === "timeout") this.banner("TIME", 2000);
           if (ev.outcome !== "draw") this.time.delayedCall(500, () => this.play(ev.outcome as PlayerIndex, "win"));
@@ -508,8 +561,12 @@ export class FightScene extends Phaser.Scene {
   // --- rendering ----------------------------------------------------------------
 
   private renderState(state: FightState): void {
-    state.fighters.forEach((f, i) => this.views[i]?.render(f));
-    this.drawMotionLines(state.fighters);
+    const tweening = getOptions(this.registry).poseTweening;
+    state.fighters.forEach((f, i) => this.views[i]?.render(f, state.frame, tweening));
+    // The streaks stand in for the motion a hard cut skips; when the poses morph, the motion is shown.
+    this.drawMotionLines(state.fighters, (i) => !(tweening && this.views[i]?.canTween));
+    this.markers.render(state.frame);
+    this.updateCamera(state);
     this.debug.render(state.fighters, this.geometry);
     this.drawHud(state);
     if (performance.now() > this.bannerUntil) this.bannerText.setVisible(false);
@@ -522,11 +579,11 @@ export class FightScene extends Phaser.Scene {
     return worldToScreen({ x: f.position.x + f.facing * (l.x - anchor.x), y: f.position.y + (l.y - anchor.y) });
   }
 
-  /** 2–3 procedural streaks between the previous and current wrist/ankle positions on active frames. */
-  private drawMotionLines(fighters: readonly FighterState[]): void {
+  /** 2–3 procedural streaks between the previous and current wrist/ankle positions on active frames, for fighters `shown` picks. */
+  private drawMotionLines(fighters: readonly FighterState[], shown: (index: number) => boolean): void {
     this.motion.clear();
     fighters.forEach((f, i) => {
-      if (!isAttack(f.action) || currentAttackPhase(f) !== "active") return;
+      if (!shown(i) || !isAttack(f.action) || currentAttackPhase(f) !== "active") return;
       const geo = this.geometry[i];
       const frame = frameOf(f);
       const side = frameGeometry(geo, frame.poseId, frame.variant).attackSide ?? "right";

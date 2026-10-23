@@ -1,7 +1,8 @@
 # Test on every push/PR; on main, deploy the static site to Cloudflare Pages and the signaling Worker.
 # Repo secrets: CLOUDFLARE_API_TOKEN, CLOUDFLARE_ACCOUNT_ID.
 # Repo variables: VITE_SIGNALING_URL (e.g. wss://photo-dojo-signaling.<subdomain>.workers.dev),
-#                 PAGES_PROJECT (Cloudflare Pages project name, default "photo-dojo").
+#                 PAGES_PROJECT (Cloudflare Pages project name, default "photo-dojo"),
+#                 SITE_URL (the site's public URL, e.g. https://photo-dojo.pages.dev: absolute link-preview images).
 name: test-and-deploy
 on:
   push:
@@ -39,5 +40,6 @@ jobs:
         run: npm run build
         env:
           VITE_SIGNALING_URL: ${{ vars.VITE_SIGNALING_URL }}
+          VITE_SITE_URL: ${{ vars.SITE_URL }}
       - name: Deploy to Cloudflare Pages
         run: npx --prefix worker wrangler pages deploy dist --project-name "${{ vars.PAGES_PROJECT || 'photo-dojo' }}" --branch main

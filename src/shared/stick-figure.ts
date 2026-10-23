@@ -90,8 +90,16 @@ const rot = (v: Vec, deg: number): Vec => {
   return { x: v.x * c + v.y * s, y: -v.x * s + v.y * c };
 };
 
-/** Canonical skeletons for the second versions of punch, kick, hurt and win, keyed by capture target. */
+/** Canonical skeletons for the second versions of idle, punch, kick, hurt and win, keyed by capture target. */
 export const STICK_BONUS_POSES: Record<string, StickPoseParams> = {
+  // Idle, breathing out: head down a little, fists a little lower. Lean and legs are idle's
+  // exactly: limb angles are measured from the torso, so any extra lean (or knee bend) moves
+  // the feet and the whole figure with them. The game sways between this and the main idle.
+  "idle-2": {
+    torsoLean: 5, headTilt: 9,
+    arms: { right: { swing: 24, bend: 52 }, left: { swing: 14, bend: 47 } },
+    legs: { right: { swing: 14, bend: 165 }, left: { swing: -12, bend: 165 } },
+  },
   // Uppercut: punching arm driven up and forward, slightly bent.
   "punch-2": {
     torsoLean: 5, headTilt: -5,

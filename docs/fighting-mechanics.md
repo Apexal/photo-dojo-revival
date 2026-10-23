@@ -53,6 +53,15 @@ Minimal version:
 - **Frame data:** 5f startup, 1 active frame, unblockable, 10 damage. It whiffs if the opponent is mid-attack (attacks beat throws) and has big recovery on whiff (20f) so it can't be spammed.
 - **Escape (optional, nice for fairness):** pressing punch + kick within 8 frames of being grabbed breaks the throw for no damage.
 - **Pose:** reuse `punch` for the thrower and `hurt` for the victim, plus a sideways shove: the victim is pushed 80 px and the sides stay as they are. It stays silly with no new captures needed. A later bonus capture ("grab") could replace the pose.
+- **Now:** a throw that lands knocks down (section 2.4): the victim is flung `throwDistance` (90 px), lies down, then gets up, which leaves the thrower free well before them.
+
+### 2.4 Knockdowns (implemented)
+
+Street Fighter's reset: a throw, or an **uppercut** hit on someone in the air (the anti-air's reward), sends the victim flying back to the floor; a KO hit makes the loser fall too. Other air hits are plain hits, so knockdowns stay an event rather than every exchange.
+
+- `knockdown` (flying) → `downed` (40 frames on the floor) → `wakeup` (12 frames) → free; buffered presses come out on the first free frame (a wake-up attack).
+- The whole time they can't be hit or thrown and have no push box (walk over them): **no juggles**, so this fits the "no combos" rule in section 5. It resets to neutral with the attacker free first; the fixed wake-up timing is the guessing game (attack so it's out as they rise, or wait and block).
+- Drawn without new captures: the hurt photo tipped back around the feet until it lies flat, resting on the floor, a bounce, dust and a thud on landing; it rotates back up and eases into the stance. The CPU walks in on a downed opponent and, more often on harder levels, times an attack for their wake-up.
 
 ### 2.3 Give blocking a high/low choice
 
@@ -74,7 +83,7 @@ Size is already normalized (every fighter has the same torso length on screen). 
 - **Clamp reach:** measure each attack hitbox's horizontal reach from the anchor and clamp it to the canonical stick figure's reach ±15%. Squeeze the hitbox and its landmarks toward the anchor, not the sprite. The sprite keeps looking like the person, and the gameplay box stays within a fair band.
 - **Standard hurtboxes:** derive the hurtbox for each action from the canonical skeleton, scaled by the fighter's body scale, instead of from the raw capture's bounding box. Keep "the attacking limb is hittable while extended": that's how whiff punishing works, and it's intuitive.
 - **Body-shaped hurtboxes (implemented):** instead of one bounding rectangle per pose, the hurtbox is a set of boxes: head, torso, and each visible limb bone in two halves (`hurtboxesFor` in `frame-data.ts`). Only where the body is can be hit: the empty space under an extended arm or above a crouch isn't part of it, and the extended attacking limb is, for whiff punishing. Part thickness is fixed in canonical units (`HURT_PART_SIZE`), the same for every fighter, and every part is clipped to the stick figure's extent for that frame ±15%, so a sprawling capture isn't a bigger target. Because hurtboxes now follow the body, punch hitboxes run from the fist back to the shoulder (kicks: foot to knee), so point-blank hits still land. Trade-off: the *minimum* target isn't enforced any more, so how far you can be hit from depends a little on your own captured pose (e.g. a tight guard is reached by an uppercut ~20% less far than the stick figure's). Standardizing hurtboxes on the stick figure would remove that.
-- **Hurtboxes don't depend on animation or luck (implemented):** walking alternates the walk and idle photos for a stride, but the hurtboxes are always the idle ones (the stride's front leg would otherwise make you a bigger target every other step), and randomly picked alternates (hurt, KO, win/taunt) are cosmetic: the main pose's hurtboxes count (`hurtFrameOf` in `fight-simulation.ts`).
+- **Hurtboxes don't depend on animation or luck (implemented):** walking alternates the walk and idle photos for a stride, but the hurtboxes are always the idle ones (the stride's front leg would otherwise make you a bigger target every other step), and alternates picked by where a hit landed (hurt, KO) or at random (win/taunt) are cosmetic: the main pose's hurtboxes count (`hurtFrameOf` in `fight-simulation.ts`).
 - **Show it:** the F1 overlay draws all three kinds of box (each hurtbox part separately). When the clamp kicks in, draw the original box faintly too, so testers can see what got evened out.
 
 ### 3.1b Crouching (implemented)

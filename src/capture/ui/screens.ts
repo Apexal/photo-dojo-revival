@@ -1,4 +1,4 @@
-import { MAX_SOUND_TAKES, SOUND_IDS, type PoseId, type SoundId } from "../../shared/fighter-model";
+import { MAX_SOUND_SECONDS, MAX_SOUND_TAKES, SOUND_IDS, type PoseId, type SoundId } from "../../shared/fighter-model";
 import { CAPTURE_TARGETS } from "../../shared/pose-definitions";
 import { describeAge, type DraftSummary } from "../capture-draft";
 import type { CaptureFlowState, CaptureMode } from "../capture-flow";
@@ -59,7 +59,7 @@ const SOUND_PROMPTS: Record<SoundId, { title: string; hint: string }> = {
 
 const screen = (...children: (Node | string | null | false)[]) => h("section", { class: "screen" }, ...children);
 
-/** All thirteen poses. Tapping one retakes it. */
+/** All fourteen poses. Tapping one retakes it. */
 function strip(data: CaptureSessionData, onPick?: (targetKey: string) => void): HTMLElement {
   return h("div", { class: "strip" },
     ...CAPTURE_TARGETS.map((t) =>
@@ -128,7 +128,7 @@ export function renderScreen(root: HTMLElement, flow: CaptureFlowState, data: Ca
       const code = h("input", { type: "text", placeholder: "Game code (optional)", maxLength: 6, autocapitalize: "characters", value: flow.roomCode ?? "" });
       code.addEventListener("change", () => a.setRoomCode(code.value));
       root.append(screen(
-        h("h1", {}, "Photo Dojo"),
+        h("h1", {}, "Photo Dojo", h("span", { class: "kicker" }, "Revival")),
         env.draft
           ? h("div", { class: "resume" },
               h("strong", {}, "Pick up where you left off?"),
@@ -139,7 +139,7 @@ export function renderScreen(root: HTMLElement, flow: CaptureFlowState, data: Ca
               ),
             )
           : null,
-        h("p", {}, "Strike 13 poses, record 3 sounds, and become a fighter."),
+        h("p", {}, `Strike ${CAPTURE_TARGETS.length} poses, record ${SOUND_IDS.length} battle cries, and become a fighter.`),
         roomInfo,
         flow.roomCode ? null : code,
         h("div", { class: "choices" },
@@ -153,7 +153,10 @@ export function renderScreen(root: HTMLElement, flow: CaptureFlowState, data: Ca
               h("input", { type: "checkbox", checked: env.voiceEnabled, on: { change: (ev) => a.setVoice((ev.target as HTMLInputElement).checked) } }),
               "Spoken prompts")
           : null,
-        h("p", { class: "muted" }, "Everything stays on your devices. There's no cloud backup, so keep a downloaded copy of fighters you love."),
+        h("p", { class: "privacy" },
+          h("strong", {}, "Private by design. "),
+          "Your photos and voice are processed on this phone and go straight to the game screen, nowhere else: no accounts, no uploads. There's no cloud backup either, so keep a downloaded copy of fighters you love."),
+        h("p", { class: "muted" }, h("a", { href: `${import.meta.env.BASE_URL}about`, target: "_blank", rel: "noopener" }, "About, FAQ & credits")),
       ));
       break;
     }
@@ -219,7 +222,7 @@ export function renderScreen(root: HTMLElement, flow: CaptureFlowState, data: Ca
       const takes = data.sounds[soundId] ?? [];
       const full = takes.length >= MAX_SOUND_TAKES;
       const status = h("p", { class: "muted" },
-        takes.length ? `${takes.length} take${takes.length > 1 ? "s" : ""}. The game picks one at random each time.` : "Tap record and shout. Stops after 2 seconds.");
+        takes.length ? `${takes.length} take${takes.length > 1 ? "s" : ""}. The game picks one at random each time.` : `Tap record and shout. Stops after ${MAX_SOUND_SECONDS[soundId]} seconds.`);
       const record = h("button", { type: "button", class: takes.length ? "" : "primary", disabled: full },
         full ? `${MAX_SOUND_TAKES} takes recorded` : takes.length ? "Record another take" : "Record");
       // Live input level, so a too-quiet take is obvious before it ends.

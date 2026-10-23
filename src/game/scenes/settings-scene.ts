@@ -16,7 +16,7 @@ export interface SettingsSceneData {
 const VOLUME_STEP = 0.1;
 
 /**
- * Volumes, screen shake, rumble, and keyboard remapping. Opened over fighter
+ * Volumes, screen shake, camera, rumble, smooth motion, and keyboard remapping. Opened over fighter
  * select or the pause menu; every change is saved right away.
  */
 export class SettingsScene extends Phaser.Scene {
@@ -49,19 +49,21 @@ export class SettingsScene extends Phaser.Scene {
       setOption(this.registry, key, value);
       if (value > 0 && this.cache.audio.exists(preview)) this.sound.play(preview, { volume: value });
     };
-    const toggle = (key: "screenShake" | "rumble") => () => setOption(this.registry, key, !options()[key]);
+    const toggle = (key: "screenShake" | "dynamicCamera" | "rumble" | "poseTweening") => () => setOption(this.registry, key, !options()[key]);
     const row = (name: string, value: string) => `${name.padEnd(18)}${value.padStart(12)}`;
 
     this.menu = new Menu(this, GAME_WIDTH / 2, 130, [
       { label: () => row("Game volume", `◀ ${percent(options().gameVolume)} ▶`), onAdjust: volume("gameVolume", gameSoundKey("hit")) },
       { label: () => row("Voice volume", `◀ ${percent(options().voiceVolume)} ▶`), onAdjust: volume("voiceVolume", fallbackSoundKey("hurt")) },
       { label: () => row("Screen shake", onOff(options().screenShake)), onAdjust: toggle("screenShake") },
+      { label: () => row("Dynamic camera", onOff(options().dynamicCamera)), onAdjust: toggle("dynamicCamera") },
       { label: () => row("Controller rumble", onOff(options().rumble)), onAdjust: toggle("rumble") },
+      { label: () => row("Smooth motion", onOff(options().poseTweening)), onAdjust: toggle("poseTweening") },
       { label: () => row("P1 keys", keyboardKeys("p1")), onConfirm: () => this.startRemap("p1") },
       { label: () => row("P2 keys", keyboardKeys("p2")), onConfirm: () => this.startRemap("p2") },
       { label: () => "Reset keys to default", onConfirm: () => resetKeyBindings(), disabled: () => isDefaultBindings(keyBindings()) },
       { label: () => "Back", onConfirm: () => this.close() },
-    ], { width: 640, lineHeight: 50, fontSize: 26 });
+    ], { width: 640, lineHeight: 42, fontSize: 26 });
 
     this.promptText = this.add.text(GAME_WIDTH / 2, 552, "", { fontSize: "26px", fontStyle: "bold", color: "#f2c14e", align: "center" }).setOrigin(0.5, 0);
     this.messageText = this.add.text(GAME_WIDTH / 2, 592, "", { fontSize: "19px", color: "#e8483b" }).setOrigin(0.5, 0);

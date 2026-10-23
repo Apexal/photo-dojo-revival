@@ -1,5 +1,6 @@
 import { exportFighterFile, fighterFileName } from "../shared/fighter-codec";
 import {
+  MAX_SOUND_SECONDS,
   MAX_SOUND_TAKES,
   SOUND_IDS,
   createFighterId,
@@ -346,7 +347,7 @@ class CaptureApp {
     start: () => {
       this.voice.unlock();
       this.holdSound.unlock();
-      this.link.warmUp(); // find out now, not after thirteen poses, whether the laptop is reachable
+      this.link.warmUp(); // find out now, not after fourteen poses, whether the laptop is reachable
       this.dispatch({ type: "start" });
     },
     manualCapture: () => {
@@ -363,7 +364,7 @@ class CaptureApp {
       if (takes.length >= MAX_SOUND_TAKES) return;
       try {
         this.recorder ??= await SoundRecorder.open();
-        const clip = await this.recorder.record(undefined, onLevel);
+        const clip = await this.recorder.record(MAX_SOUND_SECONDS[soundId] * 1000, onLevel);
         takes.push(clip);
         void playClip(clip);
         this.saveDraftSoon();

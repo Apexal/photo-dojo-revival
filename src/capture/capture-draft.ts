@@ -31,7 +31,7 @@ export interface CaptureDraft {
 
 export interface DraftSummary {
   captured: number;
-  /** All thirteen poses are in. */
+  /** All fourteen poses are in. */
   complete: boolean;
   /** First pose still missing (null when complete). */
   nextPoseIndex: number | null;

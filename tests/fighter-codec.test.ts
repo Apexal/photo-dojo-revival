@@ -52,11 +52,20 @@ describe("fighter codec", () => {
     expect(await fighterSnapshot(imported)).toEqual(await fighterSnapshot(fighter));
   });
 
-  it("requires all thirteen poses: a missing second pose or its image is rejected", async () => {
+  it("requires every pose but the second stance: a missing second pose or its image is rejected", async () => {
     const { manifest } = await encodeFighter(makeFighter());
     const parts = manifest.parts.filter((p) => p.partId !== "pose:win:1");
     expect(() => validateManifest({ ...manifest, parts })).toThrow(/win variant 1/);
     expect(() => validateManifest({ ...manifest, variantPoses: manifest.variantPoses.filter((v) => v.poseId !== "kick") })).toThrow(/second kick/);
+  });
+
+  it("carries the second stance when there is one (older fighters don't have it)", async () => {
+    const plain = makeFighter();
+    expect(plain.poseVariants.idle).toBeUndefined();
+    const fighter = { ...plain, poseVariants: { ...plain.poseVariants, idle: [{ ...plain.poses.idle, capturedAt: 42 }] } };
+    const imported = await importFighterFile(await exportFighterFile(fighter));
+    expect(await fighterSnapshot(imported)).toEqual(await fighterSnapshot(fighter));
+    expect(imported.poseVariants.idle?.[0].capturedAt).toBe(42);
   });
 
   it("manifest lists parts, landmarks and anchors", async () => {

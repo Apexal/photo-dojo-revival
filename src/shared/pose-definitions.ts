@@ -123,8 +123,24 @@ export const POSE_DEFINITIONS: Record<PoseId, PoseDefinition> = Object.fromEntri
 /** Capture order. */
 export const POSE_SEQUENCE: readonly PoseDefinition[] = POSE_IDS.map((id) => POSE_DEFINITIONS[id]);
 
-/** Second versions of four poses, keyed like "punch-2": the uppercut and low kick moves, plus alternate hit and win reactions. */
+/**
+ * Second versions of five poses, keyed like "punch-2": a second stance the idle
+ * sways into, the uppercut and low kick moves, plus alternate hit and win reactions.
+ */
 const ALTERNATE_SPECS: Record<string, DefinitionSpec & { poseId: PoseId }> = {
+  "idle-2": {
+    poseId: "idle",
+    label: "Stance, breathing in",
+    // Close to the main stance on purpose: standing still, the fighter sways between the two.
+    voicePrompt: "Fighting stance again. Bend your knees a little more and breathe in.",
+    angleTargets: [
+      { joint: "rightElbow", degrees: 50, tolerance: 35 },
+      { joint: "leftElbow", degrees: 50, tolerance: 35 },
+      { joint: "rightShoulderElevation", degrees: 28, tolerance: 25 },
+      { joint: "legSpread", degrees: 24, tolerance: 14 },
+    ],
+    requiredVisibleLandmarks: FULL_BODY,
+  },
   "punch-2": {
     poseId: "punch",
     label: "Uppercut",
@@ -191,8 +207,8 @@ export interface CaptureTarget {
   definition: PoseDefinition;
 }
 
-/** Every fighter captures all thirteen, so everyone has the same move set. Alternates come right after their main pose. */
-const CAPTURE_ORDER = ["idle", "walk", "block", "crouch", "punch", "punch-2", "kick", "kick-2", "jump", "hurt", "hurt-2", "win", "win-2"] as const;
+/** New fighters capture all fourteen, so everyone has the same move set. Alternates come right after their main pose. */
+const CAPTURE_ORDER = ["idle", "idle-2", "walk", "block", "crouch", "punch", "punch-2", "kick", "kick-2", "jump", "hurt", "hurt-2", "win", "win-2"] as const;
 
 export const CAPTURE_TARGETS: readonly CaptureTarget[] = CAPTURE_ORDER.map((key) => {
   const alternate = ALTERNATE_DEFINITIONS[key];
@@ -201,5 +217,13 @@ export const CAPTURE_TARGETS: readonly CaptureTarget[] = CAPTURE_ORDER.map((key)
     : { key, poseId: key as PoseId, variant: 0, definition: POSE_DEFINITIONS[key as PoseId] };
 });
 
+/**
+ * Alternates added after fighters already existed: captured from now on, but a
+ * fighter file without them is still valid (the game makes up a stand-in).
+ */
+export const OPTIONAL_ALTERNATES: ReadonlySet<string> = new Set(["idle-2"]);
+
 /** Alternates every fighter has: variant 1 of each of these poses. */
-export const REQUIRED_VARIANT_POSES: readonly PoseId[] = CAPTURE_TARGETS.filter((t) => t.variant > 0).map((t) => t.poseId);
+export const REQUIRED_VARIANT_POSES: readonly PoseId[] = CAPTURE_TARGETS
+  .filter((t) => t.variant > 0 && !OPTIONAL_ALTERNATES.has(t.key))
+  .map((t) => t.poseId);

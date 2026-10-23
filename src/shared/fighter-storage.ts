@@ -18,6 +18,10 @@ export interface Settings {
   /** 0..1: the fighters' voices (captured clips or their stand-ins). */
   voiceVolume: number;
   screenShake: boolean;
+  /** The fight camera zooms in when the fighters are close. */
+  dynamicCamera: boolean;
+  /** Morph between some captures (ARAP) instead of cutting. */
+  poseTweening: boolean;
   /** Keyboard remapping; key codes per action for each keyboard half. */
   keyBindings: unknown;
 }

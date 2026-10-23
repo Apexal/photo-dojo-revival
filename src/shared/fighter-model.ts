@@ -30,9 +30,13 @@ export interface Fighter {
   createdAt: number;
   facingDirection: "right";               // all captures face right; renderer flips for P2
   poses: Record<PoseId, CapturedPose>;
-  sounds: Record<SoundId, Blob | null>;   // webm/opus, ≤2 s each
+  sounds: Record<SoundId, Blob | null>;   // webm/opus, ≤MAX_SOUND_SECONDS each
   thumbnailBlob: Blob;                    // idle pose downscaled, for character select
-  /** Second versions of punch (uppercut), kick (low kick), hurt and win. Variant n is index n-1. Every fighter has all of them. */
+  /**
+   * Second versions of punch (uppercut), kick (low kick), hurt and win, which every
+   * fighter has, and of idle (the stance it sways into), which older fighters lack.
+   * Variant n is index n-1.
+   */
   poseVariants: Partial<Record<PoseId, CapturedPose[]>>;
   /** Extra takes of each voice line; the game picks one at random. */
   soundVariants?: Partial<Record<SoundId, Blob[]>>;
@@ -55,7 +59,8 @@ export const GROUND_LINE_Y = 480;
 export const JUMP_ANCHOR_Y = 300;
 export const THUMBNAIL_SIZE = 128;
 export const LANDMARK_COUNT = 33;
-export const MAX_SOUND_SECONDS = 2;
+/** Recording limit per voice line: the victory line has room for a short speech. */
+export const MAX_SOUND_SECONDS: Record<SoundId, number> = { attack: 2, hurt: 2, win: 5 };
 
 /** MediaPipe Pose landmark indices. */
 export const LANDMARK = {

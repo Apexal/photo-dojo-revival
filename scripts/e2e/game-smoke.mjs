@@ -33,7 +33,13 @@ try {
   const game = await ctx.newPage();
   watch(game, "game");
   await game.goto(BASE + "/");
-  await game.waitForFunction(() => window.photoDojo?.scene.isActive("character-select"), null, { timeout: 20000 });
+  await game.waitForFunction(() => window.photoDojo?.scene.isActive("title"), null, { timeout: 20000 });
+  await game.waitForFunction(() => window.photoDojo.scene.getScene("title").sim?.current.frame > 30, null, { timeout: 10000 });
+  step("title screen is up, demo fight running");
+  await game.screenshot({ path: `${OUT}/00-title.png` });
+  await game.keyboard.press("Enter"); // not a player key: starts without joining anyone
+  await game.waitForFunction(() => window.photoDojo.scene.isActive("character-select"), null, { timeout: 5000 });
+  check((await game.evaluate(() => window.photoDojo.scene.getScene("character-select").players.every((p) => p === null))), "Enter on the title joins nobody");
   step("character select is up");
   await game.waitForFunction(() => /^[A-Z2-9]{6}$/.test(window.photoDojo.scene.getScene("character-select").codeText.text), null, { timeout: 10000 });
   await game.waitForFunction(() => window.photoDojo.scene.getScene("character-select").hostText.text.startsWith("Or open"), null, { timeout: 10000 });
@@ -71,18 +77,20 @@ try {
     return f ? { name: f.name, kickBytes: f.poses.kick.imageBlob.size, alternates: Object.values(f.poseVariants ?? {}).flat().length } : null;
   }, sent.id);
   check(stored?.name === "Wire Blue" && stored.kickBytes > 1000, "received fighter is in IndexedDB");
-  check(stored.alternates === 4, `pose alternates survived the transfer (${stored.alternates})`);
+  check(stored.alternates === 5, `pose alternates (second stance included) survived the transfer (${stored.alternates})`);
   step(`laptop saved it to IndexedDB and the grid updated (${JSON.stringify(stored)})`);
   await game.waitForTimeout(400);
   await game.screenshot({ path: `${OUT}/02-select-after-transfer.png` });
   await phone.close();
 
   // --- mouse: select a tile, export from the tile's own button, re-import through the toolbar ---
-  await clickGame(game, 40 + 75, 120 + 75); // first tile
+  // First tile of the grid (character-select-scene.ts: GRID_X 40, GRID_Y 116, TILE 120); its buttons sit along its bottom edge.
+  const TILE_X = 40, TILE_Y = 116, TILE = 120;
+  await clickGame(game, TILE_X + TILE / 2, TILE_Y + TILE / 2); // first tile
   check((await game.evaluate(() => window.photoDojo.scene.getScene("character-select").selected)) === 0, "clicking a tile selects it");
   await game.waitForTimeout(100);
   await game.screenshot({ path: `${OUT}/02b-tile-selected.png` });
-  const [download] = await Promise.all([game.waitForEvent("download"), clickGame(game, 40 + 30, 120 + 150 - 14)]);
+  const [download] = await Promise.all([game.waitForEvent("download"), clickGame(game, TILE_X + 30, TILE_Y + TILE - 16)]);
   const exportPath = `${OUT}/${download.suggestedFilename()}`;
   await download.saveAs(exportPath);
   step(`exported ${download.suggestedFilename()}`);
@@ -90,12 +98,12 @@ try {
   await game.waitForFunction(() => /^(Imported|Updated)/.test(document.getElementById("toolbar-status").textContent), null, { timeout: 5000 });
   step("re-imported the exported file");
   // Delete needs a confirm on the tile; "Keep" backs out.
-  await clickGame(game, 40 + 75, 120 + 75);
-  await clickGame(game, 40 + 96, 120 + 150 - 14); // 🗑
+  await clickGame(game, TILE_X + TILE / 2, TILE_Y + TILE / 2);
+  await clickGame(game, TILE_X + 96, TILE_Y + TILE - 16); // 🗑
   await game.waitForTimeout(100);
   await game.screenshot({ path: `${OUT}/02c-delete.png` });
   check((await game.evaluate(() => window.photoDojo.scene.getScene("character-select").pendingDelete)) !== null, "delete asks to confirm");
-  await clickGame(game, 40 + 95, 120 + 150 - 14); // Keep
+  await clickGame(game, TILE_X + 88, TILE_Y + TILE - 16); // Keep
   check((await game.evaluate(() => window.photoDojo.scene.getScene("character-select").pendingDelete)) === null, "Keep cancels the delete");
   step("mouse: tile select, export button, delete confirm/cancel");
 
@@ -264,6 +272,7 @@ try {
   await stepTo("practice", () => window.photoDojo.scene.isActive("fight"));
   await game.waitForFunction(() => window.photoDojo.scene.getScene("fight")?.sim?.practice === true && window.photoDojo.scene.isActive("fight"), null, { timeout: 8000 });
   await game.waitForFunction(() => window.photoDojo.scene.getScene("fight").sim.current.round.phase === "fighting", null, { timeout: 5000 });
+  check((await game.evaluate(() => window.photoDojo.scene.getScene("fight").dummy.behavior)) === "cpuEasy", "practice opens against the easy CPU");
   await game.keyboard.press("2"); // dummy: block
   check((await game.evaluate(() => window.photoDojo.scene.getScene("fight").dummy.behavior)) === "block", "number keys pick the dummy's behavior");
   await game.keyboard.down("d");
@@ -329,24 +338,24 @@ try {
     await app.renderSprites();
     await app.saveDraftNow();
   }, keys);
-  await inject(["idle", "walk", "block", "punch", "punch-2"]);
+  await inject(["idle", "idle-2", "walk", "block", "crouch"]);
   await cap.reload();
   await cap.getByText("Pick up where you left off?").waitFor({ timeout: 10000 });
-  check((await cap.textContent(".resume")).includes("5 of 12"), "resume card shows progress");
+  check((await cap.textContent(".resume")).includes("5 of 14"), "resume card shows progress");
   await cap.getByText("Resume", { exact: true }).click();
   await cap.getByText("Start camera").click();
-  await cap.waitForFunction(() => document.querySelector("[data-hud=step]")?.textContent?.startsWith("6 / 12"), null, { timeout: 60000 });
-  step("draft survived a reload: resumed at pose 6 / 12");
+  await cap.waitForFunction(() => document.querySelector("[data-hud=step]")?.textContent?.startsWith("6 / 14"), null, { timeout: 60000 });
+  step("draft survived a reload: resumed at pose 6 / 14");
 
   // Fill in the rest and drive the remaining capture UI.
-  await inject(["kick", "kick-2", "jump", "hurt", "hurt-2", "win", "win-2"]);
+  await inject(["punch", "punch-2", "kick", "kick-2", "jump", "hurt", "hurt-2", "win", "win-2"]);
   await cap.evaluate(() => {
     const app = window.photoDojoCapture;
     app.stopLive();
     app.flow = { ...app.flow, screen: { name: "review" } };
     app.render();
   });
-  check((await cap.locator(".strip img").count()) === 12, "review strip shows all 12 poses");
+  check((await cap.locator(".strip img").count()) === 14, "review strip shows all 14 poses");
   await cap.getByText("Looks good").click();
   await cap.getByText("Battle cry").waitFor();
   await cap.getByText("Skip this one").click();

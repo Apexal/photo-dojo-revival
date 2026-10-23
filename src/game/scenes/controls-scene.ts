@@ -156,7 +156,7 @@ export class ControlsScene extends Phaser.Scene {
     if (this.ready[0] && this.ready[1]) this.scene.start("fight", this.setup);
   }
 
-  /** Show the frame of the card's move for the current loop position, exactly as the fight would. */
+  /** Show the frame of the card's move for the current loop position, as the fight would (with hard cuts where it tweens). */
   private animate(card: Card): void {
     const t = Math.floor(this.frame * PREVIEW_SPEED + card.offset) % (card.frames + PAUSE_FRAMES);
     const playing = t < card.frames;
