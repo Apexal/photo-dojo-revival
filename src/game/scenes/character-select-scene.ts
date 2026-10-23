@@ -15,6 +15,7 @@ import type { InputSource } from "../input/input-source";
 import { KeyboardInputSource } from "../input/keyboard-input-source";
 import { KEY, actionKeyLabel } from "../input/key-bindings";
 import { JOIN_RUMBLE } from "../input/rumble";
+import { hasPlayed } from "../played-fighters";
 import { getOptions } from "../options";
 import { loadFighterSounds } from "../render/fighter-sprite-view";
 import { PosePreview, type PreviewCapture, type PreviewPose } from "../render/pose-preview";
@@ -77,6 +78,9 @@ interface Preview {
   title: Phaser.GameObjects.Text;
   name: Phaser.GameObjects.Text;
   status: Phaser.GameObjects.Text;
+  /** Points at the tutorial (gold, just under the name); pulses for a fighter nobody has played yet. */
+  tip: Phaser.GameObjects.Text;
+  tipPulses: boolean;
   device: Phaser.GameObjects.Text;
   /** "Press any button", centred in an empty panel. */
   join: Phaser.GameObjects.Text;
@@ -388,6 +392,10 @@ export class CharacterSelectScene extends Phaser.Scene {
       }
       items.push(this.add.text(x + TILE / 2, y + TILE + 4, entry.fighter.name, { fontSize: "14px", color: "#f3efe6", fixedWidth: TILE + GAP, align: "center" }).setOrigin(0.5, 0));
       if (entry.builtIn) items.push(this.add.text(x + 6, y + TILE - 4, "built-in", { fontSize: "11px", color: "#8a8478" }).setOrigin(0, 1));
+      // Never fought yet: the tutorial is suggested when it's picked.
+      if (!hasPlayed(this.registry, entry.fighter.fighterId)) {
+        items.push(this.add.text(x + TILE - 4, y + 4, "NEW", { fontSize: "11px", fontStyle: "bold", color: "#121018", backgroundColor: "#f2c14e", padding: { x: 4, y: 2 } }).setOrigin(1, 0));
+      }
       // Buttons live outside the container: Phaser's hit-testing doesn't reliably put container siblings above the tile.
       if (selected) this.tileButtons = this.tileActions(entry, x, y).map((b) => b.setDepth(20));
       this.introduce(items as IntroTarget[], this.introTileDelay(i), { y: 30 });
@@ -655,12 +663,14 @@ export class CharacterSelectScene extends Phaser.Scene {
       title: text(PANEL_Y + 14, { fontSize: "34px", fontStyle: "bold", color: PLAYER_CSS[i] }).setText(`P${i + 1}`),
       name: text(PANEL_Y + 60, { fontSize: "26px", fontStyle: "bold", color: "#f3efe6" }),
       status: text(PANEL_Y + 136, { fontSize: "17px", color: PLAYER_CSS[i], lineSpacing: 4 }),
+      tip: text(PANEL_Y + 136, { fontSize: "17px", fontStyle: "bold", color: "#f2c14e", lineSpacing: 4 }),
+      tipPulses: false,
       device: text(PANEL_Y + PANEL_H - 40, { fontSize: "13px", color: "#8a8478" }),
       join: this.add.text(x + PANEL_W / 2, PANEL_Y + PANEL_H / 2 + 20, "", { fontSize: "20px", color: PLAYER_CSS[i], align: "center", lineSpacing: 8 }).setOrigin(0.5),
     };
     preview.title.setPosition(right ? x + PANEL_W - 20 : x + 20, PANEL_Y + 14).setOrigin(right ? 1 : 0, 0);
     // One container so the intro moves the panel as a whole; above the VS dimmer.
-    const panel = this.add.container(0, 0, [preview.frame, preview.title, preview.name, preview.status, preview.device, preview.join]).setDepth(PREVIEW_DEPTH);
+    const panel = this.add.container(0, 0, [preview.frame, preview.title, preview.name, preview.status, preview.tip, preview.device, preview.join]).setDepth(PREVIEW_DEPTH);
     this.introduce([panel], INTRO_PANELS_MS + i * 80, { y: 120 });
     return preview;
   }
@@ -674,12 +684,21 @@ export class CharacterSelectScene extends Phaser.Scene {
       v.title.setAlpha(p ? 1 : 0.5);
       v.name.setText(entry ? entry.fighter.name : "");
       v.join.setText(p ? "" : `Press any button to join\n(gamepad, ${actionKeyLabel("p1", "punch")}, or ${actionKeyLabel("p2", "punch")})`);
+      // The tutorial is one player's: suggest it to anyone alone, and push it for a fighter's first fight.
+      const fresh = !!entry && !hasPlayed(this.registry, entry.fighter.fighterId);
+      v.tip.setText(
+        !p ? ""
+        : alone && p.ready ? (fresh ? "First fight!\nup: TUTORIAL" : "up: tutorial")
+        : alone ? (fresh ? "New? Pick, then\nup: TUTORIAL" : "")
+        : fresh ? "New? Try the\ntutorial solo" : "",
+      ).setY(PANEL_Y + 64 + v.name.height + 12).setAlpha(1);
+      v.tipPulses = fresh && alone;
       v.status.setText(
         !p ? ""
         : !p.ready ? "punch: pick\nkick: leave"
         : alone ? "READY!\npunch: practice\nkick: change"
         : "READY!\nkick: change",
-      ).setY(PANEL_Y + 64 + v.name.height + 12);
+      ).setY(v.tip.y + (v.tip.text ? v.tip.height + 10 : 0));
       v.device.setText(p ? describeInput(p.input) : "");
       // Have the victory line ready by the time they pick.
       if (entry) void this.fighterVoices(entry.fighter);
@@ -756,7 +775,10 @@ export class CharacterSelectScene extends Phaser.Scene {
 
   update(): void {
     this.updateExpiry();
-    for (const v of this.previews) v.fighter?.update(this.time.now);
+    for (const v of this.previews) {
+      v.fighter?.update(this.time.now);
+      if (v.tipPulses) v.tip.setAlpha(0.55 + 0.45 * Math.cos(this.time.now / 220));
+    }
     let changed = false;
     this.players.forEach((p, i) => {
       if (!p) return;
@@ -789,9 +811,10 @@ export class CharacterSelectScene extends Phaser.Scene {
       } else if (pressed("kick")) {
         this.setReady(i, false);
         changed = true;
-      } else if (pressed("punch") && this.players.filter(Boolean).length === 1) {
+      } else if ((pressed("punch") || pressed("up")) && this.players.filter(Boolean).length === 1) {
+        const tutorial = pressed("up"); // before `previous` moves on
         p.previous = now;
-        return this.startPractice(p);
+        return this.startPractice(p, tutorial);
       }
       if (!p.ready && pressed("kick") && !changed) {
         this.players[i] = null; // leave the slot
@@ -824,11 +847,11 @@ export class CharacterSelectScene extends Phaser.Scene {
     startMatch(this, data);
   }
 
-  /** One player against a scripted dummy: another fighter from the roster (or the same one). */
-  startPractice(p: PlayerSlot): void {
+  /** One player against a scripted dummy: another fighter from the roster (or the same one). `tutorial`: start with the guided drill. */
+  startPractice(p: PlayerSlot, tutorial = false): void {
     const mine = this.library[p.cursor];
     const dummy = this.library.find((e) => e.fighter.fighterId !== mine.fighter.fighterId) ?? mine;
-    const data: FightSceneData = { entries: [mine, dummy], inputs: [p.input, { kind: "dummy" }], practice: true };
+    const data: FightSceneData = { entries: [mine, dummy], inputs: [p.input, { kind: "dummy" }], practice: true, tutorial };
     startMatch(this, data);
   }
 

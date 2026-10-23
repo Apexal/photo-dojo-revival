@@ -26,6 +26,8 @@ export interface Settings {
   poseTweening: boolean;
   /** Keyboard remapping; key codes per action for each keyboard half. */
   keyBindings: unknown;
+  /** Ids of fighters that have been played; fighter select suggests the tutorial for the rest. */
+  playedFighters: string[];
 }
 
 interface PhotoDojoDB extends DBSchema {

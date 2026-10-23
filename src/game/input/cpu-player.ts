@@ -36,12 +36,12 @@ const JUMP_IN_DISTANCE = 320;
 type Stance = "idle" | "forward" | "back" | "crouch";
 
 /** How far each move reaches, measured once from the two fighters' landmark-derived boxes. */
-interface Ranges {
+export interface Ranges {
   attack: Record<AttackId, number>;
   throw: number;
 }
 
-function rangesFor(self: FighterGeometry, opponent: FighterGeometry): Ranges {
+export function rangesFor(self: FighterGeometry, opponent: FighterGeometry): Ranges {
   const oppBoxes = worldBoxesOf(opponent, createFighterState(0, -1, 1));
   const reach = (attack: AttackId) => {
     const active = { ...createFighterState(0, 1, 1), action: attack, actionFrame: ATTACKS[attack].startup };

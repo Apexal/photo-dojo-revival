@@ -73,7 +73,7 @@ export class StageSelectScene extends Phaser.Scene {
     this.add.text(cx, 56, "CHOOSE A STAGE", { fontSize: "44px", fontStyle: "bold", color: "#f2c14e", stroke: "#121018", strokeThickness: 8 })
       .setOrigin(0.5).setDepth(OVERLAY_DEPTH);
     const [a, b] = this.setup.entries.map((e) => e.fighter.name);
-    this.add.text(cx, 104, this.setup.practice ? `${a} · practice` : `${a}  vs  ${b}`, { fontSize: "20px", color: "#f3efe6" })
+    this.add.text(cx, 104, this.setup.tutorial ? `${a} · tutorial` : this.setup.practice ? `${a} · practice` : `${a}  vs  ${b}`, { fontSize: "20px", color: "#f3efe6" })
       .setOrigin(0.5).setDepth(OVERLAY_DEPTH);
 
     this.nameText = this.add.text(cx, GAME_HEIGHT - 116, "", { fontSize: "48px", fontStyle: "bold", color: "#f3efe6", stroke: "#121018", strokeThickness: 6 })

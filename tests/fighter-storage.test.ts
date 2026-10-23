@@ -50,3 +50,32 @@ describe("capture drafts", () => {
     expect(await loadDraft()).toBeUndefined();
   });
 });
+
+import type Phaser from "phaser";
+import { hasPlayed, loadPlayedFighters, markPlayed } from "../src/game/played-fighters";
+
+describe("played fighters", () => {
+  /** Just the bit of Phaser's DataManager the module uses. */
+  const registry = () => {
+    const data = new Map<string, unknown>();
+    return { get: (k: string) => data.get(k), set: (k: string, v: unknown) => data.set(k, v) } as unknown as Phaser.Data.DataManager;
+  };
+
+  it("starts with nobody played, remembers plays across sessions, and ignores junk", async () => {
+    const a = registry();
+    await loadPlayedFighters(a);
+    expect(hasPlayed(a, "x")).toBe(false);
+    markPlayed(a, ["x", "y"]);
+    markPlayed(a, ["x"]);
+    expect(hasPlayed(a, "x")).toBe(true);
+    await new Promise((r) => setTimeout(r, 20)); // the save is fire-and-forget
+    const b = registry();
+    await loadPlayedFighters(b);
+    expect(["x", "y", "z"].map((id) => hasPlayed(b, id))).toEqual([true, true, false]);
+    expect(await getSetting("playedFighters")).toEqual(["x", "y"]);
+
+    await setSetting("playedFighters", "nonsense" as unknown as string[]);
+    await loadPlayedFighters(b);
+    expect(hasPlayed(b, "x")).toBe(false);
+  });
+});

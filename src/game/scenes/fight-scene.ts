@@ -31,12 +31,17 @@ import type { RoundResultData } from "./round-result-scene";
 import type { MatchResultData } from "./match-result-scene";
 import { MatchStatsTracker } from "../../simulation/match-stats";
 import { stopMenuMusic } from "../menu-music";
+import { controlLabels } from "../input/control-labels";
+import { markPlayed } from "../played-fighters";
+import { NUDGES, TUTORIAL_STEPS, Tutorial, type TutorialEvent } from "../tutorial";
 
 export interface FightSceneData {
   entries: [LibraryEntry, LibraryEntry];
   /** P2 is the training dummy in practice mode. */
   inputs: [PlayerInputDescriptor, InputDescriptor];
   practice?: boolean;
+  /** Practice that opens with the guided drill (tutorial.ts), then carries on as practice. */
+  tutorial?: boolean;
   /** StageDefinition id (stages/stages.ts); the default stage when missing or unknown. */
   stageId?: string;
 }
@@ -93,6 +98,10 @@ export class FightScene extends Phaser.Scene {
   private heldMask: Set<keyof InputFrame>[] = [new Set(), new Set()];
   private shownHealth: [number, number] = [MAX_HEALTH, MAX_HEALTH];
   private bannerUntil = 0;
+  private tutorial: Tutorial | null = null;
+  private tutorialUi: { title: Phaser.GameObjects.Text; how: Phaser.GameObjects.Text; pips: Phaser.GameObjects.Graphics; nudge: Phaser.GameObjects.Text; footer: Phaser.GameObjects.Text } | null = null;
+  /** When the tutorial's "too far" nudge goes away (performance.now()). */
+  private nudgeUntil = 0;
 
   constructor() {
     super("fight");
@@ -113,6 +122,7 @@ export class FightScene extends Phaser.Scene {
     this.replay = null;
     this.replayDone = false;
     this.rumbles = [new RumbleScheduler(), new RumbleScheduler()];
+    this.tutorial = data.tutorial ? new Tutorial() : null;
   }
 
   preload(): void {
@@ -123,14 +133,15 @@ export class FightScene extends Phaser.Scene {
   create(): void {
     stopMenuMusic(this); // practice comes straight here from the menus
     const [a, b] = this.setup.entries;
+    markPlayed(this.registry, this.setup.entries.filter((_, i) => isPlayerInput(this.setup.inputs[i])).map((e) => e.fighter.fighterId));
     this.geometry = [geometryOf(a.fighter), geometryOf(b.fighter)];
     // A fresh seed per match so variant choices differ between fights (and stay replayable within one).
     this.sim = new FightSimulation(this.geometry, { seed: (Math.random() * 2 ** 32) >>> 0, practice: this.setup.practice });
     this.sources = this.setup.inputs.map((d) =>
       isPlayerInput(d) ? createInputSource(this, d) : (this.dummy = new DummyInputSource(this.sim, 1)),
     );
-    // Practice opens against an easy CPU; 1–8 / Tab switch to the scripted dummies.
-    this.dummy?.setBehavior("cpuEasy");
+    // Practice opens against an easy CPU; 1–8 / Tab switch to the scripted dummies. The tutorial's dummy waits.
+    this.dummy?.setBehavior(this.tutorial ? "stand" : "cpuEasy");
     void Promise.all(this.setup.entries.map((e, i) => loadFighterSounds(this, e.fighter, PREFIXES[i]))).then((s) => { this.sounds = s; });
 
     this.stage = stageFor(this.setup.stageId);
@@ -171,7 +182,8 @@ export class FightScene extends Phaser.Scene {
       this.registry.set(REGISTRY.debugHitboxes, this.debug.visible);
       void setSetting("debugHitboxes", this.debug.visible).catch(() => {});
     });
-    if (this.setup.practice) this.buildPracticePanel();
+    if (this.tutorial) this.buildTutorialPanel();
+    else if (this.setup.practice) this.buildPracticePanel();
     this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => {
       stopStageMusic(this, this.music);
       this.music = null;
@@ -244,6 +256,83 @@ export class FightScene extends Phaser.Scene {
     show();
   }
 
+  // --- tutorial ---------------------------------------------------------------
+
+  /** The drill's instruction, the player's buttons for it, and a pip per repetition. */
+  private buildTutorialPanel(): void {
+    this.timerText.setText("TUTORIAL").setFontSize(26).setY(30);
+    const shadow = { stroke: "#121018", strokeThickness: 8 };
+    this.tutorialUi = {
+      title: this.add.text(GAME_WIDTH / 2, 150, "", { fontSize: "52px", fontStyle: "bold", color: "#f3efe6", ...shadow }).setOrigin(0.5).setDepth(150),
+      how: this.add.text(GAME_WIDTH / 2, 206, "", { fontSize: "26px", fontStyle: "bold", color: "#f2c14e", ...shadow }).setOrigin(0.5).setDepth(150),
+      pips: this.add.graphics().setDepth(150),
+      nudge: this.add.text(GAME_WIDTH / 2, 292, "", { fontSize: "24px", fontStyle: "bold", color: "#e8483b", ...shadow }).setOrigin(0.5).setDepth(150),
+      footer: this.add.text(GAME_WIDTH / 2, GAME_HEIGHT - 26, "Esc: menu", {
+        fontSize: "17px", color: "#f3efe6", backgroundColor: "#121018cc", padding: { x: 12, y: 6 },
+      }).setOrigin(0.5).setDepth(150),
+    };
+  }
+
+  private handleTutorial(events: TutorialEvent[]): void {
+    for (const ev of events) {
+      switch (ev.type) {
+        case "step": this.dummy?.setBehavior(TUTORIAL_STEPS[ev.index].dummy); break;
+        case "progress":
+          this.playEffect("tick", 0.6);
+          this.nudgeUntil = 0;
+          break;
+        case "nudge":
+          this.tutorialUi?.nudge.setText(NUDGES[ev.kind]);
+          this.nudgeUntil = performance.now() + 1800;
+          break;
+        case "cleared":
+          this.dummy?.setBehavior("stand"); // a breather before the next drill
+          this.banner("NICE!", 900);
+          break;
+        case "finished": {
+          // Carry on as plain practice against the easy CPU.
+          this.banner("WELL DONE!", 1500);
+          const ui = this.tutorialUi!;
+          ui.pips.clear();
+          ui.footer.destroy();
+          ui.nudge.destroy();
+          ui.title.setText("You're ready!");
+          ui.how.setText("Keep practicing against the CPU");
+          this.time.delayedCall(4000, () => [ui.title, ui.how, ui.pips].forEach((o) => o.destroy()));
+          this.tutorialUi = null;
+          this.dummy?.setBehavior("cpuEasy");
+          this.buildPracticePanel();
+          break;
+        }
+      }
+    }
+  }
+
+  private drawTutorial(state: FightState): void {
+    const step = this.tutorial?.current;
+    const ui = this.tutorialUi;
+    if (!ui) return;
+    ui.pips.clear();
+    ui.nudge.setVisible(performance.now() < this.nudgeUntil);
+    if (!step) {
+      ui.title.setText("");
+      ui.how.setText("");
+      return;
+    }
+    // Forward / back follow the way the player faces now (they may have crossed over).
+    const labels = controlLabels(this.setup.inputs[0], state.fighters[0].facing === 1 ? "left" : "right");
+    const how = step.how(labels);
+    if (ui.title.text !== step.title) ui.title.setText(step.title);
+    if (ui.how.text !== how) ui.how.setText(how);
+    const gap = 34;
+    const x0 = GAME_WIDTH / 2 - ((step.goal - 1) * gap) / 2;
+    for (let i = 0; i < step.goal; i++) {
+      const done = i < this.tutorial!.count;
+      ui.pips.fillStyle(done ? 0xf2c14e : 0x3a3346, 1).fillCircle(x0 + i * gap, 250, 11);
+      ui.pips.lineStyle(3, 0x121018, 1).strokeCircle(x0 + i * gap, 250, 11);
+    }
+  }
+
   update(_time: number, delta: number): void {
     if (this.replay) return this.updateReplay(delta);
     if (this.waitingForResult) return;
@@ -266,6 +355,7 @@ export class FightScene extends Phaser.Scene {
       this.stats.record(state);
       if (state.events.some((e) => e.type === "ko")) this.replayBuffer.markFinish();
       this.handleEvents(state);
+      if (this.tutorial) this.handleTutorial(this.tutorial.update(state));
       this.accumulator -= STEP_MS;
       if (state.round.phase === "roundOver" || state.round.phase === "matchOver") break;
     }
@@ -541,7 +631,7 @@ export class FightScene extends Phaser.Scene {
       if (options.replay && (ev.type === "roundStart" || ev.type === "fight" || ev.type === "roundEnd" || ev.type === "matchEnd" || ev.type === "throwTech")) continue;
       switch (ev.type) {
         case "roundStart":
-          this.banner(this.setup.practice ? "PRACTICE" : `ROUND ${ev.round}`, 900);
+          this.banner(this.tutorial ? "TUTORIAL" : this.setup.practice ? "PRACTICE" : `ROUND ${ev.round}`, 900);
           this.camera.snap(state.fighters.map((f) => worldToScreen(f.position)));
           break;
         case "fight": this.banner("FIGHT!", 700); break;
@@ -602,6 +692,7 @@ export class FightScene extends Phaser.Scene {
     this.updateCamera(state);
     this.debug.render(state.fighters, this.geometry);
     this.drawHud(state);
+    this.drawTutorial(state);
     if (performance.now() > this.bannerUntil) this.bannerText.setVisible(false);
   }
 

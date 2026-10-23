@@ -1,10 +1,11 @@
 import type { FightSimulation } from "../../simulation/fight-simulation";
 import { EMPTY_INPUT, type InputFrame } from "../../simulation/input-frame";
 import type { PlayerIndex } from "../../simulation/round-rules";
-import { CpuPlayer, type CpuLevel } from "./cpu-player";
+import { CpuPlayer, rangesFor, type CpuLevel } from "./cpu-player";
 import type { InputSource } from "./input-source";
 
-type ScriptedBehavior = "stand" | "block" | "crouch" | "jump" | "jumpIn" | "punch" | "throw" | "random";
+/** `pressure` (walk in and punch, for the tutorial's blocking drill) isn't on the practice picker. */
+type ScriptedBehavior = "stand" | "block" | "crouch" | "jump" | "jumpIn" | "punch" | "pressure" | "throw" | "random";
 export type DummyBehavior = ScriptedBehavior | "cpuEasy" | "cpuNormal" | "cpuHard";
 
 export const DUMMY_BEHAVIORS: readonly { behavior: DummyBehavior; label: string }[] = [
@@ -44,6 +45,8 @@ export class DummyInputSource implements InputSource {
   private frame = 0;
   private randomBehavior: Exclude<ScriptedBehavior, "random"> = "stand";
   private cpu: CpuPlayer | null = null;
+  /** `pressure`: how close it walks before punching. */
+  private punchRange = 0;
 
   constructor(
     private readonly fight: Pick<FightSimulation, "current" | "getGeometry">,
@@ -59,6 +62,9 @@ export class DummyInputSource implements InputSource {
     this.cpu = level
       ? new CpuPlayer(level, { self: this.fight.getGeometry(this.player), opponent: this.fight.getGeometry(other) }, this.random)
       : null;
+    if (behavior === "pressure") {
+      this.punchRange = rangesFor(this.fight.getGeometry(this.player), this.fight.getGeometry(other)).attack.punch;
+    }
   }
 
   read(): InputFrame {
@@ -84,6 +90,11 @@ export class DummyInputSource implements InputSource {
         return { ...EMPTY_INPUT, ...forward, up: t < 3, kick: t === 18 };
       }
       case "punch": return { ...EMPTY_INPUT, punch: t % 30 < 2 };
+      case "pressure": {
+        const distance = Math.abs(fighters[this.player === 0 ? 1 : 0].position.x - fighters[this.player].position.x);
+        if (distance > this.punchRange) return { ...EMPTY_INPUT, ...(facing === 1 ? { right: true } : { left: true }) };
+        return { ...EMPTY_INPUT, punch: t < 2 };
+      }
       case "throw": return { ...EMPTY_INPUT, punch: t < 2, kick: t < 2 };
       default: return { ...EMPTY_INPUT };
     }
