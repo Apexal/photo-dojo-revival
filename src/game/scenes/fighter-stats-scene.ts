@@ -89,7 +89,7 @@ export class FighterStatsScene extends Phaser.Scene {
       ["Attacks blocked", String(r.blocks)],
       ["Throws", String(r.throws)],
       ["Knockdowns", String(r.knockdowns)],
-      ["Best combo", String(r.longestCombo)],
+      ["Best hit streak", String(r.longestStreak)],
       ["Favorite move", favorite ? MOVE_NAMES[favorite] : "–"],
     ];
     const rowH = 31;

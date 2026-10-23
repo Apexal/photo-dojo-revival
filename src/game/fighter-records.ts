@@ -23,7 +23,7 @@ export interface FighterRecord {
   throws: number;
   knockdowns: number;
   /** Best over all matches. */
-  longestCombo: number;
+  longestStreak: number;
   /** Clean hits by attack, over all matches. */
   movesLanded: Partial<Record<AttackId, number>>;
   /** Head-to-head against each opponent, by their fighter id (not mirror matches). */
@@ -43,7 +43,7 @@ const REGISTRY_KEY = "fighterRecords";
 
 export const emptyRecord = (): FighterRecord => ({
   matches: 0, wins: 0, losses: 0, draws: 0, roundsWon: 0, perfectRounds: 0, damageDealt: 0,
-  attacks: 0, hits: 0, blocks: 0, throws: 0, knockdowns: 0, longestCombo: 0, movesLanded: {}, versus: {},
+  attacks: 0, hits: 0, blocks: 0, throws: 0, knockdowns: 0, longestStreak: 0, movesLanded: {}, versus: {},
 });
 
 type CountField = Exclude<keyof FighterRecord, "movesLanded" | "versus">;
@@ -58,6 +58,9 @@ export function parseRecord(value: unknown): FighterRecord {
     const n = (value as Record<string, unknown>)[key];
     if (isCount(n)) record[key] = n;
   }
+  // Saves from before hit streaks kept hits-before-recovery under this name: never more than the streak was.
+  const legacy = (value as Record<string, unknown>).longestCombo;
+  if (!record.longestStreak && isCount(legacy)) record.longestStreak = legacy;
   const moves = (value as Record<string, unknown>).movesLanded;
   if (typeof moves === "object" && moves !== null) {
     for (const [id, n] of Object.entries(moves)) if (isAttackId(id as never) && isCount(n)) record.movesLanded[id as AttackId] = n;
@@ -101,7 +104,7 @@ export function addMatch(record: FighterRecord, stats: PlayerStats, side: Player
     blocks: record.blocks + stats.blocks,
     throws: record.throws + stats.throws,
     knockdowns: record.knockdowns + stats.knockdowns,
-    longestCombo: Math.max(record.longestCombo, stats.longestCombo),
+    longestStreak: Math.max(record.longestStreak, stats.longestStreak),
     movesLanded: addCounts(record.movesLanded, stats.movesLanded),
     versus,
   };

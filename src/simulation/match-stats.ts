@@ -22,8 +22,8 @@ export interface PlayerStats {
   /** Times they put the opponent on the floor. */
   knockdowns: number;
   taunts: number;
-  /** Most clean hits in a row before the opponent recovered. */
-  longestCombo: number;
+  /** Most clean hits in a row (HitStreak). */
+  longestStreak: number;
   /** The attack they landed most often (null if none landed). */
   favoriteMove: AttackId | null;
   /** Clean hits by attack (attacks that never landed are missing). */
@@ -49,38 +49,43 @@ export interface MatchStats {
 
 const emptyStats = (): PlayerStats => ({
   roundsWon: 0, perfectRounds: 0, damageDealt: 0, attacks: 0, hits: 0, blockedByOpponent: 0, blocks: 0,
-  throws: 0, throwTechs: 0, knockdowns: 0, taunts: 0, longestCombo: 0, favoriteMove: null, movesLanded: {},
+  throws: 0, throwTechs: 0, knockdowns: 0, taunts: 0, longestStreak: 0, favoriteMove: null, movesLanded: {},
 });
 
-/** Still reeling from the last hit, so the next one continues the combo. */
-const reeling = (action: string) => action === "hurt" || action === "knockdown" || action === "downed";
-
 /**
- * Clean hits in a row before the defender recovers. Call `hit` for each clean
- * hit in a state's events, then `settle` with that state.
+ * Clean hits in a row, per player, within a round. A streak survives whiffs and
+ * waiting; it ends when the opponent lands a clean hit or throw, or when the
+ * player is blocked, parried or has a throw broken. Feed it every state's events.
  */
-export class ComboCounter {
-  private readonly combo: [number, number] = [0, 0];
-  /** Per defender: still in hitstun from the attacker's last clean hit. */
-  private readonly open: [boolean, boolean] = [false, false];
+export class HitStreak {
+  private readonly streak: [number, number] = [0, 0];
 
-  /** A clean hit by `attacker`: the combo it's now on (1 for a fresh hit). */
-  hit(attacker: PlayerIndex): number {
-    this.combo[attacker] = this.open[other(attacker)] ? this.combo[attacker] + 1 : 1;
-    return this.combo[attacker];
-  }
-
-  /** A blocked hit ends the attacker's combo. */
-  blocked(attacker: PlayerIndex): void {
-    this.combo[attacker] = 0;
-  }
-
-  /** After a state's events: a combo is open while the defender is still reeling; it closes the moment they recover. */
-  settle(state: FightState): void {
-    for (const p of [0, 1] as const) {
-      this.open[p] = reeling(state.fighters[p].action);
-      if (!this.open[p]) this.combo[other(p)] = 0;
+  /** Updates the streaks from one state's events; returns each clean hit's attacker and the streak it's now on. */
+  record(state: FightState): { player: PlayerIndex; hits: number }[] {
+    const landed: { player: PlayerIndex; hits: number }[] = [];
+    for (const ev of state.events) {
+      switch (ev.type) {
+        case "roundStart":
+          this.streak[0] = this.streak[1] = 0;
+          break;
+        case "hit":
+          if (ev.blocked) {
+            this.streak[ev.attacker] = 0;
+            break;
+          }
+          this.streak[ev.defender] = 0;
+          landed.push({ player: ev.attacker, hits: ++this.streak[ev.attacker] });
+          break;
+        case "throw":
+          this.streak[ev.defender] = 0;
+          break;
+        case "parry":
+        case "throwTech":
+          this.streak[ev.attacker] = 0;
+          break;
+      }
     }
+    return landed;
   }
 }
 
@@ -94,7 +99,7 @@ export class MatchStatsTracker {
   private readonly rounds: RoundSummary[] = [];
   private frames = 0;
   private roundFrames = 0;
-  private readonly combo = new ComboCounter();
+  private readonly streak = new HitStreak();
 
   record(state: FightState): void {
     if (state.round.phase === "fighting") {
@@ -111,11 +116,9 @@ export class MatchStatsTracker {
           if (ev.blocked) {
             attacker.blockedByOpponent++;
             this.players[ev.defender].blocks++;
-            this.combo.blocked(ev.attacker);
             break;
           }
           attacker.hits++;
-          attacker.longestCombo = Math.max(attacker.longestCombo, this.combo.hit(ev.attacker));
           attacker.movesLanded[ev.attack] = (attacker.movesLanded[ev.attack] ?? 0) + 1;
           attacker.favoriteMove = mostLanded(attacker.movesLanded);
           break;
@@ -123,7 +126,6 @@ export class MatchStatsTracker {
         case "parry":
           this.players[ev.attacker].blockedByOpponent++;
           this.players[ev.player].blocks++;
-          this.combo.blocked(ev.attacker);
           break;
         case "throw":
           this.players[ev.attacker].throws++;
@@ -149,7 +151,9 @@ export class MatchStatsTracker {
         }
       }
     }
-    this.combo.settle(state);
+    for (const { player, hits } of this.streak.record(state)) {
+      this.players[player].longestStreak = Math.max(this.players[player].longestStreak, hits);
+    }
     // Damage: what came off each fighter's health this step (hits, throws), credited to the other.
     this.trackDamage(state);
   }

@@ -14,6 +14,8 @@ import { GAME_HEIGHT, GAME_WIDTH, PLAYER_COLORS } from "../render/stage";
 import { MIRROR_TINT } from "./controls-scene";
 import { REGISTRY } from "./boot-scene";
 import type { FightScene } from "./fight-scene";
+import { announce } from "../announcer";
+import { matchWinnerLine } from "../announcer-lines";
 import { SERIES_INFO, recordSeriesResult, type SeriesKind, type SeriesSession } from "../series";
 
 export interface MatchResultData {
@@ -44,7 +46,7 @@ const ROWS: Row[] = [
   { label: "Damage dealt", value: (s) => s.damageDealt },
   { label: "Clean hits", value: (s) => s.hits },
   { label: "Accuracy", value: (s) => accuracy(s), show: (v, s) => (s.attacks ? `${Math.round(v * 100)}%` : "–") },
-  { label: "Longest combo", value: (s) => s.longestCombo },
+  { label: "Longest hit streak", value: (s) => s.longestStreak },
   { label: "Attacks blocked", value: (s) => s.blocks },
   { label: "Throws", value: (s) => s.throws },
   { label: "Throws broken", value: (s) => s.throwTechs },
@@ -86,6 +88,7 @@ export class MatchResultScene extends Phaser.Scene {
 
     this.add.rectangle(0, 0, GAME_WIDTH, GAME_HEIGHT, 0x121018, 0.98).setOrigin(0);
     const title = winner === "draw" ? "DRAW GAME" : `${names[winner]} WINS!`;
+    announce(this, matchWinnerLine(winner));
     this.add.text(cx, 52, title.toUpperCase(), {
       fontSize: "60px", fontStyle: "bold", color: "#f2c14e", stroke: "#121018", strokeThickness: 8, align: "center", wordWrap: { width: 760 },
     }).setOrigin(0.5);

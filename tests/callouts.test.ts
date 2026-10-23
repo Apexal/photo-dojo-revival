@@ -33,7 +33,7 @@ describe("CalloutTracker", () => {
     const { seen, step } = tracked();
     punch(step, 60);
     punch(step, 60);
-    expect(seen).toEqual([{ type: "firstBlood", player: 0 }]);
+    expect(seen.filter((c) => c.type !== "streak")).toEqual([{ type: "firstBlood", player: 0 }]);
   });
 
   it("doesn't call a blocked hit first blood", () => {
@@ -45,7 +45,7 @@ describe("CalloutTracker", () => {
   it("calls PERFECT as an untouched winner takes the round, and first blood again next round", () => {
     const { sim, callouts, seen, step } = tracked();
     for (let i = 0; i < 400 && sim.current.round.phase === "fighting"; i++) punch(step, 30);
-    expect(seen.filter((c) => c.type !== "combo")).toEqual([{ type: "firstBlood", player: 0 }, { type: "perfect", player: 0 }]);
+    expect(seen.filter((c) => c.type !== "streak")).toEqual([{ type: "firstBlood", player: 0 }, { type: "perfect", player: 0 }]);
     for (let i = 0; i < 400 && sim.current.round.phase !== "roundOver"; i++) step();
     sim.startNextRound();
     seen.length = 0;
@@ -67,33 +67,30 @@ describe("CalloutTracker", () => {
     expect(seen.some((c) => c.type === "perfect")).toBe(false);
   });
 
-  it("counts combos while the opponent is still reeling, from 2 hits up", () => {
+  it("calls hit streaks from 2 hits up, until the opponent lands one back", () => {
     const { sim } = tracked();
     const callouts = new CalloutTracker({ match: false });
     const base = sim.current;
-    const at = (defenderAction: string, events: FightState["events"] = []): FightState => ({
-      ...base,
-      events,
-      fighters: [base.fighters[0], { ...base.fighters[1], action: defenderAction as FightState["fighters"][1]["action"] }],
-    });
+    const at = (events: FightState["events"] = []): FightState => ({ ...base, events });
     const hit = { type: "hit", attacker: 0, defender: 1, attack: "punch", blocked: false, damage: 5, at: { x: 0, y: 0 } } as const;
-    expect(callouts.record(at("hurt", [hit]))).toEqual([]); // 1, and no first blood in practice
-    callouts.record(at("hurt"));
-    expect(callouts.record(at("hurt", [hit]))).toEqual([{ type: "combo", player: 0, hits: 2 }]);
-    expect(callouts.record(at("hurt", [hit]))).toEqual([{ type: "combo", player: 0, hits: 3 }]);
-    callouts.record(at("idle")); // recovered
-    expect(callouts.record(at("hurt", [hit]))).toEqual([]);
+    expect(callouts.record(at([hit]))).toEqual([]); // 1, and no first blood in practice
+    callouts.record(at());
+    expect(callouts.record(at([hit]))).toEqual([{ type: "streak", player: 0, hits: 2 }]);
+    expect(callouts.record(at([hit]))).toEqual([{ type: "streak", player: 0, hits: 3 }]);
+    callouts.record(at([{ ...hit, attacker: 1, defender: 0 }])); // P2 hits back
+    expect(callouts.record(at([hit]))).toEqual([]);
   });
 
-  it("calls nothing but combos in practice", () => {
+  it("calls nothing but hit streaks in practice", () => {
     const { seen, step } = tracked({ match: false });
     punch(step, 60);
-    expect(seen).toEqual([]);
+    punch(step, 60);
+    expect(seen).toEqual([{ type: "streak", player: 0, hits: 2 }]);
   });
 
   it("words them for the screen", () => {
     expect(calloutText({ type: "firstBlood", player: 0 })).toBe("FIRST BLOOD");
-    expect(calloutText({ type: "combo", player: 1, hits: 3 })).toBe("3 HIT COMBO");
+    expect(calloutText({ type: "streak", player: 1, hits: 3 })).toBe("3 HIT STREAK");
     expect(calloutText({ type: "perfect", player: 1 })).toBe("PERFECT");
   });
 });

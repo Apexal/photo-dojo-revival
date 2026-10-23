@@ -8,6 +8,8 @@ export interface GameOptions {
   gameVolume: number;
   /** 0..1: the fighters' voices. */
   voiceVolume: number;
+  /** 0..1: the announcer (announcer.ts). */
+  announcerVolume: number;
   /** 0..1: stage soundtracks. */
   musicVolume: number;
   screenShake: boolean;
@@ -18,7 +20,7 @@ export interface GameOptions {
   poseTweening: boolean;
 }
 
-export const DEFAULT_OPTIONS: Readonly<GameOptions> = Object.freeze({ gameVolume: 0.8, voiceVolume: 1, musicVolume: 0.6, screenShake: true, dynamicCamera: true, rumble: true, poseTweening: true });
+export const DEFAULT_OPTIONS: Readonly<GameOptions> = Object.freeze({ gameVolume: 0.8, voiceVolume: 1, announcerVolume: 1, musicVolume: 0.6, screenShake: true, dynamicCamera: true, rumble: true, poseTweening: true });
 
 const REGISTRY_KEY = "options";
 

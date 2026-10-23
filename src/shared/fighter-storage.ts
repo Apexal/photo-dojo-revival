@@ -17,6 +17,7 @@ export interface Settings {
   gameVolume: number;
   /** 0..1: the fighters' voices (captured clips or their stand-ins). */
   voiceVolume: number;
+  announcerVolume: number;
   /** 0..1: stage soundtracks. */
   musicVolume: number;
   screenShake: boolean;

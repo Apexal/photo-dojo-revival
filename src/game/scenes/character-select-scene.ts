@@ -9,6 +9,7 @@ import { deleteFighter, getSetting, isStoragePersisted, saveFighter, setSetting 
 import type { InputFrame } from "../../simulation/input-frame";
 import { geometryOf, type LibraryEntry } from "../fighter-library";
 import { playGameSound } from "../game-sounds";
+import { announce } from "../announcer";
 import { HostSession, type HostStatus } from "../host-session";
 import { PAD_BUTTON } from "../input/gamepad-input-source";
 import { createInputSource, describeInput, sameInput, type PlayerInputDescriptor } from "../input/input-descriptor";
@@ -194,6 +195,7 @@ export class CharacterSelectScene extends Phaser.Scene {
 
   create(): void {
     playMenuMusic(this);
+    announce(this, "choose-fighter");
     this.library = this.registry.get(REGISTRY.library) ?? [];
     this.players = [null, null];
     this.selected = null;
@@ -615,6 +617,7 @@ export class CharacterSelectScene extends Phaser.Scene {
     // "That's you": a pad buzzes when it joins.
     if (getOptions(this.registry).rumble) source.rumble?.(JOIN_RUMBLE);
     playGameSound(this, "tick", 0.6);
+    if (slot === 1) announce(this, "new-challenger");
     this.showPage(Math.floor(cursor / this.pageSize));
     this.updatePreviews();
     this.drawCursors();
@@ -718,7 +721,7 @@ export class CharacterSelectScene extends Phaser.Scene {
       v.name.setText(entry ? entry.fighter.name : "");
       const record = entry && recordOf(this.registry, entry.fighter.fighterId);
       // Ready: down is free (it moves the cursor before), so it opens the career page.
-      v.record.setText(record ? `${winLoss(record)}\n${p.ready ? "down: stats ▸" : `best combo ${record.longestCombo}`}` : "");
+      v.record.setText(record ? `${winLoss(record)}\n${p.ready ? "down: stats ▸" : `best streak ${record.longestStreak}`}` : "");
       // The signature move only: "Brawler · Shoulder Charge" wraps in the panel's text column.
       v.style.setText(entry ? ARCHETYPES[entry.fighter.archetype].moveName : "").setY(PANEL_Y + 62 + v.name.height);
       v.join.setText(p ? "" : `Press any button to join\n(gamepad, ${actionKeyLabel("p1", "punch")}, or ${actionKeyLabel("p2", "punch")})`);

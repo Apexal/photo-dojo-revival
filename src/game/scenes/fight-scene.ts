@@ -19,6 +19,8 @@ import { REPLAY_SPEED, ReplayBuffer } from "../replay-buffer";
 import { pickTake } from "../sound-choice";
 import { JOIN_RUMBLE, RumbleScheduler, rumbleFor } from "../input/rumble";
 import { playGameSound } from "../game-sounds";
+import { announce } from "../announcer";
+import { calloutLine, roundEndLine, roundStartLine } from "../announcer-lines";
 import { getOptions, setOption } from "../options";
 import { HitboxDebugView } from "../render/hitbox-debug-view";
 import { LOW_HEALTH, clockCue, clockTicked, lowHealthPulse } from "../render/hud-cues";
@@ -82,9 +84,9 @@ export class FightScene extends Phaser.Scene {
   private views: FighterSpriteView[] = [];
   /** For the end-of-match stats page. */
   private stats = new MatchStatsTracker();
-  /** FIRST BLOOD, N HIT COMBO, PERFECT. */
+  /** FIRST BLOOD, N HIT STREAK, PERFECT. */
   private callouts = new CalloutTracker({ match: true });
-  /** Per player, under their health bar: first blood and combos. */
+  /** Per player, under their health bar: first blood and hit streaks. */
   private calloutTexts: Phaser.GameObjects.Text[] = [];
   /** Under the center banner, after the K.O. */
   private perfectText!: Phaser.GameObjects.Text;
@@ -314,10 +316,12 @@ export class FightScene extends Phaser.Scene {
         case "cleared":
           this.dummy?.setBehavior("stand"); // a breather before the next drill
           this.banner("NICE!", 900);
+          announce(this, "nice");
           break;
         case "finished": {
           // Carry on as plain practice against the easy CPU.
           this.banner("WELL DONE!", 1500);
+          announce(this, "well-done");
           const ui = this.tutorialUi!;
           ui.pips.clear();
           ui.footer.destroy();
@@ -645,13 +649,16 @@ export class FightScene extends Phaser.Scene {
     this.bannerUntil = performance.now() + ms;
   }
 
-  /** Pops the text in, holds it, fades it. A bigger combo replaces the smaller one in place. */
+  /** Pops the text in, holds it, fades it. A longer streak replaces the shorter one in place. */
   private showCallouts(callouts: Callout[]): void {
     for (const c of callouts) {
       const perfect = c.type === "perfect";
       const text = perfect ? this.perfectText : this.calloutTexts[c.player];
       this.tweens.killTweensOf(text);
       text.setText(calloutText(c)).setAlpha(perfect ? 0 : 1).setScale(1.4).setVisible(true);
+      const line = calloutLine(c);
+      // PERFECT comes after the K.O.
+      if (line) announce(this, line, { queue: perfect });
       this.tweens.chain({
         targets: text,
         tweens: [
@@ -687,11 +694,17 @@ export class FightScene extends Phaser.Scene {
       // In a replay only the sounds and shakes come back, not the announcer banners.
       if (options.replay && (ev.type === "roundStart" || ev.type === "fight" || ev.type === "roundEnd" || ev.type === "matchEnd" || ev.type === "throwTech")) continue;
       switch (ev.type) {
-        case "roundStart":
-          this.banner(this.tutorial && !this.tutorial.finished ? "TUTORIAL" : this.setup.practice ? "PRACTICE" : `ROUND ${ev.round}`, 900);
+        case "roundStart": {
+          const tutorial = this.tutorial && !this.tutorial.finished;
+          this.banner(tutorial ? "TUTORIAL" : this.setup.practice ? "PRACTICE" : `ROUND ${ev.round}`, 900);
+          announce(this, tutorial ? "tutorial" : this.setup.practice ? "practice" : roundStartLine(ev.round, state.round.wins));
           this.camera.snap(state.fighters.map((f) => worldToScreen(f.position)));
           break;
-        case "fight": this.banner("FIGHT!", 700); break;
+        }
+        case "fight":
+          this.banner("FIGHT!", 700);
+          announce(this, "fight");
+          break;
         case "attackActive": this.play(ev.player, "attack", 0.6); break;
         case "hit": {
           const ko = events.some((e) => e.type === "ko" && e.player === ev.defender);
@@ -704,7 +717,10 @@ export class FightScene extends Phaser.Scene {
         }
         case "parry": {
           playGameSound(this, "block", 1);
-          if (!options.replay) this.banner("PARRY!", 600);
+          if (!options.replay) {
+            this.banner("PARRY!", 600);
+            announce(this, "parry");
+          }
           break;
         }
         case "grab": this.play(ev.attacker, "attack", 0.6); break;
@@ -715,7 +731,10 @@ export class FightScene extends Phaser.Scene {
           this.shake(140, 4);
           break;
         }
-        case "throwTech": this.banner("BREAK!", 500); break;
+        case "throwTech":
+          this.banner("BREAK!", 500);
+          announce(this, "throw-break");
+          break;
         case "taunt": this.play(ev.player, "win", 0.9); break;
         case "ko":
           if (!options.replay) this.banner("K.O.", 2000);
@@ -728,6 +747,7 @@ export class FightScene extends Phaser.Scene {
         }
         case "roundEnd":
           if (ev.reason === "timeout") this.banner("TIME", 2000);
+          announce(this, roundEndLine(ev.outcome, ev.reason));
           if (ev.outcome !== "draw") this.time.delayedCall(500, () => this.play(ev.outcome as PlayerIndex, "win"));
           break;
         default: break;

@@ -12,6 +12,7 @@ import { fighterTextureKeys, preloadFighterTextures, textureKey } from "../rende
 import { GAME_HEIGHT, GAME_WIDTH } from "../render/stage";
 import { menuSceneFor, type FightSceneData } from "./fight-scene";
 import { stopMenuMusic } from "../menu-music";
+import { announce } from "../announcer";
 
 const PREFIXES = ["ctl0", "ctl1"] as const;
 export const MIRROR_TINT = 0x9fc4ff;
@@ -146,6 +147,7 @@ export class ControlsScene extends Phaser.Scene {
       if (f.punch && !this.previous[i].punch && !this.ready[i]) {
         this.ready[i] = true;
         this.updateReadyText(i);
+        announce(this, i === 0 ? "p1-ready" : "p2-ready");
       }
       if (f.kick && !this.previous[i].kick) {
         if (this.ready[i]) {

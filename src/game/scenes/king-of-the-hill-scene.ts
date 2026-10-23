@@ -2,6 +2,7 @@ import Phaser from "phaser";
 import type { InputFrame } from "../../simulation/input-frame";
 import type { LibraryEntry } from "../fighter-library";
 import { playGameSound } from "../game-sounds";
+import { announce } from "../announcer";
 import { createInputSource } from "../input/input-descriptor";
 import type { InputSource } from "../input/input-source";
 import { playMenuMusic } from "../menu-music";
@@ -65,6 +66,7 @@ export class KingOfTheHillScene extends Phaser.Scene {
     const champion = session.hill.champion;
     if (champion) this.drawChampion(champion);
     else this.drawMatch();
+    announce(this, champion ? "hill-champion" : session.hill.kingSide === null ? "king-of-the-hill" : "new-challenger");
     this.hint = this.add.text(GAME_WIDTH / 2, GAME_HEIGHT - 28, "", { fontSize: "17px", color: "#a8a196" }).setOrigin(0.5);
     this.setHint();
   }

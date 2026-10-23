@@ -4,6 +4,7 @@ import { getSetting, openFighterDb } from "../../shared/fighter-storage";
 import { loadLibrary, type LibraryEntry } from "../fighter-library";
 import { HostSession } from "../host-session";
 import { GAME_SOUND_IDS, gameSoundKey } from "../game-sounds";
+import { preloadAnnouncer } from "../announcer";
 import { loadOptions } from "../options";
 import { loadFighterRecords } from "../fighter-records";
 import { loadPlayedFighters } from "../played-fighters";
@@ -21,6 +22,7 @@ export class BootScene extends Phaser.Scene {
   preload(): void {
     for (const id of SOUND_IDS) this.load.audio(fallbackSoundKey(id), `${import.meta.env.BASE_URL}sounds/${id}.wav`);
     for (const id of GAME_SOUND_IDS) this.load.audio(gameSoundKey(id), `${import.meta.env.BASE_URL}sounds/${id}.wav`);
+    preloadAnnouncer(this);
   }
 
   create(): void {

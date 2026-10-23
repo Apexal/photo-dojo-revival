@@ -90,14 +90,14 @@ describe("fighter records", () => {
   };
   const stats = (over: Partial<PlayerStats> = {}): PlayerStats => ({
     roundsWon: 0, perfectRounds: 0, damageDealt: 0, attacks: 0, hits: 0, blockedByOpponent: 0, blocks: 0,
-    throws: 0, throwTechs: 0, knockdowns: 0, taunts: 0, longestCombo: 0, favoriteMove: null, movesLanded: {}, ...over,
+    throws: 0, throwTechs: 0, knockdowns: 0, taunts: 0, longestStreak: 0, favoriteMove: null, movesLanded: {}, ...over,
   });
 
-  it("adds a match up: result from the fighter's side, totals summed, best combo kept", () => {
-    let r = addMatch(emptyRecord(), stats({ roundsWon: 2, damageDealt: 150, hits: 9, attacks: 12, longestCombo: 4 }), 0, 0);
-    r = addMatch(r, stats({ roundsWon: 1, damageDealt: 80, hits: 3, attacks: 10, longestCombo: 2 }), 1, 0);
-    r = addMatch(r, stats({ longestCombo: 5 }), 1, "draw");
-    expect(r).toMatchObject({ matches: 3, wins: 1, losses: 1, draws: 1, roundsWon: 3, damageDealt: 230, hits: 12, attacks: 22, longestCombo: 5 });
+  it("adds a match up: result from the fighter's side, totals summed, best hit streak kept", () => {
+    let r = addMatch(emptyRecord(), stats({ roundsWon: 2, damageDealt: 150, hits: 9, attacks: 12, longestStreak: 4 }), 0, 0);
+    r = addMatch(r, stats({ roundsWon: 1, damageDealt: 80, hits: 3, attacks: 10, longestStreak: 2 }), 1, 0);
+    r = addMatch(r, stats({ longestStreak: 5 }), 1, "draw");
+    expect(r).toMatchObject({ matches: 3, wins: 1, losses: 1, draws: 1, roundsWon: 3, damageDealt: 230, hits: 12, attacks: 22, longestStreak: 5 });
     expect(winLoss(r)).toBe("1W 1L 1D");
     expect(winLoss({ ...r, draws: 0 })).toBe("1W 1L");
   });
@@ -116,6 +116,12 @@ describe("fighter records", () => {
     expect(parseRecord({ wins: 3, losses: -1, draws: "2", hits: NaN })).toEqual({ ...emptyRecord(), wins: 3 });
     expect(parseRecord({ movesLanded: { punch: 2, fireball: 9, kick: "x" }, versus: { y: { wins: 1, losses: "?" }, z: 5 } }))
       .toEqual({ ...emptyRecord(), movesLanded: { punch: 2 }, versus: { y: { wins: 1, losses: 0, draws: 0 } } });
+  });
+
+  it("carries an older save's best run over as its best hit streak", () => {
+    expect(parseRecord({ longestCombo: 3 }).longestStreak).toBe(3);
+    expect(parseRecord({ longestCombo: 3, longestStreak: 5 }).longestStreak).toBe(5);
+    expect(parseRecord({ longestCombo: 3 })).not.toHaveProperty("longestCombo");
   });
 
   it("records both sides (a mirror match twice), persists, and forgets deleted fighters", async () => {

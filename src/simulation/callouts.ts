@@ -1,23 +1,23 @@
 import type { FightState } from "./fight-simulation";
-import { ComboCounter } from "./match-stats";
+import { HitStreak } from "./match-stats";
 import { MAX_HEALTH, type PlayerIndex, type RoundPhase } from "./round-rules";
 
-/** An announcer callout for one player: the round's first hit, a combo as it grows, a round won untouched. */
+/** An announcer callout for one player: the round's first hit, a hit streak as it grows, a round won untouched. */
 export type Callout =
   | { type: "firstBlood"; player: PlayerIndex }
-  | { type: "combo"; player: PlayerIndex; hits: number }
+  | { type: "streak"; player: PlayerIndex; hits: number }
   | { type: "perfect"; player: PlayerIndex };
 
 export const calloutText = (c: Callout): string =>
-  c.type === "firstBlood" ? "FIRST BLOOD" : c.type === "combo" ? `${c.hits} HIT COMBO` : "PERFECT";
+  c.type === "firstBlood" ? "FIRST BLOOD" : c.type === "streak" ? `${c.hits} HIT STREAK` : "PERFECT";
 
 /**
  * Picks out callouts as the fight is played: feed it every state the
  * simulation steps to (not replays), in order. `firstBlood` and `perfect`
- * are for matches; practice only gets combos.
+ * are for matches; practice only gets streaks.
  */
 export class CalloutTracker {
-  private combo = new ComboCounter();
+  private readonly streak = new HitStreak();
   private bloodied = false;
   private lastPhase: RoundPhase | null = null;
 
@@ -29,28 +29,19 @@ export class CalloutTracker {
       switch (ev.type) {
         case "roundStart":
           // Also a restarted round.
-          this.combo = new ComboCounter();
           this.bloodied = false;
           break;
-        case "hit": {
-          if (ev.blocked) {
-            this.combo.blocked(ev.attacker);
-            break;
-          }
-          this.firstBlood(ev.attacker, out);
-          const hits = this.combo.hit(ev.attacker);
-          if (hits >= 2) out.push({ type: "combo", player: ev.attacker, hits });
-          break;
-        }
-        case "parry":
-          this.combo.blocked(ev.attacker);
+        case "hit":
+          if (!ev.blocked) this.firstBlood(ev.attacker, out);
           break;
         case "throw":
           this.firstBlood(ev.attacker, out);
           break;
       }
     }
-    this.combo.settle(state);
+    for (const { player, hits } of this.streak.record(state)) {
+      if (hits >= 2) out.push({ type: "streak", player, hits });
+    }
     // Called as the round is decided (the outro starts), not at its end, so it lands with the K.O.
     const { round } = state;
     const decided = round.phase === "outro" && this.lastPhase === "fighting";

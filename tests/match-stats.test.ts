@@ -61,12 +61,12 @@ describe("MatchStatsTracker", () => {
     expect(p2.blocks).toBe(1);
   });
 
-  it("separate hits after the opponent recovers are combos of one", () => {
+  it("counts clean hits in a row as a streak, even with the opponent recovering in between", () => {
     const { stats, step } = tracked();
     punch(step, 60);
     punch(step, 60);
     expect(stats.result.players[0].hits).toBe(2);
-    expect(stats.result.players[0].longestCombo).toBe(1);
+    expect(stats.result.players[0].longestStreak).toBe(2);
   });
 
   it("records a round: winner, reason, health left, perfect round", () => {
@@ -85,24 +85,45 @@ describe("MatchStatsTracker", () => {
     expect(rounds[0].frames).toBe(frames);
   });
 
-  it("counts hits that land while the opponent is still reeling as one combo", () => {
+  it("ends a streak when the opponent lands one back or blocks", () => {
     const { sim } = tracked();
     const stats = new MatchStatsTracker();
     const base = sim.current;
-    const at = (defenderAction: string, events: FightState["events"] = []): FightState => ({
-      ...base,
-      events,
-      fighters: [base.fighters[0], { ...base.fighters[1], action: defenderAction as FightState["fighters"][1]["action"] }],
-    });
+    const at = (events: FightState["events"] = []): FightState => ({ ...base, events });
     const hit = { type: "hit", attacker: 0, defender: 1, attack: "punch", blocked: false, damage: 5, at: { x: 0, y: 0 } } as const;
-    stats.record(at("hurt", [hit])); // 1
-    stats.record(at("hurt"));
-    stats.record(at("hurt", [hit])); // 2: still reeling
-    stats.record(at("hurt", [{ ...hit, attack: "kick" }])); // 3
-    stats.record(at("idle")); // recovered: the combo's over
-    stats.record(at("hurt", [hit])); // a new one
-    expect(stats.result.players[0].longestCombo).toBe(3);
-    expect(stats.result.players[0].hits).toBe(4);
+    const back = { ...hit, attacker: 1, defender: 0 } as const;
+    stats.record(at([hit])); // 1
+    stats.record(at()); // whiffs and waiting don't end it
+    stats.record(at([hit])); // 2
+    stats.record(at([{ ...hit, attack: "kick" }])); // 3
+    stats.record(at([back])); // P2 hits back: P1's streak is over
+    stats.record(at([hit])); // 1
+    stats.record(at([{ ...hit, blocked: true }])); // blocked: over again
+    stats.record(at([hit])); // 1
+    stats.record(at([hit])); // 2
+    expect(stats.result.players[0].longestStreak).toBe(3);
+    expect(stats.result.players[0].hits).toBe(6);
     expect(stats.result.players[0].favoriteMove).toBe("punch");
+    expect(stats.result.players[1].longestStreak).toBe(1);
+  });
+
+  it("ends a streak on a parry, a broken throw, the opponent's throw, and a new round", () => {
+    const { sim } = tracked();
+    const base = sim.current;
+    const at = (events: FightState["events"] = []): FightState => ({ ...base, events });
+    const hit = { type: "hit", attacker: 0, defender: 1, attack: "punch", blocked: false, damage: 5, at: { x: 0, y: 0 } } as const;
+    const enders: FightState["events"] = [
+      { type: "parry", player: 1, attacker: 0, attack: "punch", at: { x: 0, y: 0 } },
+      { type: "throwTech", attacker: 0, defender: 1 },
+      { type: "throw", attacker: 1, defender: 0, grab: "throw", damage: 10 },
+      { type: "roundStart", round: 2 },
+    ];
+    for (const ender of enders) {
+      const stats = new MatchStatsTracker();
+      stats.record(at([hit]));
+      stats.record(at([ender]));
+      stats.record(at([hit]));
+      expect(stats.result.players[0].longestStreak, ender.type).toBe(1);
+    }
   });
 });

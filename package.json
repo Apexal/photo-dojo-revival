@@ -13,6 +13,7 @@
     "typecheck": "tsc --noEmit && npm --prefix worker run typecheck",
     "worker:dev": "npm --prefix worker run dev",
     "generate:assets": "tsx scripts/generate-assets.ts",
+    "generate:announcer": "tsx scripts/generate-announcer.ts",
     "test:e2e": "node scripts/e2e/game-smoke.mjs",
     "test:signaling": "node scripts/signaling-smoke.mjs",
     "dev:https": "HTTPS=1 vite",

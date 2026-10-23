@@ -1,6 +1,8 @@
 import Phaser from "phaser";
 import type { InputFrame } from "../../simulation/input-frame";
 import { playGameSound } from "../game-sounds";
+import { announce } from "../announcer";
+import { stageLine } from "../announcer-lines";
 import { createInputSource, isPlayerInput } from "../input/input-descriptor";
 import type { InputSource } from "../input/input-source";
 
@@ -62,6 +64,7 @@ export class StageSelectScene extends Phaser.Scene {
 
   create(): void {
     stopMenuMusic(this, 400); // each stage previews its own
+    announce(this, "choose-stage");
     this.options = [...STAGES.map((s) => s.id), RANDOM];
     this.index = Math.max(0, this.options.indexOf(this.registry.get(REGISTRY.lastStage)));
     this.layer = this.add.container(0, 0).setDepth(0);
@@ -158,7 +161,10 @@ export class StageSelectScene extends Phaser.Scene {
     const choice = this.options[this.index];
     this.registry.set(REGISTRY.lastStage, choice);
     playGameSound(this, "hit", 0.6);
-    startWithStage(this, { ...this.setup, stageId: choice === RANDOM ? randomStage().id : choice });
+    const stageId = choice === RANDOM ? randomStage().id : choice;
+    const line = stageLine(stageId);
+    if (line) announce(this, line);
+    startWithStage(this, { ...this.setup, stageId });
   }
 
   private back(): void {
