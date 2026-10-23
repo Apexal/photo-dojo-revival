@@ -1,0 +1,578 @@
+import Phaser from "phaser";
+import { ATTACKS, frameGeometry, groundAnchorFor, type FighterGeometry } from "../../shared/frame-data";
+import { LANDMARK, type PoseId, type SoundId } from "../../shared/fighter-model";
+import { setSetting } from "../../shared/fighter-storage";
+import { FightSimulation, frameOf, type FightEvent, type FightState } from "../../simulation/fight-simulation";
+import { currentAttackPhase, isAttack, type FighterState } from "../../simulation/fighter-state-machine";
+import type { InputFrame } from "../../simulation/input-frame";
+import { MAX_HEALTH, secondsRemaining, type PlayerIndex } from "../../simulation/round-rules";
+import { geometryOf, type LibraryEntry } from "../fighter-library";
+import { DUMMY_BEHAVIORS, DummyInputSource, nextCpuBehavior } from "../input/dummy-input-source";
+import { createInputSource, isPlayerInput, sameInput, type InputDescriptor, type PlayerInputDescriptor } from "../input/input-descriptor";
+import { PAD_BUTTON } from "../input/gamepad-input-source";
+import type { InputSource } from "../input/input-source";
+import { layoutForKey } from "../input/key-bindings";
+import { FighterSpriteView, loadFighterSounds, preloadFighterTextures } from "../render/fighter-sprite-view";
+import { REPLAY_SPEED, ReplayBuffer } from "../replay-buffer";
+import { pickTake } from "../sound-choice";
+import { JOIN_RUMBLE, RumbleScheduler, rumbleFor } from "../input/rumble";
+import { gameSoundKey, type GameSoundId } from "../game-sounds";
+import { getOptions, setOption } from "../options";
+import { HitboxDebugView } from "../render/hitbox-debug-view";
+import { LOW_HEALTH, clockCue, clockTicked, lowHealthPulse } from "../render/hud-cues";
+import { FLOOR_SCREEN_Y, GAME_HEIGHT, GAME_WIDTH, worldToScreen } from "../render/stage";
+import { REGISTRY } from "./boot-scene";
+import { MIRROR_TINT } from "./controls-scene";
+import type { RoundResultData } from "./round-result-scene";
+
+export interface FightSceneData {
+  entries: [LibraryEntry, LibraryEntry];
+  /** P2 is the training dummy in practice mode. */
+  inputs: [PlayerInputDescriptor, InputDescriptor];
+  practice?: boolean;
+}
+
+const STEP_MS = 1000 / 60;
+const MAX_FRAME_MS = 100;
+const PREFIXES = ["p0", "p1"] as const;
+const BAR_W = 520;
+const BAR_H = 26;
+
+/**
+ * Owns a FightSimulation, steps it at a fixed 60 Hz with an accumulator, and
+ * renders the latest state. Render code never mutates simulation state.
+ */
+export class FightScene extends Phaser.Scene {
+  private setup!: FightSceneData;
+  private sim!: FightSimulation;
+  private geometry!: [FighterGeometry, FighterGeometry];
+  private sources: InputSource[] = [];
+  private dummy: DummyInputSource | null = null;
+  private replayBuffer = new ReplayBuffer<FightState>();
+  private replay: { states: FightState[]; position: number; shown: number } | null = null;
+  private replayDone = false;
+  private replayUi: Phaser.GameObjects.GameObject[] = [];
+  private views: FighterSpriteView[] = [];
+  private sounds: Record<SoundId, string[]>[] = [];
+  private lastTake = new Map<string, string>();
+  private objectUrls: string[] = [];
+  private accumulator = 0;
+  private paused = false;
+  private waitingForResult = false;
+  private motion!: Phaser.GameObjects.Graphics;
+  private hud!: Phaser.GameObjects.Graphics;
+  private debug!: HitboxDebugView;
+  private timerText!: Phaser.GameObjects.Text;
+  private bannerText!: Phaser.GameObjects.Text;
+  /** Player whose gamepad dropped out (the fight stays paused until they're back). */
+  private disconnected: PlayerIndex | null = null;
+  /** Buttons held when play resumed; ignored until released so "Resume" isn't also a punch. */
+  private heldMask: Set<keyof InputFrame>[] = [new Set(), new Set()];
+  private shownHealth: [number, number] = [MAX_HEALTH, MAX_HEALTH];
+  private bannerUntil = 0;
+
+  constructor() {
+    super("fight");
+  }
+
+  init(data: FightSceneData): void {
+    this.setup = data;
+    this.accumulator = 0;
+    this.paused = false;
+    this.disconnected = null;
+    this.heldMask = [new Set(), new Set()];
+    this.waitingForResult = false;
+    this.shownHealth = [MAX_HEALTH, MAX_HEALTH];
+    this.views = [];
+    this.sounds = [];
+    this.replayBuffer = new ReplayBuffer<FightState>();
+    this.replay = null;
+    this.replayDone = false;
+    this.rumbles = [new RumbleScheduler(), new RumbleScheduler()];
+  }
+
+  preload(): void {
+    this.setup.entries.forEach((e, i) => this.objectUrls.push(...preloadFighterTextures(this, e.fighter, PREFIXES[i])));
+  }
+
+  create(): void {
+    const [a, b] = this.setup.entries;
+    this.geometry = [geometryOf(a.fighter), geometryOf(b.fighter)];
+    // A fresh seed per match so variant choices differ between fights (and stay replayable within one).
+    this.sim = new FightSimulation(this.geometry, { seed: (Math.random() * 2 ** 32) >>> 0, practice: this.setup.practice });
+    this.sources = this.setup.inputs.map((d) =>
+      isPlayerInput(d) ? createInputSource(this, d) : (this.dummy = new DummyInputSource(this.sim, 1)),
+    );
+    void Promise.all(this.setup.entries.map((e, i) => loadFighterSounds(this, e.fighter, PREFIXES[i]))).then((s) => { this.sounds = s; });
+
+    this.drawStage();
+    const mirrorMatch = a.fighter.fighterId === b.fighter.fighterId;
+    this.views = [0, 1].map((i) => new FighterSpriteView(this, PREFIXES[i], this.geometry[i], i === 1 && mirrorMatch ? MIRROR_TINT : undefined));
+    this.views.forEach((v, i) => v.setDepth(10 + i));
+    this.motion = this.add.graphics().setDepth(20);
+    this.hud = this.add.graphics().setDepth(100);
+    this.debug = new HitboxDebugView(this);
+    // Practice shows hitboxes by default: it's for learning the moves.
+    this.debug.visible = this.setup.practice || Boolean(this.registry.get(REGISTRY.debugHitboxes));
+
+    const label = { fontSize: "22px", color: "#f3efe6", fontStyle: "bold" };
+    this.add.text(40, 62, a.fighter.name, label).setDepth(100);
+    this.add.text(GAME_WIDTH - 40, 62, b.fighter.name, label).setOrigin(1, 0).setDepth(100);
+    this.timerText = this.add.text(GAME_WIDTH / 2, 18, "60", { fontSize: "48px", color: "#f2c14e", fontStyle: "bold" }).setOrigin(0.5, 0).setDepth(100);
+    this.bannerText = this.add.text(GAME_WIDTH / 2, GAME_HEIGHT / 2 - 80, "", {
+      fontSize: "96px", color: "#f2c14e", fontStyle: "bold", stroke: "#121018", strokeThickness: 10,
+    }).setOrigin(0.5).setDepth(200);
+
+    // Pause-menu shortcut (also in Settings).
+    this.input.keyboard!.on("keydown-R", () => {
+      if (!this.paused) return;
+      const on = !getOptions(this.registry).rumble;
+      setOption(this.registry, "rumble", on);
+      if (on) this.sources.forEach((s) => s.rumble?.({ duration: 120, strong: 0.4, weak: 0.4 }));
+    });
+    // "Press any button to reconnect" on a keyboard half nobody else is using (pads: pollReconnect).
+    this.input.keyboard!.on("keydown", (ev: KeyboardEvent) => {
+      const layout = layoutForKey(ev.keyCode);
+      if (layout) this.reconnect({ kind: "keyboard", layout });
+    });
+    this.input.keyboard!.on("keydown-F1", (ev: KeyboardEvent) => {
+      ev.preventDefault();
+      this.debug.visible = !this.debug.visible;
+      this.registry.set(REGISTRY.debugHitboxes, this.debug.visible);
+      void setSetting("debugHitboxes", this.debug.visible).catch(() => {});
+    });
+    if (this.setup.practice) this.buildPracticePanel();
+    this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => {
+      this.scene.stop("pause");
+      this.scene.stop("settings");
+      this.input.keyboard?.removeAllListeners("keydown-F1");
+      this.input.keyboard?.removeAllListeners("keydown-R");
+      this.input.keyboard?.removeAllListeners("keydown");
+      this.input.gamepad?.removeAllListeners("down");
+      this.objectUrls.forEach((u) => URL.revokeObjectURL(u));
+      this.objectUrls = [];
+    });
+    this.handleEvents(this.sim.current.events);
+    this.renderState(this.sim.current);
+  }
+
+  /** Practice: dummy behavior picker (1–8, 9 for the CPU levels, Tab, or a pad's Select button). */
+  private buildPracticePanel(): void {
+    this.timerText.setText("PRACTICE").setFontSize(26).setY(30);
+    const panel = this.add.text(GAME_WIDTH / 2, GAME_HEIGHT - 26, "", {
+      fontSize: "17px", color: "#f3efe6", backgroundColor: "#121018cc", padding: { x: 12, y: 6 },
+    }).setOrigin(0.5).setDepth(150);
+    const show = () => {
+      const i = DUMMY_BEHAVIORS.findIndex((b) => b.behavior === this.dummy?.behavior);
+      const n = Math.min(i + 1, 9);
+      panel.setText(`Dummy: ${n}. ${DUMMY_BEHAVIORS[i].label}   ·   1–8 or Tab: change   ·   9: CPU level   ·   Esc: menu   ·   F1: hitboxes`);
+    };
+    const select = (i: number) => {
+      this.dummy?.setBehavior(DUMMY_BEHAVIORS[(i + DUMMY_BEHAVIORS.length) % DUMMY_BEHAVIORS.length].behavior);
+      show();
+    };
+    const cpuIndex = DUMMY_BEHAVIORS.findIndex((b) => b.behavior === "cpuEasy");
+    const current = () => DUMMY_BEHAVIORS.findIndex((b) => b.behavior === this.dummy?.behavior);
+    this.input.keyboard!.on("keydown", (ev: KeyboardEvent) => {
+      if (this.paused) return;
+      const n = Number(ev.key);
+      if (Number.isInteger(n) && n >= 1 && n <= cpuIndex) select(n - 1);
+      if (n === 9 && this.dummy) select(DUMMY_BEHAVIORS.findIndex((b) => b.behavior === nextCpuBehavior(this.dummy!.behavior)));
+      if (ev.key === "Tab") {
+        ev.preventDefault();
+        select(current() + 1);
+      }
+    });
+    this.input.gamepad?.on("down", (_pad: Phaser.Input.Gamepad.Gamepad, button: Phaser.Input.Gamepad.Button) => {
+      if (button.index === PAD_BUTTON.SELECT && !this.paused) select(current() + 1);
+    });
+    show();
+  }
+
+  private drawStage(): void {
+    const g = this.add.graphics();
+    g.fillGradientStyle(0x2b2140, 0x2b2140, 0x6b4a5e, 0x6b4a5e, 1).fillRect(0, 0, GAME_WIDTH, FLOOR_SCREEN_Y);
+    g.fillStyle(0x3b2f2a, 1).fillRect(0, FLOOR_SCREEN_Y, GAME_WIDTH, GAME_HEIGHT - FLOOR_SCREEN_Y);
+    g.lineStyle(3, 0xf2c14e, 0.6).lineBetween(0, FLOOR_SCREEN_Y, GAME_WIDTH, FLOOR_SCREEN_Y);
+    for (let x = 0; x < GAME_WIDTH; x += 80) g.lineStyle(1, 0x000000, 0.25).lineBetween(x, FLOOR_SCREEN_Y, x - 60, GAME_HEIGHT);
+  }
+
+  update(_time: number, delta: number): void {
+    if (this.replay) return this.updateReplay(delta);
+    if (this.waitingForResult) return;
+    this.checkControllers();
+    if (this.paused) {
+      // The pause menu reads its own inputs; drain ours so nothing fires on resume.
+      this.sources.forEach((s) => { if (s !== this.dummy) { s.read(); s.pausePressed(); } });
+      return;
+    }
+    // Poll every source (no short-circuit) so a press shared by both keyboard halves is consumed once.
+    if (this.sources.map((s) => s.pausePressed()).includes(true)) return this.pause();
+    this.accumulator += Math.min(delta, MAX_FRAME_MS);
+    let state = this.sim.current;
+    while (this.accumulator >= STEP_MS) {
+      const inputs = [this.readInput(0), this.readInput(1)] as [InputFrame, InputFrame];
+      const before = state;
+      state = this.sim.step(inputs);
+      if (!this.setup.practice && clockTicked(before.round, state.round)) this.playEffect("tick", 0.7);
+      this.replayBuffer.push(state);
+      if (state.events.some((e) => e.type === "ko")) this.replayBuffer.markFinish();
+      this.handleEvents(state.events);
+      this.accumulator -= STEP_MS;
+      if (state.round.phase === "roundOver" || state.round.phase === "matchOver") break;
+    }
+    this.renderState(state);
+    this.flushRumble();
+    if (state.round.phase === "roundOver" || state.round.phase === "matchOver") {
+      if (this.replayBuffer.hasFinish && !this.replayDone) this.startReplay();
+      else this.showResult(state);
+    }
+  }
+
+  // --- KO replay ----------------------------------------------------------------
+
+  /** Slow-motion replay of the knockout from recorded states; any button skips. */
+  private startReplay(): void {
+    const states = this.replayBuffer.clip();
+    if (!states.length) {
+      this.replayDone = true;
+      return;
+    }
+    this.replay = { states, position: 0, shown: -1 };
+    const bar = (y: number) => this.add.rectangle(0, y, GAME_WIDTH, 56, 0x000000, 0.85).setOrigin(0).setDepth(400);
+    this.replayUi = [
+      bar(0),
+      bar(GAME_HEIGHT - 56),
+      this.add.text(40, 14, "● REPLAY", { fontSize: "26px", fontStyle: "bold", color: "#e8483b" }).setDepth(401),
+      this.add.text(GAME_WIDTH - 40, GAME_HEIGHT - 42, "Press any button to skip", { fontSize: "18px", color: "#c9c3b8" }).setOrigin(1, 0).setDepth(401),
+    ];
+    this.bannerText.setVisible(false);
+    // Players are often still mashing from the knockout: ignore input for the first second.
+    this.replaySkipArmedAt = performance.now() + 1000;
+    this.replayPrevious = this.sources.map((src) => src.read());
+  }
+
+  private replaySkipArmedAt = 0;
+  private replayPrevious: InputFrame[] = [];
+
+  private updateReplay(delta: number): void {
+    const replay = this.replay!;
+    replay.position += (Math.min(delta, MAX_FRAME_MS) / STEP_MS) * REPLAY_SPEED;
+    const index = Math.min(replay.states.length - 1, Math.floor(replay.position));
+    // Replay the sounds and shakes of every frame we pass (no banners).
+    for (let i = replay.shown + 1; i <= index; i++) this.handleEvents(replay.states[i].events, { replay: true });
+    replay.shown = index;
+    const state = replay.states[index];
+    this.shownHealth = [state.fighters[0].health, state.fighters[1].health];
+    this.renderState(state);
+
+    const now = this.sources.map((src) => src.read());
+    const pressed = now.some((f, i) => (["punch", "kick"] as const).some((k) => f[k] && !this.replayPrevious[i]?.[k]));
+    this.replayPrevious = now;
+    const skip = performance.now() > this.replaySkipArmedAt && (pressed || this.sources.map((src) => src.pausePressed()).includes(true));
+    if (replay.position >= replay.states.length || skip) this.endReplay();
+  }
+
+  private endReplay(): void {
+    this.replayUi.forEach((o) => o.destroy());
+    this.replayUi = [];
+    this.replay = null;
+    this.replayDone = true;
+    const state = this.sim.current;
+    this.shownHealth = [state.fighters[0].health, state.fighters[1].health];
+    this.renderState(state);
+    this.showResult(state);
+  }
+
+  // --- pause menu and controllers ------------------------------------------------
+
+  get isPractice(): boolean {
+    return Boolean(this.setup.practice);
+  }
+
+  get playerInfo(): { inputs: [PlayerInputDescriptor, InputDescriptor]; names: [string, string] } {
+    return { inputs: this.setup.inputs, names: [this.setup.entries[0].fighter.name, this.setup.entries[1].fighter.name] };
+  }
+
+  get disconnectedPlayer(): PlayerIndex | null {
+    return this.disconnected;
+  }
+
+  private pause(): void {
+    this.paused = true;
+    this.sound.pauseAll();
+    this.scene.launch("pause");
+  }
+
+  /** From the pause menu. Not while a controller is missing. */
+  resumeFromPause(): void {
+    if (this.disconnected !== null) return;
+    this.scene.stop("pause");
+    this.paused = false;
+    this.sound.resumeAll();
+    this.maskHeldButtons();
+  }
+
+  /** Pause menu: start the current round over (wins as they were when it began). */
+  restartRound(): void {
+    if (this.disconnected !== null) return;
+    this.scene.stop("pause");
+    this.sound.stopAll();
+    this.paused = false;
+    this.sim.restartRound();
+    // Starts the dummy's loop (or the CPU's memory of the fight) over.
+    this.dummy?.setBehavior(this.dummy.behavior);
+    this.replayBuffer.reset();
+    this.replayDone = false;
+    this.shownHealth = [MAX_HEALTH, MAX_HEALTH];
+    this.accumulator = 0;
+    this.maskHeldButtons();
+    this.handleEvents(this.sim.current.events);
+    this.renderState(this.sim.current);
+  }
+
+  /**
+   * On resume. Also swallows the Start / Esc press that closed the menu: overlays
+   * update before this scene, so it would otherwise pause again this same frame.
+   */
+  private maskHeldButtons(): void {
+    this.heldMask = this.sources.map((s) => {
+      if (s === this.dummy) return new Set<keyof InputFrame>();
+      s.pausePressed();
+      const now = s.read();
+      return new Set((Object.keys(now) as (keyof InputFrame)[]).filter((k) => now[k]));
+    });
+  }
+
+  private readInput(player: PlayerIndex): InputFrame {
+    const frame = this.sources[player].read();
+    for (const k of this.heldMask[player]) {
+      if (frame[k]) frame[k] = false;
+      else this.heldMask[player].delete(k);
+    }
+    return frame;
+  }
+
+  /** A player's gamepad unplugged or out of battery: pause until they press a button again. */
+  private checkControllers(): void {
+    if (this.disconnected !== null) return;
+    const lost = this.setup.inputs.findIndex((d, i) => d.kind === "pad" && !this.sources[i].connected);
+    if (lost < 0) return;
+    this.disconnected = lost as PlayerIndex;
+    if (!this.paused) this.pause();
+  }
+
+  /**
+   * Called by the pause menu each frame, before it reads its own input: a button
+   * on any pad the other player isn't using takes over the missing controller.
+   * Polled from the browser because Phaser's per-scene pad events don't reach
+   * this scene while the menu is on top.
+   */
+  pollReconnect(): void {
+    if (this.disconnected === null || typeof navigator === "undefined" || !navigator.getGamepads) return;
+    for (const pad of navigator.getGamepads()) {
+      if (pad?.connected && pad.buttons.some((b) => b.pressed)) {
+        this.reconnect({ kind: "pad", index: pad.index });
+        if (this.disconnected === null) return;
+      }
+    }
+  }
+
+  /** Any button on a pad or keyboard half the other player isn't using takes over the missing controller. */
+  private reconnect(input: PlayerInputDescriptor): void {
+    const player = this.disconnected;
+    if (player === null) return;
+    const other = this.setup.inputs[player === 0 ? 1 : 0];
+    if (sameInput(other, input)) return;
+    (this.setup.inputs as InputDescriptor[])[player] = input; // a rematch keeps the new controller
+    this.sources[player] = createInputSource(this, input);
+    this.heldMask[player] = new Set();
+    this.disconnected = null;
+    if (getOptions(this.registry).rumble) this.sources[player].rumble?.(JOIN_RUMBLE);
+  }
+
+  quitToSelect(): void {
+    this.sound.stopAll();
+    this.scene.stop("round-result");
+    this.scene.start("character-select");
+  }
+
+  /** Called by the round result screen. */
+  nextRound(): void {
+    this.sim.startNextRound();
+    this.replayBuffer.reset();
+    this.replayDone = false;
+    this.shownHealth = [MAX_HEALTH, MAX_HEALTH];
+    this.waitingForResult = false;
+    this.accumulator = 0;
+    this.handleEvents(this.sim.current.events);
+  }
+
+  rematch(): void {
+    this.scene.restart(this.setup);
+  }
+
+  private showResult(state: FightState): void {
+    this.waitingForResult = true;
+    const r = state.round;
+    const names = this.setup.entries.map((e) => e.fighter.name);
+    const data: RoundResultData = {
+      kind: state.round.phase === "matchOver" ? "match" : "round",
+      roundNumber: r.roundNumber,
+      roundWinner: r.roundWinner ?? "draw",
+      matchWinner: r.matchWinner,
+      reason: r.roundEndReason ?? "ko",
+      wins: r.wins,
+      names: [names[0], names[1]],
+      inputs: this.setup.inputs,
+    };
+    this.scene.launch("round-result", data);
+  }
+
+  // --- events → sound and banners ---------------------------------------------
+
+  /** A fighter's voice (their clip, or the bundled stand-in): the "Voice volume" setting. */
+  private play(player: number, id: SoundId, volume = 0.8): void {
+    const takes = this.sounds[player]?.[id] ?? [`fallback:${id}`];
+    const key = pickTake(takes, this.lastTake.get(`${player}:${id}`));
+    this.lastTake.set(`${player}:${id}`, key);
+    const v = volume * getOptions(this.registry).voiceVolume;
+    if (v > 0 && this.cache.audio.exists(key)) this.sound.play(key, { volume: v });
+  }
+
+  /** Impacts and the clock: the "Game volume" setting. */
+  private playEffect(id: GameSoundId, volume = 0.8): void {
+    const v = volume * getOptions(this.registry).gameVolume;
+    if (v > 0 && this.cache.audio.exists(gameSoundKey(id))) this.sound.play(gameSoundKey(id), { volume: v });
+  }
+
+  private shake(ms: number, pixels: number): void {
+    if (getOptions(this.registry).screenShake) this.cameras.main.shake(ms, pixels / GAME_WIDTH);
+  }
+
+  private banner(text: string, ms: number): void {
+    this.bannerText.setText(text).setVisible(true);
+    this.bannerUntil = performance.now() + ms;
+  }
+
+  private rumbles = [new RumbleScheduler(), new RumbleScheduler()];
+
+  /** Once per frame: each controller plays the strongest effect asked for this frame. */
+  private flushRumble(): void {
+    const now = performance.now();
+    this.rumbles.forEach((queue, i) => {
+      const r = queue.flush(now);
+      if (r) this.sources[i]?.rumble?.(r);
+    });
+  }
+
+  private handleEvents(events: FightEvent[], options: { replay?: boolean } = {}): void {
+    for (const ev of events) {
+      if (getOptions(this.registry).rumble && !options.replay) {
+        this.rumbles.forEach((queue, i) => {
+          const r = rumbleFor(ev, i as PlayerIndex);
+          if (r) queue.request(r);
+        });
+      }
+      // In a replay only the sounds and shakes come back, not the announcer banners.
+      if (options.replay && (ev.type === "roundStart" || ev.type === "fight" || ev.type === "roundEnd" || ev.type === "matchEnd" || ev.type === "throwTech")) continue;
+      switch (ev.type) {
+        case "roundStart": this.banner(this.setup.practice ? "PRACTICE" : `ROUND ${ev.round}`, 900); break;
+        case "fight": this.banner("FIGHT!", 700); break;
+        case "attackActive": this.play(ev.player, "attack", 0.6); break;
+        case "hit":
+          this.playEffect(ev.blocked ? "block" : "hit", ATTACKS[ev.attack].limb === "leg" ? 0.9 : 0.7);
+          if (!ev.blocked) this.play(ev.defender, "hurt");
+          if (ATTACKS[ev.attack].limb === "leg" && !ev.blocked) this.shake(90, 2);
+          break;
+        case "grab": this.play(ev.attacker, "attack", 0.6); break;
+        case "throw":
+          this.playEffect("hit", 1);
+          this.play(ev.defender, "hurt");
+          this.shake(140, 4);
+          break;
+        case "throwTech": this.banner("BREAK!", 500); break;
+        case "taunt": this.play(ev.player, "win", 0.9); break;
+        case "ko":
+          if (!options.replay) this.banner("K.O.", 2000);
+          break;
+        case "roundEnd":
+          if (ev.reason === "timeout") this.banner("TIME", 2000);
+          if (ev.outcome !== "draw") this.time.delayedCall(500, () => this.play(ev.outcome as PlayerIndex, "win"));
+          break;
+        default: break;
+      }
+    }
+  }
+
+  // --- rendering ----------------------------------------------------------------
+
+  private renderState(state: FightState): void {
+    state.fighters.forEach((f, i) => this.views[i]?.render(f));
+    this.drawMotionLines(state.fighters);
+    this.debug.render(state.fighters, this.geometry);
+    this.drawHud(state);
+    if (performance.now() > this.bannerUntil) this.bannerText.setVisible(false);
+  }
+
+  /** World position of a landmark of the given pose, placed where the fighter stands. */
+  private landmarkWorld(geo: FighterGeometry, f: FighterState, poseId: PoseId, variant: number, index: number) {
+    const anchor = groundAnchorFor(geo, poseId, variant);
+    const l = frameGeometry(geo, poseId, variant).landmarks[index];
+    return worldToScreen({ x: f.position.x + f.facing * (l.x - anchor.x), y: f.position.y + (l.y - anchor.y) });
+  }
+
+  /** 2–3 procedural streaks between the previous and current wrist/ankle positions on active frames. */
+  private drawMotionLines(fighters: readonly FighterState[]): void {
+    this.motion.clear();
+    fighters.forEach((f, i) => {
+      if (!isAttack(f.action) || currentAttackPhase(f) !== "active") return;
+      const geo = this.geometry[i];
+      const frame = frameOf(f);
+      const side = frameGeometry(geo, frame.poseId, frame.variant).attackSide ?? "right";
+      const index = ATTACKS[f.action].limb === "arm" ? LANDMARK[`${side}Wrist`] : LANDMARK[`${side}Ankle`];
+      const from = this.landmarkWorld(geo, f, "idle", 0, index);
+      const to = this.landmarkWorld(geo, f, frame.poseId, frame.variant, index);
+      const dx = to.x - from.x, dy = to.y - from.y;
+      const len = Math.hypot(dx, dy) || 1;
+      const nx = -dy / len, ny = dx / len;
+      [-14, 0, 14].forEach((off, k) => {
+        this.motion.lineStyle(k === 1 ? 5 : 3, 0xffffff, 0.75 - Math.abs(off) / 40);
+        this.motion.lineBetween(from.x + nx * off + dx * 0.15, from.y + ny * off + dy * 0.15, to.x + nx * off * 0.4 - dx * 0.12, to.y + ny * off * 0.4 - dy * 0.12);
+      });
+    });
+  }
+
+  private drawHud(state: FightState): void {
+    const g = this.hud.clear();
+    state.fighters.forEach((f, i) => {
+      // Trailing damage bar drains toward the real value.
+      this.shownHealth[i] = Math.max(f.health, this.shownHealth[i] - 0.6);
+      const x = i === 0 ? 40 : GAME_WIDTH - 40 - BAR_W;
+      const y = 28;
+      const w = (v: number) => (BAR_W * Math.max(0, v)) / MAX_HEALTH;
+      g.fillStyle(0x121018, 1).fillRect(x - 3, y - 3, BAR_W + 6, BAR_H + 6);
+      g.fillStyle(0x5a1d1d, 1).fillRect(x, y, BAR_W, BAR_H);
+      // P1 drains toward the center from the left, P2 from the right.
+      const trail = w(this.shownHealth[i]);
+      const now = w(f.health);
+      g.fillStyle(0xf2f2f2, 1).fillRect(i === 0 ? x + BAR_W - trail : x, y, trail, BAR_H);
+      g.fillStyle(f.health > LOW_HEALTH ? 0xf2c14e : 0xe8483b, 1).fillRect(i === 0 ? x + BAR_W - now : x, y, now, BAR_H);
+      // Low health: the bar pulses brighter and its frame glows.
+      const pulse = lowHealthPulse(f.health, state.frame);
+      if (pulse > 0) {
+        g.fillStyle(0xffd0c8, 0.45 * pulse).fillRect(i === 0 ? x + BAR_W - now : x, y, now, BAR_H);
+        g.lineStyle(3, 0xe8483b, 0.35 + 0.65 * pulse).strokeRect(x - 4, y - 4, BAR_W + 8, BAR_H + 8);
+      }
+      // Round wins (none in practice)
+      for (let r = 0; r < (this.setup.practice ? 0 : 2); r++) {
+        const cx = i === 0 ? x + BAR_W - 12 - r * 26 : x + 12 + r * 26;
+        g.fillStyle(r < state.round.wins[i] ? 0xf2c14e : 0x3a3346, 1).fillCircle(cx, y + BAR_H + 52, 9);
+      }
+    });
+    if (!this.setup.practice) {
+      const cue = clockCue(state.round);
+      this.timerText.setText(String(secondsRemaining(state.round))).setColor(cue.red ? "#e8483b" : "#f2c14e").setScale(cue.scale);
+    }
+  }
+}

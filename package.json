@@ -1,0 +1,40 @@
+{
+  "name": "photo-dojo",
+  "private": true,
+  "license": "MIT",
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc --noEmit && vite build",
+    "preview": "vite preview",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "typecheck": "tsc --noEmit && npm --prefix worker run typecheck",
+    "worker:dev": "npm --prefix worker run dev",
+    "generate:assets": "tsx scripts/generate-assets.ts",
+    "test:e2e": "node scripts/e2e/game-smoke.mjs",
+    "test:signaling": "node scripts/signaling-smoke.mjs",
+    "dev:https": "HTTPS=1 vite",
+    "test:e2e:gamepad": "node scripts/e2e/gamepad-smoke.mjs"
+  },
+  "dependencies": {
+    "@mediapipe/tasks-vision": "^1.1.1",
+    "fflate": "^0.8.3",
+    "idb": "^8.0.4",
+    "onnxruntime-web": "1.30.0",
+    "phaser": "^3.90.0",
+    "qrcode": "^1.5.4"
+  },
+  "devDependencies": {
+    "@types/qrcode": "^1.5.6",
+    "@vitejs/plugin-basic-ssl": "^2.3.0",
+    "fake-indexeddb": "^6.2.6",
+    "happy-dom": "^21.0.4",
+    "playwright-core": "^1.64.1",
+    "tsx": "^4.23.15",
+    "typescript": "^7.0.2",
+    "vite": "^8.3.5",
+    "vitest": "^5.0.5"
+  }
+}

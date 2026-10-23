@@ -1,0 +1,19 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Photo Dojo</title>
+    <link rel="stylesheet" href="/src/game/game.css" />
+  </head>
+  <body>
+    <div id="game"></div>
+    <div id="toolbar" hidden>
+      <button type="button" data-action="import">Import fighter file</button>
+      <button type="button" data-action="export-all">Export all fighters</button>
+      <input type="file" id="import-file" accept=".photodojo,application/zip" hidden />
+      <span id="toolbar-status" role="status"></span>
+    </div>
+    <script type="module" src="/src/game/main.ts"></script>
+  </body>
+</html>

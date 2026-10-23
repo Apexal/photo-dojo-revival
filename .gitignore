@@ -1,0 +1,16 @@
+node_modules/
+dist/
+.wrangler/
+worker/node_modules/
+*.log
+.DS_Store
+.dev.vars
+e2e-out/
+models/
+.env
+.env.*
+!.env.example
+coverage/
+.vscode/
+.idea/
+*.photodojo

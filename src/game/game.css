@@ -1,0 +1,11 @@
+:root { color-scheme: dark; --bg: #121018; --fg: #f3efe6; --accent: #f2c14e; }
+* { box-sizing: border-box; }
+html, body { margin: 0; height: 100%; background: var(--bg); color: var(--fg); font-family: system-ui, sans-serif; }
+body { display: flex; flex-direction: column; }
+#game { flex: 1; min-height: 0; display: flex; align-items: center; justify-content: center; }
+#game canvas { display: block; }
+#toolbar { display: flex; gap: 8px; align-items: center; justify-content: center; padding: 8px 16px; flex-wrap: wrap; }
+#toolbar[hidden] { display: none; }
+#toolbar button { font: inherit; padding: 6px 12px; border-radius: 6px; border: 1px solid #555; background: #222; color: var(--fg); cursor: pointer; }
+#toolbar button:hover { border-color: var(--accent); }
+#toolbar-status { min-width: 12em; opacity: 0.85; }
