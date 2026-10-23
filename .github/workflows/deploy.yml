@@ -5,6 +5,7 @@
 #                 SITE_URL (the site's public URL, e.g. https://photo-dojo.pages.dev: absolute link-preview images),
 #                 VITE_MUSIC_BASE_URL (public URL of the R2 bucket/folder holding the music files),
 #                 VITE_MATTING_MODEL_URL (public URL of the ISNet .onnx: too big for Pages, so capture needs it),
+#                 VITE_MATTING_MODEL_FP16_URL (public URL of its fp16 copy, used on WebGPU: iPhones run out of memory with fp32),
 #                 VITE_POSE_MODEL_URL (optional: a mirror of MediaPipe's pose model).
 name: test-and-deploy
 on:
@@ -46,6 +47,7 @@ jobs:
           VITE_SITE_URL: ${{ vars.SITE_URL }}
           VITE_MUSIC_BASE_URL: ${{ vars.VITE_MUSIC_BASE_URL }}
           VITE_MATTING_MODEL_URL: ${{ vars.VITE_MATTING_MODEL_URL }}
+          VITE_MATTING_MODEL_FP16_URL: ${{ vars.VITE_MATTING_MODEL_FP16_URL }}
           VITE_POSE_MODEL_URL: ${{ vars.VITE_POSE_MODEL_URL }}
       - name: Deploy to Cloudflare Pages
         run: npx --prefix worker wrangler pages deploy dist --project-name "${{ vars.PAGES_PROJECT || 'photo-dojo' }}" --branch main

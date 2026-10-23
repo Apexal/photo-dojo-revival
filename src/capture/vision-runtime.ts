@@ -25,6 +25,15 @@ export const POSE_MODEL_URL =
 // `||`: CI passes unset repository variables through as empty strings.
 export const MATTING_MODEL_URL = import.meta.env.VITE_MATTING_MODEL_URL || "/models/isnet-general-use-webgpu.onnx";
 
+/**
+ * The same model with half-precision weights and arithmetic (~91 MB): what WebGPU runs when it has
+ * shader-f16, at about half the memory (a 1024² fp32 run needs ~2.4 GB, more than iPhones allow beside
+ * the pose models). Empty means there's no fp16 copy: a build that hosts the fp32 model but doesn't set
+ * VITE_MATTING_MODEL_FP16_URL uses fp32 everywhere.
+ */
+export const MATTING_MODEL_FP16_URL =
+  import.meta.env.VITE_MATTING_MODEL_FP16_URL || (import.meta.env.VITE_MATTING_MODEL_URL ? "" : "/models/isnet-general-use-webgpu-fp16.onnx");
+
 /** Keep in step with the onnxruntime-web version in package.json (a test checks). */
 export const ORT_VERSION = "1.30.0";
 
