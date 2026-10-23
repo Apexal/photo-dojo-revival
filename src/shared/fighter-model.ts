@@ -51,6 +51,12 @@ export interface Fighter {
 
 export const MAX_SOUND_TAKES = 3;
 
+/** Longest name a player can type: the phone's name field, and renaming on the laptop. */
+export const MAX_TYPED_NAME_LENGTH = 24;
+
+/** A typed name, tidied: trimmed, runs of spaces made one, cut to the limit. Empty if nothing's left. */
+export const tidyFighterName = (name: string): string => name.replace(/\s+/g, " ").trim().slice(0, MAX_TYPED_NAME_LENGTH).trim();
+
 /** Main clip plus any extra takes. */
 export function soundTakes(fighter: Pick<Fighter, "sounds" | "soundVariants">, soundId: SoundId): Blob[] {
   const main = fighter.sounds[soundId];

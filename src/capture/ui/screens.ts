@@ -1,5 +1,5 @@
 import { ARCHETYPES, ARCHETYPE_IDS, type ArchetypeId } from "../../shared/archetypes";
-import { MAX_SOUND_SECONDS, MAX_SOUND_TAKES, SOUND_IDS, type PoseId, type SoundId } from "../../shared/fighter-model";
+import { MAX_SOUND_SECONDS, MAX_SOUND_TAKES, MAX_TYPED_NAME_LENGTH, SOUND_IDS, type PoseId, type SoundId } from "../../shared/fighter-model";
 import { CAPTURE_TARGET_COUNT, SIGNATURE_DEFINITIONS, captureTargetsFor } from "../../shared/pose-definitions";
 import { describeAge, type DraftSummary } from "../capture-draft";
 import type { CaptureFlowState, CaptureMode } from "../capture-flow";
@@ -309,7 +309,7 @@ export function renderScreen(root: HTMLElement, flow: CaptureFlowState, data: Ca
       break;
     }
     case "preview": {
-      const name = h("input", { type: "text", placeholder: "Fighter name", maxLength: 24, value: data.name });
+      const name = h("input", { type: "text", placeholder: "Fighter name", maxLength: MAX_TYPED_NAME_LENGTH, value: data.name });
       name.addEventListener("input", () => a.setName(name.value));
       root.append(screen(
         h("h2", {}, "Ready to fight"),

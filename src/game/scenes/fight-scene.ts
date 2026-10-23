@@ -175,9 +175,18 @@ export class FightScene extends Phaser.Scene {
     this.debug = new HitboxDebugView(this);
     this.debug.visible = Boolean(this.registry.get(REGISTRY.debugHitboxes));
 
-    const label = { fontSize: "22px", color: "#f3efe6", fontStyle: "bold" };
-    this.add.text(40, 62, a.fighter.name, label).setDepth(100);
-    this.add.text(GAME_WIDTH - 40, 62, this.setup.inputs[1].kind === "cpu" ? `${b.fighter.name} · CPU` : b.fighter.name, label).setOrigin(1, 0).setDepth(100);
+    // Whose bar is whose: a P1 / P2 (or CPU) tag and the name, in the player's colour.
+    [a, b].forEach((entry, i) => {
+      const css = `#${PLAYER_COLORS[i].toString(16).padStart(6, "0")}`;
+      const right = i === 1;
+      const x = right ? GAME_WIDTH - 40 : 40;
+      const input = this.setup.inputs[i];
+      const tag = this.add.text(x, 64, isPlayerInput(input) ? `P${i + 1}` : "CPU", {
+        fontSize: "16px", fontStyle: "bold", color: "#121018", backgroundColor: css, padding: { x: 6, y: 2 },
+      }).setOrigin(right ? 1 : 0, 0).setDepth(100);
+      this.add.text(x + (right ? -1 : 1) * (tag.width + 10), 62, entry.fighter.name, { fontSize: "22px", fontStyle: "bold", color: css })
+        .setOrigin(right ? 1 : 0, 0).setDepth(100);
+    });
     this.timerText = this.add.text(GAME_WIDTH / 2, 18, "60", { fontSize: "48px", color: "#f2c14e", fontStyle: "bold" }).setOrigin(0.5, 0).setDepth(100);
     this.bannerText = this.add.text(GAME_WIDTH / 2, GAME_HEIGHT / 2 - 80, "", {
       fontSize: "96px", color: "#f2c14e", fontStyle: "bold", stroke: "#121018", strokeThickness: 10,

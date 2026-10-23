@@ -20,6 +20,7 @@ import { CPU_LEVEL_IDS, CPU_LEVEL_NAMES, type CpuLevel } from "../input/cpu-play
 import { JOIN_RUMBLE } from "../input/rumble";
 import { forgetFighterRecord, headToHead, recordOf, winLoss } from "../fighter-records";
 import type { FighterStatsSceneData } from "./fighter-stats-scene";
+import type { RenameResult, RenameSceneData } from "./rename-scene";
 import { hasPlayed } from "../played-fighters";
 import { getOptions } from "../options";
 import { loadFighterSounds } from "../render/fighter-sprite-view";
@@ -32,6 +33,7 @@ import { startMatch } from "./stage-select-scene";
 import type { SeriesSetupData } from "./series-setup-scene";
 import { MIN_ENTRANTS } from "../series";
 import { playMenuMusic, updateMenuMusicVolume } from "../menu-music";
+import { canFullscreen, toggleFullscreen, watchFullscreen } from "../fullscreen";
 
 const ROWS = 2;
 const TILE = 120;
@@ -456,11 +458,11 @@ export class CharacterSelectScene extends Phaser.Scene {
     this.drawCursors();
   }
 
-  /** Clickable buttons on the selected tile: export, and delete with an inline confirm. */
+  /** Clickable buttons on the selected tile: export, rename (captured fighters, at the top), and delete with an inline confirm. */
   private tileActions(entry: LibraryEntry, x: number, y: number): Phaser.GameObjects.Text[] {
-    const button = (bx: number, label: string, color: string, onClick: () => void) => {
-      const t = this.add.text(bx, y + TILE - 6, label, { fontSize: "13px", fontStyle: "bold", color, backgroundColor: "#121018dd", padding: { x: 6, y: 4 } })
-        .setOrigin(0, 1).setInteractive({ useHandCursor: true });
+    const button = (bx: number, label: string, color: string, onClick: () => void, top = false) => {
+      const t = this.add.text(bx, top ? y + 6 : y + TILE - 6, label, { fontSize: "13px", fontStyle: "bold", color, backgroundColor: "#121018dd", padding: { x: 6, y: 4 } })
+        .setOrigin(0, top ? 0 : 1).setInteractive({ useHandCursor: true });
       t.on("pointerdown", (_p: unknown, _x: number, _y: number, ev: Phaser.Types.Input.EventData) => {
         ev.stopPropagation();
         this.buttonPressedAt = performance.now();
@@ -477,10 +479,13 @@ export class CharacterSelectScene extends Phaser.Scene {
     }
     return [
       button(x + 6, "⬇ Export", "#f3efe6", () => void this.exportEntry(entry)),
-      ...(entry.builtIn ? [] : [button(x + 86, "🗑", "#e8483b", () => {
-        this.pendingDelete = { fighterId: entry.fighter.fighterId, until: performance.now() + 5000 };
-        this.drawGrid();
-      })]),
+      ...(entry.builtIn ? [] : [
+        button(x + 86, "🗑", "#e8483b", () => {
+          this.pendingDelete = { fighterId: entry.fighter.fighterId, until: performance.now() + 5000 };
+          this.drawGrid();
+        }),
+        button(x + 6, "✎ Rename", "#f3efe6", () => this.openRename(entry), true),
+      ]),
     ];
   }
 
@@ -637,6 +642,7 @@ export class CharacterSelectScene extends Phaser.Scene {
     const layout = KeyboardInputSource.layoutForKey(ev.keyCode);
     if (layout) this.join({ kind: "keyboard", layout });
     else if (ev.keyCode === KEY.T) this.openSeries();
+    else if (ev.keyCode === KEY.F) void toggleFullscreen().catch(() => {});
   }
 
   /** "Press any button": the first unassigned controller takes the next free slot. */
@@ -893,6 +899,14 @@ export class CharacterSelectScene extends Phaser.Scene {
     this.scene.start("series-setup", { inputs: [a.input, b.input] } satisfies SeriesSetupData);
   }
 
+  // --- rename -----------------------------------------------------------------
+
+  private openRename(entry: LibraryEntry): void {
+    if (this.vs) return;
+    this.scene.pause();
+    this.scene.launch("rename", { fighterId: entry.fighter.fighterId, returnTo: "character-select" } satisfies RenameSceneData);
+  }
+
   // --- settings ---------------------------------------------------------------
 
   private openSettings(): void {
@@ -900,8 +914,16 @@ export class CharacterSelectScene extends Phaser.Scene {
     this.scene.launch("settings", { returnTo: "character-select" });
   }
 
-  /** Back from settings: key bindings may have changed, and presses made there don't count here. */
-  private onResume(): void {
+  /**
+   * Back from settings (key bindings may have changed), a career page or a rename
+   * (`data`: the library in the registry has the new name). Presses made there don't count here.
+   */
+  private onResume(_sys: Phaser.Scenes.Systems, data?: Partial<RenameResult>): void {
+    if (data?.renamed) {
+      this.library = this.registry.get(REGISTRY.library) ?? this.library;
+      this.drawGrid();
+      this.setToolbarStatus(`Renamed ${data.renamed.from} to ${data.renamed.to}`);
+    }
     for (const p of this.players) {
       if (!p) continue;
       p.previous = p.source.read();
@@ -1253,7 +1275,15 @@ export class CharacterSelectScene extends Phaser.Scene {
       const action = (ev.target as HTMLElement).closest("button")?.dataset.action;
       if (action === "import") fileInput.click();
       if (action === "export-all") await this.exportAll();
+      if (action === "fullscreen") await toggleFullscreen().catch(() => this.setToolbarStatus("Fullscreen isn't available here"));
     };
+    const fullscreenButton = document.getElementById("fullscreen-button");
+    if (fullscreenButton) fullscreenButton.hidden = !canFullscreen();
+    // The game's box changes size; Phaser keeps the old measurement otherwise.
+    const unwatchFullscreen = watchFullscreen((on) => {
+      if (fullscreenButton) fullscreenButton.textContent = on ? "Exit fullscreen (F)" : "⛶ Fullscreen (F)";
+      requestAnimationFrame(() => refitGame(this.game));
+    });
     const onFile = async () => {
       const file = fileInput.files?.[0];
       fileInput.value = "";
@@ -1273,6 +1303,7 @@ export class CharacterSelectScene extends Phaser.Scene {
       toolbar.hidden = true;
       requestAnimationFrame(() => refitGame(this.game));
       toolbar.removeEventListener("click", onClick);
+      unwatchFullscreen();
       fileInput.removeEventListener("change", onFile);
       this.setToolbarStatus("");
     };

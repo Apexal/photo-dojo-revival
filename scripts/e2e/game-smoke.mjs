@@ -106,13 +106,30 @@ try {
   await clickGame(game, TILE_X + 88, TILE_Y + TILE - 16); // Keep
   check((await game.evaluate(() => window.photoDojo.scene.getScene("character-select").pendingDelete)) === null, "Keep cancels the delete");
   step("mouse: tile select, export button, delete confirm/cancel");
+  // ✎ Rename sits along the selected tile's top edge; typing fast mustn't double letters.
+  await game.waitForTimeout(400); // a tile ignores clicks for 300 ms after one of its buttons
+  await clickGame(game, TILE_X + TILE / 2, TILE_Y + TILE / 2);
+  await game.waitForTimeout(100);
+  await clickGame(game, TILE_X + 30, TILE_Y + 16);
+  await game.waitForFunction(() => window.photoDojo.scene.isActive("rename"), null, { timeout: 3000 })
+    .catch(async () => { throw new Error(`rename didn't open: ${await game.evaluate(() => { const sc = window.photoDojo.scene.getScene("character-select"); return JSON.stringify({ selected: sc.selected, buttons: sc.tileButtons.map((b) => [b.text, b.x, b.y]), lib: sc.library.slice(0, 2).map((e) => [e.fighter.name, e.builtIn]) }); })}`); });
+  for (let i = 0; i < 12; i++) await game.keyboard.press("Backspace");
+  await game.keyboard.type(" Wire   Blue II ");
+  await game.keyboard.press("Enter");
+  await game.waitForFunction(() => /^Renamed/.test(document.getElementById("toolbar-status").textContent), null, { timeout: 5000 });
+  const renamed = await game.evaluate(async (id) => {
+    const { loadFighter } = await import("/src/shared/fighter-storage.ts");
+    return (await loadFighter(id))?.name;
+  }, sent.id);
+  check(renamed === "Wire Blue II", `rename saved the tidied name (${renamed})`);
+  step("mouse: renamed the fighter from its tile");
 
   // --- pick fighters: P1 keyboard (J), P2 keyboard (,) ---
   await game.click("canvas");
   await game.keyboard.press("j"); // P1 joins
   await game.keyboard.press("Comma"); // P2 joins
   await game.waitForTimeout(100);
-  await game.keyboard.press("j"); // P1 ready on tile 0 (newest = Wire Blue)
+  await game.keyboard.press("j"); // P1 ready on tile 0 (newest = Wire Blue II)
   await game.keyboard.press("ArrowRight");
   await game.keyboard.press("ArrowRight");
   await game.waitForTimeout(100);
