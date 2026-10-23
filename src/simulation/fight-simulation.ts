@@ -23,6 +23,7 @@ import {
   type PoseGeometry,
 } from "../shared/frame-data";
 import type { PoseId } from "../shared/fighter-model";
+import { REACH_FRAMES, SECOND_HAND_FRAMES, SHAKE_START_FRAME, handshakeGrips, shakeAt, type HandshakeGrip } from "../shared/handshake";
 import { midShoulder, torsoLength } from "../shared/pose-geometry";
 import { boxCenterX, contactPoint, horizontalOverlap, toWorldBox, type Placement } from "./collision";
 import {
@@ -50,6 +51,7 @@ import {
 } from "./fighter-state-machine";
 import { EMPTY_INPUT, type InputFrame } from "./input-frame";
 import {
+  INTRO,
   MAX_HEALTH,
   createMatch,
   restartRound,
@@ -89,7 +91,7 @@ export interface FightState {
 /** Practice mode refills health after this many frames back in neutral. */
 export const PRACTICE_REFILL_FRAMES = 60;
 
-export const START_POSITIONS: [number, number] = [STAGE_WIDTH / 2 - 240, STAGE_WIDTH / 2 + 240];
+export const START_POSITIONS: [number, number] = [STAGE_WIDTH / 2 - 380, STAGE_WIDTH / 2 + 380];
 
 export function poseOf(state: FighterState): PoseId {
   if (isCrouching(state)) return "crouch";
@@ -144,6 +146,42 @@ export function allTweens(): FrameTween[] {
     }
   }
   return [...found.values()];
+}
+
+/**
+ * Shaking hands: the hand pumps between two made-up versions of the handshake
+ * capture (variants 1 and 2: the hand raised and lowered, see shakenGrip).
+ * Rendering only. Null while the hand is still going out; then it's held
+ * where the hands meet until both are out, and both shake in step.
+ * `offeredAt`: the fighter's HandshakeGrip.offeredAt.
+ */
+export function handshakeShakeOf(state: FighterState, offeredAt: number): FrameTween | null {
+  if (state.action !== "handshake" || state.actionFrame < REACH_FRAMES) return null;
+  const t = shakeAt(state.actionFrame + offeredAt - SHAKE_START_FRAME);
+  return { from: { poseId: "handshake", variant: 1 }, to: { poseId: "handshake", variant: 2 }, t };
+}
+
+/**
+ * The scripted round intro on a given frame of it, for one player: walking in
+ * (`along` goes 0 → 1, from where the round starts to where the hands meet),
+ * a pause, the handshake (player 1 offers first, player 2 takes it a moment
+ * later), walking back, then standing ready.
+ */
+export function introStep(phaseFrame: number, player: PlayerIndex): { action: "walk" | "handshake" | "idle"; actionFrame: number; along: number } {
+  let f = phaseFrame;
+  if (f < INTRO.walkIn) return { action: "walk", actionFrame: f, along: (f + 1) / INTRO.walkIn };
+  f -= INTRO.walkIn;
+  if (f < INTRO.pause) return { action: "idle", actionFrame: f, along: 1 };
+  f -= INTRO.pause;
+  if (f < INTRO.shake) {
+    // Player 2 stands there a moment before taking the offered hand.
+    const offered = player === 0 ? 0 : SECOND_HAND_FRAMES;
+    if (f < offered) return { action: "idle", actionFrame: INTRO.pause + f, along: 1 };
+    return { action: "handshake", actionFrame: f - offered, along: 1 };
+  }
+  f -= INTRO.shake;
+  if (f < INTRO.walkOut) return { action: "walk", actionFrame: f, along: 1 - (f + 1) / INTRO.walkOut };
+  return { action: "idle", actionFrame: f - INTRO.walkOut, along: 0 };
 }
 
 export function currentGeometry(geometry: FighterGeometry, state: FighterState): PoseGeometry {
@@ -253,6 +291,8 @@ export class FightSimulation {
   private calmFrames: [number, number] = [0, 0];
   /** Wins when the current round began, so restarting it undoes a KO from its outro. */
   private winsAtRoundStart: [number, number] = [0, 0];
+  /** Each fighter's handshake, aimed so the hands meet (the round intro). */
+  readonly grips: [HandshakeGrip, HandshakeGrip];
 
   constructor(
     private readonly geometry: [FighterGeometry, FighterGeometry],
@@ -261,6 +301,7 @@ export class FightSimulation {
     this.practice = options.practice ?? false;
     this.startPositions = options.startPositions ?? START_POSITIONS;
     this.random = createRng(options.seed ?? 1);
+    this.grips = handshakeGrips(geometry);
     this.state = {
       frame: 0,
       fighters: this.freshFighters(),
@@ -277,6 +318,16 @@ export class FightSimulation {
       createFighterState(swap ? right : left, swap ? -1 : 1, MAX_HEALTH),
       createFighterState(swap ? left : right, swap ? 1 : -1, MAX_HEALTH),
     ];
+  }
+
+  /**
+   * Where each fighter stands to shake hands this round: either side of the
+   * middle of their starting spots, so the two hands overlap exactly.
+   */
+  handshakePositions(roundNumber = this.state.round.roundNumber): [number, number] {
+    const start = this.freshFighters(roundNumber);
+    const middle = (start[0].position.x + start[1].position.x) / 2;
+    return [0, 1].map((i) => middle - start[i].facing * this.grips[i].reach) as [number, number];
   }
 
   get current(): FightState {
@@ -344,7 +395,7 @@ export class FightSimulation {
     const controllable = phase === "fighting";
     const pressed = (i: number): Presses =>
       controllable ? { punch: this.buffers[i].punch > 0, kick: this.buffers[i].kick > 0 } : { punch: false, kick: false };
-    let fighters = [0, 1].map((i) =>
+    let fighters = phase === "intro" ? this.introFighters(prev) : [0, 1].map((i) =>
       stepFighter(prev.fighters[i], {
         input: controllable ? inputs[i] : EMPTY_INPUT,
         pressed: pressed(i),
@@ -374,7 +425,8 @@ export class FightSimulation {
 
     if (controllable) fighters = this.resolveThrows(fighters, events);
     if (controllable) fighters = this.resolveHits(fighters, events);
-    fighters = this.pushApart(fighters);
+    // The intro's handshake stands them closer than their push boxes allow.
+    if (phase !== "intro") fighters = this.pushApart(fighters);
 
     if (this.practice) fighters = this.practiceRefill(fighters);
     let round = this.practice && prev.round.phase === "fighting"
@@ -389,6 +441,23 @@ export class FightSimulation {
 
     this.state = { frame, fighters, round, events };
     return this.state;
+  }
+
+  /** The round intro: both fighters walk in, shake hands and walk back to where the round starts. Input is ignored. */
+  private introFighters(prev: FightState): [FighterState, FighterState] {
+    const start = this.freshFighters(prev.round.roundNumber).map((f) => f.position.x);
+    const meet = this.handshakePositions(prev.round.roundNumber);
+    return prev.fighters.map((f, i): FighterState => {
+      const step = introStep(prev.round.phaseFrame, i as PlayerIndex);
+      return {
+        ...f,
+        action: step.action,
+        actionFrame: step.actionFrame,
+        position: { x: start[i] + (meet[i] - start[i]) * step.along, y: FLOOR_Y },
+        velocity: { x: 0, y: 0 },
+        crouching: false,
+      };
+    }) as [FighterState, FighterState];
   }
 
   /** Practice: health (floored at 1 where damage is applied) refills after a second of neutral. */

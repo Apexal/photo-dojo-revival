@@ -7,6 +7,7 @@ import { Menu } from "../render/menu";
 import { GAME_HEIGHT, GAME_WIDTH } from "../render/stage";
 import { gameSoundKey } from "../game-sounds";
 import { getOptions, resetKeyBindings, saveKeyBindings, setOption } from "../options";
+import { updateMenuMusicVolume } from "../menu-music";
 
 export interface SettingsSceneData {
   /** Scene to resume on close (it was paused while settings are open). */
@@ -44,10 +45,11 @@ export class SettingsScene extends Phaser.Scene {
     const options = () => getOptions(this.registry);
     const onOff = (v: boolean) => (v ? "On" : "Off");
     const percent = (v: number) => `${Math.round(v * 100)}%`;
-    const volume = (key: "gameVolume" | "voiceVolume", preview: string) => (direction: -1 | 1) => {
+    const volume = (key: "gameVolume" | "voiceVolume" | "musicVolume", preview: string | null) => (direction: -1 | 1) => {
       const value = Math.round(Math.min(1, Math.max(0, options()[key] + direction * VOLUME_STEP)) * 10) / 10;
       setOption(this.registry, key, value);
-      if (value > 0 && this.cache.audio.exists(preview)) this.sound.play(preview, { volume: value });
+      if (preview && value > 0 && this.cache.audio.exists(preview)) this.sound.play(preview, { volume: value });
+      if (key === "musicVolume") updateMenuMusicVolume(this); // the menu music, if it's on, is the preview
     };
     const toggle = (key: "screenShake" | "dynamicCamera" | "rumble" | "poseTweening") => () => setOption(this.registry, key, !options()[key]);
     const row = (name: string, value: string) => `${name.padEnd(18)}${value.padStart(12)}`;
@@ -55,6 +57,8 @@ export class SettingsScene extends Phaser.Scene {
     this.menu = new Menu(this, GAME_WIDTH / 2, 130, [
       { label: () => row("Game volume", `◀ ${percent(options().gameVolume)} ▶`), onAdjust: volume("gameVolume", gameSoundKey("hit")) },
       { label: () => row("Voice volume", `◀ ${percent(options().voiceVolume)} ▶`), onAdjust: volume("voiceVolume", fallbackSoundKey("hurt")) },
+      // Previewed by the menu music when it's playing; a fight's soundtrack picks the new level up when it resumes.
+      { label: () => row("Music volume", `◀ ${percent(options().musicVolume)} ▶`), onAdjust: volume("musicVolume", null) },
       { label: () => row("Screen shake", onOff(options().screenShake)), onAdjust: toggle("screenShake") },
       { label: () => row("Dynamic camera", onOff(options().dynamicCamera)), onAdjust: toggle("dynamicCamera") },
       { label: () => row("Controller rumble", onOff(options().rumble)), onAdjust: toggle("rumble") },
@@ -63,7 +67,7 @@ export class SettingsScene extends Phaser.Scene {
       { label: () => row("P2 keys", keyboardKeys("p2")), onConfirm: () => this.startRemap("p2") },
       { label: () => "Reset keys to default", onConfirm: () => resetKeyBindings(), disabled: () => isDefaultBindings(keyBindings()) },
       { label: () => "Back", onConfirm: () => this.close() },
-    ], { width: 640, lineHeight: 42, fontSize: 26 });
+    ], { width: 640, lineHeight: 38, fontSize: 26 });
 
     this.promptText = this.add.text(GAME_WIDTH / 2, 552, "", { fontSize: "26px", fontStyle: "bold", color: "#f2c14e", align: "center" }).setOrigin(0.5, 0);
     this.messageText = this.add.text(GAME_WIDTH / 2, 592, "", { fontSize: "19px", color: "#e8483b" }).setOrigin(0.5, 0);

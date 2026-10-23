@@ -111,6 +111,19 @@ const SPECS: Record<PoseId, DefinitionSpec> = {
     ],
     requiredVisibleLandmarks: FULL_BODY,
   },
+  handshake: {
+    label: "Handshake",
+    voicePrompt: "Last one: a handshake. Reach out to shake your opponent's hand, elbow a little bent.",
+    angleTargets: [
+      { joint: "rightShoulderElevation", degrees: 50, tolerance: 20 }, // hand out at waist height, not a punch
+      { joint: "rightElbow", degrees: 150, tolerance: 25 },
+      { joint: "leftShoulderElevation", degrees: 10, tolerance: 20 },   // other arm down
+      { joint: "rightKnee", degrees: 172, tolerance: 20 },              // standing tall
+    ],
+    requiredVisibleLandmarks: FULL_BODY,
+    // Either hand: the game shakes with whichever one was held out.
+    attackLimb: "arm",
+  },
 };
 
 export const POSE_DEFINITIONS: Record<PoseId, PoseDefinition> = Object.fromEntries(
@@ -207,8 +220,11 @@ export interface CaptureTarget {
   definition: PoseDefinition;
 }
 
-/** New fighters capture all fourteen, so everyone has the same move set. Alternates come right after their main pose. */
-const CAPTURE_ORDER = ["idle", "idle-2", "walk", "block", "crouch", "punch", "punch-2", "kick", "kick-2", "jump", "hurt", "hurt-2", "win", "win-2"] as const;
+/**
+ * New fighters capture all fifteen, so everyone has the same move set. Alternates come right after their main pose;
+ * the handshake (the round intro) closes the session.
+ */
+const CAPTURE_ORDER = ["idle", "idle-2", "walk", "block", "crouch", "punch", "punch-2", "kick", "kick-2", "jump", "hurt", "hurt-2", "win", "win-2", "handshake"] as const;
 
 export const CAPTURE_TARGETS: readonly CaptureTarget[] = CAPTURE_ORDER.map((key) => {
   const alternate = ALTERNATE_DEFINITIONS[key];

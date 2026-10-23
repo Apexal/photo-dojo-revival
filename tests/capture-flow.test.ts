@@ -16,14 +16,14 @@ function toReview(roomCode: string | null = "ABC234") {
 }
 
 describe("capture flow", () => {
-  it("walks intro → tips → all 13 poses → review", () => {
+  it("walks intro → tips → all 15 poses → review", () => {
     const s = toReview();
     expect(s.mode).toBe("solo");
     expect(s.screen).toEqual({ name: "review" });
     expect(targetAt(0).poseId).toBe("idle");
     expect(targetAt(indexOf("punch") + 1).key).toBe("punch-2"); // uppercut right after punch
     expect(targetAt(indexOf("block") + 1).key).toBe("crouch"); // crouch block right after block
-    expect(targetAt(CAPTURE_TARGETS.length - 1).key).toBe("win-2");
+    expect(targetAt(CAPTURE_TARGETS.length - 1).key).toBe("handshake"); // the last one: for the round intro
   });
 
   it("both modes go straight to the first pose once the models are ready", () => {
@@ -148,8 +148,8 @@ describe("draft summary", () => {
   it("counts captured poses and finds the next missing one", () => {
     // A draft from before the second stance existed picks up there.
     expect(summarizeDraft(draft(["idle", "walk", "block"]), 2000)).toEqual({ captured: 3, complete: false, nextPoseIndex: 1, ageMs: 1000 });
-    const all = ["idle", "idle-2", "walk", "block", "crouch", "punch", "punch-2", "kick", "kick-2", "jump", "hurt", "hurt-2", "win", "win-2"];
-    expect(summarizeDraft(draft(all))).toMatchObject({ captured: 14, complete: true, nextPoseIndex: null });
+    const all = ["idle", "idle-2", "walk", "block", "crouch", "punch", "punch-2", "kick", "kick-2", "jump", "hurt", "hurt-2", "win", "win-2", "handshake"];
+    expect(summarizeDraft(draft(all))).toMatchObject({ captured: 15, complete: true, nextPoseIndex: null });
     expect(summarizeDraft(draft(all.filter((k) => k !== "kick-2")))).toMatchObject({ complete: false, nextPoseIndex: indexOf("kick-2") });
   });
 

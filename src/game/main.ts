@@ -8,6 +8,8 @@ import { FightScene } from "./scenes/fight-scene";
 import { PauseScene } from "./scenes/pause-scene";
 import { RoundResultScene } from "./scenes/round-result-scene";
 import { SettingsScene } from "./scenes/settings-scene";
+import { MatchResultScene } from "./scenes/match-result-scene";
+import { StageSelectScene } from "./scenes/stage-select-scene";
 import { TitleScene } from "./scenes/title-scene";
 
 /**
@@ -44,7 +46,7 @@ gatePhones(() => {
     input: { gamepad: true, keyboard: true },
     audio: { disableWebAudio: false },
     // Overlays last so they draw on top.
-    scene: [BootScene, TitleScene, CharacterSelectScene, ControlsScene, FightScene, RoundResultScene, PauseScene, SettingsScene],
+    scene: [BootScene, TitleScene, CharacterSelectScene, StageSelectScene, ControlsScene, FightScene, RoundResultScene, MatchResultScene, PauseScene, SettingsScene],
   });
 
   // Handy for debugging from the console.

@@ -190,11 +190,11 @@ describe("second-version poses", () => {
     }
   });
 
-  it("capture targets: all fourteen, each second version right after its main pose", () => {
+  it("capture targets: all fifteen, each second version right after its main pose, the handshake last", () => {
     expect(CAPTURE_TARGETS.map((t) => [t.key, t.poseId, t.variant])).toEqual([
       ["idle", "idle", 0], ["idle-2", "idle", 1], ["walk", "walk", 0], ["block", "block", 0], ["crouch", "crouch", 0],
       ["punch", "punch", 0], ["punch-2", "punch", 1], ["kick", "kick", 0], ["kick-2", "kick", 1],
-      ["jump", "jump", 0], ["hurt", "hurt", 0], ["hurt-2", "hurt", 1], ["win", "win", 0], ["win-2", "win", 1],
+      ["jump", "jump", 0], ["hurt", "hurt", 0], ["hurt-2", "hurt", 1], ["win", "win", 0], ["win-2", "win", 1], ["handshake", "handshake", 0],
     ]);
     expect(REQUIRED_VARIANT_POSES).toEqual(["punch", "kick", "hurt", "win"]); // the second stance is optional
     expect(ALTERNATE_DEFINITIONS["punch-2"].attackLimb).toBe("arm");

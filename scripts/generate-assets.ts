@@ -112,7 +112,7 @@ for (const f of FIGHTERS) {
       file: `${poseId}.png`,
       anchorPoint: anchorTargetFor(poseId),
       landmarks: landmarks.map((l) => ({ x: round(l.x), y: round(l.y), visibility: l.visibility })),
-      ...(poseId === "punch" || poseId === "kick" ? { attackSide: "right" } : {}),
+      ...(poseId === "punch" || poseId === "kick" || poseId === "handshake" ? { attackSide: "right" } : {}),
     };
   }
   const variants: Record<string, unknown[]> = {};
@@ -125,7 +125,7 @@ for (const f of FIGHTERS) {
       file: `${key}.png`,
       anchorPoint: anchorTargetFor(poseId),
       landmarks: landmarks.map((l) => ({ x: round(l.x), y: round(l.y), visibility: l.visibility })),
-      ...(poseId === "punch" || poseId === "kick" ? { attackSide: "right" } : {}),
+      ...(poseId === "punch" || poseId === "kick" || poseId === "handshake" ? { attackSide: "right" } : {}),
     });
   }
   writeFileSync(join(dir, "fighter.json"), JSON.stringify({ fighterId: f.id, name: f.name, thumbnail: "thumbnail.png", poses, variants }, null, 1));

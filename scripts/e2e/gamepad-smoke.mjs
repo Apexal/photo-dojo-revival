@@ -66,9 +66,11 @@ try {
   await tap(0); // A: pick
   check((await sel()).ready, "A picks");
   await tap(0); // A again: practice
+  await page.waitForFunction(() => window.photoDojo.scene.isActive("stage-select"), null, { timeout: 5000 });
+  await tap(0); // A: take the highlighted stage
   await page.waitForFunction(() => window.photoDojo.scene.getScene("fight")?.sim?.practice === true, null, { timeout: 5000 });
   await page.waitForFunction(() => window.photoDojo.scene.getScene("fight").sim.current.round.phase === "fighting", null, { timeout: 5000 });
-  step("A ×2 started practice (the scene change survives a pad at index 1)");
+  step("A ×2 then A on the stage select started practice (the scene changes survive a pad at index 1)");
 
   // Dummy punches; walk the pad's fighter into it and get hit.
   await page.keyboard.press("6"); // dummy: punch

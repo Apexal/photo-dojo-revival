@@ -5,4 +5,6 @@ interface ImportMetaEnv {
   readonly VITE_SIGNALING_URL?: string;
   readonly VITE_POSE_MODEL_URL?: string;
   readonly VITE_MATTING_MODEL_URL?: string;
+  /** Base URL of the music files (the R2 bucket); defaults to /music/ (git-ignored public/music/). */
+  readonly VITE_MUSIC_BASE_URL?: string;
 }

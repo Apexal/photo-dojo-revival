@@ -13,7 +13,7 @@ const press = (p: Partial<InputFrame>): InputFrame => ({ ...EMPTY_INPUT, ...p })
 /** P1 punches a standing P2 at close range; returns every state from the punch on. */
 function punchExchange() {
   const g = stickFigureGeometry();
-  const sim = new FightSimulation([g, g], { seed: 1, practice: true });
+  const sim = new FightSimulation([g, g], { seed: 1, practice: true, startPositions: [400, 880] });
   while (sim.current.round.phase !== "fighting") sim.step([idle, idle]);
   // Walk in close.
   for (let i = 0; i < 40; i++) sim.step([press({ right: true }), idle]);

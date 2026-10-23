@@ -11,6 +11,7 @@ import type { InputSource } from "../input/input-source";
 import { fighterTextureKeys, preloadFighterTextures, textureKey } from "../render/fighter-sprite-view";
 import { GAME_HEIGHT, GAME_WIDTH } from "../render/stage";
 import type { FightSceneData } from "./fight-scene";
+import { stopMenuMusic } from "../menu-music";
 
 const PREFIXES = ["ctl0", "ctl1"] as const;
 export const MIRROR_TINT = 0x9fc4ff;
@@ -76,6 +77,7 @@ export class ControlsScene extends Phaser.Scene {
   }
 
   create(): void {
+    stopMenuMusic(this);
     this.openedAt = performance.now();
     this.geometry = this.setup.entries.map((e) => geometryOf(e.fighter));
     this.sources = this.setup.inputs.filter(isPlayerInput).map((d) => createInputSource(this, d));

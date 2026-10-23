@@ -386,7 +386,8 @@ export class PoseTweener {
   /**
    * Back to front: a backing (the fainter capture's body without its cut-loose
    * limbs, opaque), the leaving capture, the arriving one. Between a capture and
-   * its own stand-in, just the one capture, warped. Null for a hard cut.
+   * its own stand-in, or between two stand-ins for the same capture, just the
+   * one capture, warped. Null for a hard cut.
    */
   layers(tween: FrameTween): TweenLayer[] | null {
     const standIn = (f: FrameRef) => this.meshFor(f)?.standIn ?? false;
@@ -395,7 +396,7 @@ export class PoseTweener {
       const real = (f: FrameRef): FrameRef => (standIn(f) ? { poseId: f.poseId, variant: 0 } : f);
       const from = real(tween.from), to = real(tween.to);
       if (frameKey(from) !== frameKey(to)) return this.layers({ ...tween, from, to });
-      return this.warpOnly(tween, standIn(tween.from) ? tween.to : tween.from);
+      return this.warpOnly(tween, from);
     }
     const from = this.deformerFor(tween.from, tween.to), to = this.deformerFor(tween.to, tween.from);
     if (!from || !to) return null;
@@ -422,9 +423,9 @@ export class PoseTweener {
     return [backing, leaving, arriving];
   }
 
-  /** One capture (`real`, an end of the tween) warped toward its stand-in at the other end. */
+  /** One capture (`real`, the photo behind both ends) warped along the tween: toward its stand-in, or from one stand-in to another. */
   private warpOnly(tween: FrameTween, real: FrameRef): TweenLayer[] | null {
-    const other = real === tween.from ? tween.to : tween.from;
+    const other = frameKey(real) === frameKey(tween.to) ? tween.from : tween.to;
     const entry = this.deformerFor(real, other);
     if (!entry) return null;
     const [a, b] = this.pairLandmarks(tween.from, tween.to)!;

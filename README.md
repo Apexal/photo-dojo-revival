@@ -1,6 +1,6 @@
 # Photo Dojo: Revival
 
-A browser-only 2D fighting game. Pose for fourteen photos on a phone, the phone turns them into a sprite fighter locally, sends it to a laptop over WebRTC, and two people fight with controllers or a shared keyboard. No accounts, no backend storage: fighters live in each browser's IndexedDB. See [PLAN.md](PLAN.md) for the design.
+A browser-only 2D fighting game. Pose for fifteen photos on a phone, the phone turns them into a sprite fighter locally, sends it to a laptop over WebRTC, and two people fight with controllers or a shared keyboard. No accounts, no backend storage: fighters live in each browser's IndexedDB. See [PLAN.md](PLAN.md) for the design.
 
 ## Run it
 
@@ -46,6 +46,7 @@ Keyboard keys can be remapped in **Settings** (Tab or a pad's Select button on f
 - Before each match, a "How to fight" screen shows each player's controls with slow-motion previews of their fighter's moves.
 - **Practice:** join with one controller, pick a fighter, and press punch again. You play against an easy CPU with no clock and health that refills. Key 9 cycles the CPU easy → normal → hard; keys 1–8 (or Tab / Select) turn it into a scripted training dummy instead, including jumping in with a kick to practice anti-airs. F1 shows hitboxes. Harder levels react faster, block, anti-air and punish more often, and throw or jump in on a player who just crouch-blocks.
 - A knockout plays back in slow motion before the round result. Press any button to skip.
+- The match ends on a stats page: damage, clean hits, accuracy, longest combo, blocks, throws, knockdowns, perfect rounds, each player's favorite move, and how every round went. Punch for a rematch, kick for fighter select.
 - Fighter select works with a mouse or touch too. Click a tile to select it, then use the tile's Export or 🗑 button. Clicking a selected tile again picks it for a player who has joined. With more than 12 fighters the grid pages: move past the last row, or click ◀ ▶.
 
 The frame data and the reasoning behind it are in [docs/fighting-mechanics.md](docs/fighting-mechanics.md).
@@ -85,7 +86,7 @@ Each capture takes the sharpest of a short burst of 1080p frames.
 - `src/simulation/`: the fight, in pure TypeScript with no Phaser imports. Fixed-timestep and deterministic.
 - `src/capture/`: phone pipeline (camera, MediaPipe pose + segmentation, matcher, normalizer, sounds, flow state machine, DOM UI).
 - `src/transfer/`: signaling client, peer connection, chunked sender/receiver with backpressure.
-- `src/game/`: Phaser scenes, input sources, rendering.
+- `src/game/`: Phaser scenes, input sources, rendering. Stages (scenery and an optional looping soundtrack) are in `src/game/stages/`: add a `StageDefinition` file and list it in `STAGES`; with more than one, a stage select step appears after fighter select. There are two: Dusk Dojo and Lunar Dojo (music: "Space-Time" by TomboFry, credited on stage select and the About page). The menus play "Get A Move On" by TomboFry. The music is licensed, not MIT, so it isn't in the repo: for local dev drop the files into git-ignored `public/music/`; production builds load them from an R2 bucket via `VITE_MUSIC_BASE_URL`. Without them the game just plays silently.
 - `worker/`: signaling Worker.
 - `scripts/`: asset generator (`npm run generate:assets` rebuilds `public/placeholders` and `public/sounds`), signaling and browser smoke tests.
 

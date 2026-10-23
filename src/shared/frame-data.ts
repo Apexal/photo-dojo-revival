@@ -265,6 +265,8 @@ export const SOFT_CUTS: readonly { from: PoseId; to: PoseId; frames: number }[] 
   { from: "kick", to: "jump", frames: 3 }, { from: "kick", to: "idle", frames: 5 },
   // Getting over a hit.
   { from: "hurt", to: "idle", frames: 6 }, { from: "hurt", to: "block", frames: 4 },
+  // The round intro: reaching out to shake hands (from the walk cycle's either capture), letting go.
+  { from: "walk", to: "handshake", frames: 5 }, { from: "idle", to: "handshake", frames: 5 }, { from: "handshake", to: "walk", frames: 6 },
   // Taunts and the win pose.
   { from: "idle", to: "win", frames: 8 }, { from: "walk", to: "win", frames: 8 }, { from: "win", to: "idle", frames: 6 },
 ];
@@ -286,6 +288,8 @@ export type FighterAction =
   | "jumpSquat"
   | "punch" | "kick" | "uppercut" | "lowKick" | "jumpKick" | "throw" | "taunt"
   | "grabbed" | "hurt" | "ko" | "win"
+  /** The round intro's handshake (fight-simulation.ts). */
+  | "handshake"
   /** Knocked down: flying (knockdown), on the floor (downed), getting up (wakeup). */
   | "knockdown" | "downed" | "wakeup";
 

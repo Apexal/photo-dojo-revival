@@ -1,0 +1,150 @@
+import { describe, expect, it } from "vitest";
+import { PoseTweener, type FrameRef, type TweenSource } from "../src/game/render/pose-tweener";
+import { LANDMARK } from "../src/shared/fighter-model";
+import { groundAnchorFor, type FighterGeometry } from "../src/shared/frame-data";
+import { REACH_FRAMES, SECOND_HAND_FRAMES, SHAKE_PERIOD_FRAMES, SHAKE_PX, SHAKE_START_FRAME, SHAKES, handOf, handshakeGrips, shakeAt, shakenGrip, turnArm } from "../src/shared/handshake";
+import { buildStickFigureLandmarks, stickFigureGeometry } from "../src/shared/stick-figure";
+import { FightSimulation, handshakeShakeOf, introStep } from "../src/simulation/fight-simulation";
+import { input } from "../src/simulation/input-frame";
+import { INTRO, ROUND_INTRO_FRAMES } from "../src/simulation/round-rules";
+
+const geo = stickFigureGeometry();
+const idle = input();
+
+/** A fighter who holds their hand out higher (and with the left hand). */
+function tallHandshake(): FighterGeometry {
+  const pose = geo.handshake;
+  const lifted = turnArm(pose.landmarks, "right", -0.35);
+  // Relabel the arms, as for a left-handed capture.
+  const swapped = lifted.map((l) => ({ ...l }));
+  for (const joint of ["Shoulder", "Elbow", "Wrist", "Pinky", "Index", "Thumb"] as const) {
+    swapped[LANDMARK[`left${joint}`]] = lifted[LANDMARK[`right${joint}`]];
+    swapped[LANDMARK[`right${joint}`]] = lifted[LANDMARK[`left${joint}`]];
+  }
+  return { ...geo, handshake: { ...pose, landmarks: swapped, attackSide: "left" } };
+}
+
+/** Where a fighter's handshake hand is in the world (aimed grip, placed at their position). */
+function worldHand(sim: FightSimulation, geometry: FighterGeometry, player: 0 | 1) {
+  const f = sim.current.fighters[player];
+  const grip = sim.grips[player];
+  const hand = handOf(grip.landmarks, grip.side);
+  const anchor = groundAnchorFor(geometry, "handshake");
+  return { x: f.position.x + f.facing * (hand.x - anchor.x), y: f.position.y + hand.y - anchor.y };
+}
+
+describe("handshake grips", () => {
+  it("aims both hands at one height without changing arm length", () => {
+    const geometries: [FighterGeometry, FighterGeometry] = [geo, tallHandshake()];
+    const grips = handshakeGrips(geometries);
+    const heights = grips.map((g, i) => handOf(g.landmarks, g.side).y - groundAnchorFor(geometries[i], "handshake").y);
+    expect(heights[0]).toBeCloseTo(heights[1], 6);
+    const before = handOf(geometries[1].handshake.landmarks, "left");
+    const shoulder = geometries[1].handshake.landmarks[LANDMARK.leftShoulder];
+    const after = handOf(grips[1].landmarks, "left");
+    expect(Math.hypot(after.x - shoulder.x, after.y - shoulder.y)).toBeCloseTo(Math.hypot(before.x - shoulder.x, before.y - shoulder.y), 6);
+    expect(grips[1].side).toBe("left");
+    expect(grips.every((g) => g.reach > 0)).toBe(true);
+  });
+
+  it("leaves matching hands alone", () => {
+    const [grip] = handshakeGrips([geo, geo]);
+    expect(grip.landmarks[LANDMARK.rightWrist].x).toBeCloseTo(geo.handshake.landmarks[LANDMARK.rightWrist].x, 6);
+  });
+
+  it("pumps the hand up and down by SHAKE_PX, starting and ending where the hands meet", () => {
+    const [grip] = handshakeGrips([geo, geo]);
+    const rest = handOf(grip.landmarks, "right");
+    const [down, up] = [handOf(shakenGrip(grip, 1), "right"), handOf(shakenGrip(grip, -1), "right")];
+    expect(Math.hypot(down.x - rest.x, down.y - rest.y)).toBeCloseTo(SHAKE_PX, 0);
+    expect(Math.hypot(up.x - rest.x, up.y - rest.y)).toBeCloseTo(SHAKE_PX, 0);
+    expect(down.y).toBeGreaterThan(rest.y + SHAKE_PX / 2);
+    expect(up.y).toBeLessThan(rest.y - SHAKE_PX / 2);
+    expect(shakeAt(0)).toBe(0.5);
+    expect(shakeAt(-5)).toBe(0.5); // waiting for the other hand
+    expect(shakeAt(SHAKES * SHAKE_PERIOD_FRAMES)).toBe(0.5);
+    expect(shakeAt(SHAKES * SHAKE_PERIOD_FRAMES + 3)).toBe(0.5); // holding on before letting go
+  });
+});
+
+describe("round intro", () => {
+  it("walks in, shakes hands with the hands overlapping, and walks back to the start", () => {
+    const geometries: [FighterGeometry, FighterGeometry] = [geo, tallHandshake()];
+    const sim = new FightSimulation(geometries);
+    const start = sim.current.fighters.map((f) => f.position.x);
+    const seen: [string[], string[]] = [[], []];
+    const offered: number[] = [];
+    let closest = Infinity;
+    for (let i = 0; i < ROUND_INTRO_FRAMES - 1; i++) {
+      const state = sim.step([input({ punch: true }), input({ right: true })]); // input is ignored
+      state.fighters.forEach((f, p) => {
+        if (seen[p][seen[p].length - 1] !== f.action) seen[p].push(f.action);
+        if (f.action === "handshake" && offered[p] === undefined) offered[p] = i;
+      });
+      closest = Math.min(closest, state.fighters[1].position.x - state.fighters[0].position.x);
+      if (state.fighters.every((f) => f.action === "handshake")) {
+        const [a, b] = [worldHand(sim, geometries[0], 0), worldHand(sim, geometries[1], 1)];
+        expect(a.x).toBeCloseTo(b.x, 6);
+        expect(a.y).toBeCloseTo(b.y, 6);
+      }
+    }
+    for (const actions of seen) expect(actions).toEqual(["walk", "idle", "handshake", "walk", "idle"]);
+    // A pause once they're in place, then player 1 offers a hand and player 2 takes it.
+    expect(offered[0]).toBe(INTRO.walkIn + INTRO.pause);
+    expect(offered[1]).toBe(offered[0] + SECOND_HAND_FRAMES);
+    expect(closest).toBeCloseTo(sim.handshakePositions()[1] - sim.handshakePositions()[0], 6);
+    expect(sim.current.fighters.map((f) => f.position.x)).toEqual(start);
+    expect(sim.step([idle, idle]).events).toContainEqual({ type: "fight" });
+  });
+
+  it("meets in the middle with sides swapped in round 2", () => {
+    const sim = new FightSimulation([geo, tallHandshake()]);
+    const [p1, p2] = [sim.handshakePositions(1), sim.handshakePositions(2)];
+    expect(p1[0]).toBeLessThan(p1[1]);
+    expect(p2[0]).toBeGreaterThan(p2[1]);
+    expect(p1[0] - 640).toBeCloseTo(640 - p2[0], 6);
+  });
+
+  it("walks at a walking pace", () => {
+    const sim = new FightSimulation([geo, geo]);
+    const distance = sim.handshakePositions()[0] - sim.current.fighters[0].position.x;
+    expect(distance / INTRO.walkIn).toBeGreaterThan(2);
+    expect(distance / INTRO.walkIn).toBeLessThan(6);
+  });
+
+  it("holds each hand out once it's there, and shakes both in step once both are", () => {
+    const sim = new FightSimulation([geo, geo]);
+    const tween = (k: number, player: 0 | 1) => {
+      const step = introStep(k, player);
+      return handshakeShakeOf({ ...sim.current.fighters[player], action: step.action, actionFrame: step.actionFrame }, sim.grips[player].offeredAt);
+    };
+    const offer = INTRO.walkIn + INTRO.pause;
+    expect(tween(offer, 0)).toBeNull(); // reaching out
+    expect(tween(offer + REACH_FRAMES, 0)).toMatchObject({ from: { poseId: "handshake", variant: 1 }, to: { poseId: "handshake", variant: 2 }, t: 0.5 });
+    expect(tween(offer + REACH_FRAMES, 1)).toBeNull(); // still waiting
+    expect(tween(offer + SECOND_HAND_FRAMES + 1, 1)).toBeNull(); // reaching out
+    expect(tween(offer + SHAKE_START_FRAME - 1, 1)?.t).toBe(0.5); // hands together, not shaking yet
+    for (const k of [SHAKE_START_FRAME, SHAKE_START_FRAME + 4, SHAKE_START_FRAME + 13]) {
+      expect(tween(offer + k, 0)?.t).toBe(tween(offer + k, 1)?.t);
+    }
+    expect(tween(offer + SHAKE_START_FRAME + 4, 0)!.t).toBeGreaterThan(0.6);
+    expect(tween(offer + INTRO.shake, 0)).toBeNull();
+  });
+
+  it("warps the one handshake photo between two made-up hands", () => {
+    const [grip] = handshakeGrips([geo, geo]);
+    const landmarks = buildStickFigureLandmarks("handshake");
+    // A solid block of pixels around the figure is enough to warp.
+    const data = new Uint8ClampedArray(512 * 512 * 4);
+    for (let y = 150; y < 490; y++) for (let x = 180; x < 380; x++) data[(y * 512 + x) * 4 + 3] = 255;
+    const source = (frame: FrameRef): TweenSource => ({
+      mask: { width: 512, height: 512, data },
+      landmarks: frame.variant ? shakenGrip(grip, frame.variant === 1 ? -1 : 1) : landmarks,
+      anchor: groundAnchorFor(geo, "handshake"),
+      standIn: frame.variant > 0,
+    });
+    const layers = new PoseTweener(source).layers({ from: { poseId: "handshake", variant: 1 }, to: { poseId: "handshake", variant: 2 }, t: 0.5 });
+    expect(layers).toHaveLength(1);
+    expect(layers![0]).toMatchObject({ frame: { poseId: "handshake", variant: 0 }, alpha: 1 });
+  });
+});

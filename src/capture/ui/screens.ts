@@ -59,7 +59,7 @@ const SOUND_PROMPTS: Record<SoundId, { title: string; hint: string }> = {
 
 const screen = (...children: (Node | string | null | false)[]) => h("section", { class: "screen" }, ...children);
 
-/** All fourteen poses. Tapping one retakes it. */
+/** All fifteen poses. Tapping one retakes it. */
 function strip(data: CaptureSessionData, onPick?: (targetKey: string) => void): HTMLElement {
   return h("div", { class: "strip" },
     ...CAPTURE_TARGETS.map((t) =>

@@ -78,6 +78,12 @@ export const STICK_POSES: Record<PoseId, StickPoseParams> = {
     arms: { right: { swing: 165, bend: 165 }, left: { swing: 155, bend: 160 } },
     legs: { right: { swing: 8, bend: 175 }, left: { swing: -8, bend: 175 } },
   },
+  // Standing tall, one hand held out at waist height, the other arm down.
+  handshake: {
+    torsoLean: 3, headTilt: 0,
+    arms: { right: { swing: 50, bend: 150 }, left: { swing: 8, bend: 165 } },
+    legs: { right: { swing: 7, bend: 175 }, left: { swing: -7, bend: 175 } },
+  },
 };
 
 interface Vec { x: number; y: number }

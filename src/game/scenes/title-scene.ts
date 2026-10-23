@@ -12,11 +12,14 @@ import { KeyboardInputSource } from "../input/keyboard-input-source";
 import { getOptions } from "../options";
 import { FighterSpriteView, fallbackSoundKey, loadFighterSounds, preloadFighterTextures } from "../render/fighter-sprite-view";
 import { HitMarkers } from "../render/hit-markers";
-import { GAME_HEIGHT, GAME_WIDTH, drawStage, worldToScreen } from "../render/stage";
+import { GAME_HEIGHT, GAME_WIDTH, worldToScreen } from "../render/stage";
+import { randomStage, type StageDefinition } from "../stages/stages";
+import { preloadStage } from "../stages/stage-music";
 import { pickTake } from "../sound-choice";
 import { REGISTRY } from "./boot-scene";
 import type { CharacterSelectData } from "./character-select-scene";
 import { MIRROR_TINT } from "./controls-scene";
+import { playMenuMusic } from "../menu-music";
 
 export interface TitleSceneData {
   /** A later bout of the demo: the logo is already up, no flash. */
@@ -49,6 +52,7 @@ const OVERLAY_DEPTH = 50;
 export class TitleScene extends Phaser.Scene {
   private setup: TitleSceneData = {};
   private pair!: [LibraryEntry, LibraryEntry];
+  private stage!: StageDefinition;
   private sim!: FightSimulation;
   private sources: DummyInputSource[] = [];
   private views: FighterSpriteView[] = [];
@@ -78,14 +82,17 @@ export class TitleScene extends Phaser.Scene {
     this.views = [];
     this.sources = [];
     this.pair = this.pickPair();
+    this.stage = randomStage();
   }
 
   preload(): void {
     this.pair.forEach((e, i) => this.objectUrls.push(...preloadFighterTextures(this, e.fighter, PREFIXES[i])));
+    preloadStage(this, this.stage); // its music too, so fighter select → fight doesn't load it again
   }
 
   create(): void {
-    drawStage(this);
+    playMenuMusic(this);
+    this.stage.build(this, this.add.container(0, 0).setDepth(0));
     const geometry = this.pair.map((e) => geometryOf(e.fighter)) as [ReturnType<typeof geometryOf>, ReturnType<typeof geometryOf>];
     this.sim = new FightSimulation(geometry, { seed: (Math.random() * 2 ** 32) >>> 0 });
     this.sources = [0, 1].map((i) => {
@@ -94,7 +101,7 @@ export class TitleScene extends Phaser.Scene {
       return cpu;
     });
     const mirrorMatch = this.pair[0].fighter.fighterId === this.pair[1].fighter.fighterId;
-    this.views = [0, 1].map((i) => new FighterSpriteView(this, PREFIXES[i], geometry[i], i === 1 && mirrorMatch ? MIRROR_TINT : undefined));
+    this.views = [0, 1].map((i) => new FighterSpriteView(this, PREFIXES[i], geometry[i], i === 1 && mirrorMatch ? MIRROR_TINT : undefined, this.sim.grips[i]));
     this.views.forEach((v, i) => v.setDepth(10 + i));
     this.markers = new HitMarkers(this.add.graphics().setDepth(25));
     this.buildOverlay();

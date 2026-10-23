@@ -17,6 +17,8 @@ export interface Settings {
   gameVolume: number;
   /** 0..1: the fighters' voices (captured clips or their stand-ins). */
   voiceVolume: number;
+  /** 0..1: stage soundtracks. */
+  musicVolume: number;
   screenShake: boolean;
   /** The fight camera zooms in when the fighters are close. */
   dynamicCamera: boolean;

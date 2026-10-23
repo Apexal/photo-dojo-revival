@@ -22,6 +22,8 @@ import { PLAYER_COLORS } from "../render/stage";
 import { pickTake } from "../sound-choice";
 import { REGISTRY } from "./boot-scene";
 import type { FightSceneData } from "./fight-scene";
+import { startMatch } from "./stage-select-scene";
+import { playMenuMusic, updateMenuMusicVolume } from "../menu-music";
 
 const ROWS = 2;
 const TILE = 120;
@@ -78,6 +80,12 @@ interface Preview {
   device: Phaser.GameObjects.Text;
   /** "Press any button", centred in an empty panel. */
   join: Phaser.GameObjects.Text;
+}
+
+/** Re-measure the game's parent box (refresh() alone reuses the last measurement) and rescale the canvas to it. */
+function refitGame(game: Phaser.Game): void {
+  game.scale.getParentBounds();
+  game.scale.refresh();
 }
 
 export interface CharacterSelectData {
@@ -168,6 +176,7 @@ export class CharacterSelectScene extends Phaser.Scene {
   }
 
   create(): void {
+    playMenuMusic(this);
     this.library = this.registry.get(REGISTRY.library) ?? [];
     this.players = [null, null];
     this.selected = null;
@@ -741,6 +750,7 @@ export class CharacterSelectScene extends Phaser.Scene {
       p.previous = p.source.read();
       p.source.pausePressed();
     }
+    updateMenuMusicVolume(this); // Settings may have changed it
     this.updatePreviews();
   }
 
@@ -811,7 +821,7 @@ export class CharacterSelectScene extends Phaser.Scene {
       inputs: [a.input, b.input],
     };
     void setSetting("controllerMapping", { p1: a.input, p2: b.input }).catch(() => {});
-    this.scene.start("controls", data);
+    startMatch(this, data);
   }
 
   /** One player against a scripted dummy: another fighter from the roster (or the same one). */
@@ -819,7 +829,7 @@ export class CharacterSelectScene extends Phaser.Scene {
     const mine = this.library[p.cursor];
     const dummy = this.library.find((e) => e.fighter.fighterId !== mine.fighter.fighterId) ?? mine;
     const data: FightSceneData = { entries: [mine, dummy], inputs: [p.input, { kind: "dummy" }], practice: true };
-    this.scene.start("fight", data);
+    startMatch(this, data);
   }
 
   // --- add a fighter (QR + room code) ----------------------------------------
@@ -968,8 +978,8 @@ export class CharacterSelectScene extends Phaser.Scene {
     const fileInput = document.getElementById("import-file") as HTMLInputElement | null;
     if (!toolbar || !fileInput) return;
     toolbar.hidden = false;
-    // Showing the toolbar moves the canvas; Phaser caches its position for pointer input.
-    requestAnimationFrame(() => this.scale.refresh());
+    // Showing the toolbar shrinks the game's box; Phaser caches its size and position (for scaling and pointer input).
+    requestAnimationFrame(() => refitGame(this.game));
     const onClick = async (ev: MouseEvent) => {
       const action = (ev.target as HTMLElement).closest("button")?.dataset.action;
       if (action === "import") fileInput.click();
@@ -992,7 +1002,7 @@ export class CharacterSelectScene extends Phaser.Scene {
     fileInput.addEventListener("change", onFile);
     this.toolbarCleanup = () => {
       toolbar.hidden = true;
-      requestAnimationFrame(() => this.game.scale.refresh());
+      requestAnimationFrame(() => refitGame(this.game));
       toolbar.removeEventListener("click", onClick);
       fileInput.removeEventListener("change", onFile);
       this.setToolbarStatus("");

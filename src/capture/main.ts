@@ -347,7 +347,7 @@ class CaptureApp {
     start: () => {
       this.voice.unlock();
       this.holdSound.unlock();
-      this.link.warmUp(); // find out now, not after fourteen poses, whether the laptop is reachable
+      this.link.warmUp(); // find out now, not after fifteen poses, whether the laptop is reachable
       this.dispatch({ type: "start" });
     },
     manualCapture: () => {

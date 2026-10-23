@@ -1,3 +1,5 @@
+import { HANDSHAKE_FRAMES } from "../shared/handshake";
+
 export const FRAMES_PER_SECOND = 60;
 export const ROUND_SECONDS = 60;
 export const ROUND_FRAMES = ROUND_SECONDS * FRAMES_PER_SECOND;
@@ -5,7 +7,13 @@ export const ROUNDS_TO_WIN = 2;
 /** Draws don't award a round; cap the match so it can't go forever. */
 export const MAX_ROUNDS = 5;
 export const MAX_HEALTH = 100;
-export const ROUND_INTRO_FRAMES = 60;
+/**
+ * The round intro: the fighters walk in from their corners, pause, shake hands
+ * (player 1 offers first, handshake.ts) and walk back, then a beat before
+ * "FIGHT!" (fight-simulation.ts).
+ */
+export const INTRO = { walkIn: 72, pause: 20, shake: HANDSHAKE_FRAMES, walkOut: 72, settle: 12 } as const;
+export const ROUND_INTRO_FRAMES = INTRO.walkIn + INTRO.pause + INTRO.shake + INTRO.walkOut + INTRO.settle;
 export const ROUND_OUTRO_FRAMES = 120;
 
 export type PlayerIndex = 0 | 1;

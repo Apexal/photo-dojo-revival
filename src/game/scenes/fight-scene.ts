@@ -22,16 +22,23 @@ import { gameSoundKey, type GameSoundId } from "../game-sounds";
 import { getOptions, setOption } from "../options";
 import { HitboxDebugView } from "../render/hitbox-debug-view";
 import { LOW_HEALTH, clockCue, clockTicked, lowHealthPulse } from "../render/hud-cues";
-import { GAME_HEIGHT, GAME_WIDTH, drawStage, worldToScreen } from "../render/stage";
+import { GAME_HEIGHT, GAME_WIDTH, worldToScreen } from "../render/stage";
+import { stageFor, type StageDefinition } from "../stages/stages";
+import { playStageMusic, preloadStage, stopStageMusic, updateStageMusicVolume } from "../stages/stage-music";
 import { REGISTRY } from "./boot-scene";
 import { MIRROR_TINT } from "./controls-scene";
 import type { RoundResultData } from "./round-result-scene";
+import type { MatchResultData } from "./match-result-scene";
+import { MatchStatsTracker } from "../../simulation/match-stats";
+import { stopMenuMusic } from "../menu-music";
 
 export interface FightSceneData {
   entries: [LibraryEntry, LibraryEntry];
   /** P2 is the training dummy in practice mode. */
   inputs: [PlayerInputDescriptor, InputDescriptor];
   practice?: boolean;
+  /** StageDefinition id (stages/stages.ts); the default stage when missing or unknown. */
+  stageId?: string;
 }
 
 const STEP_MS = 1000 / 60;
@@ -59,6 +66,11 @@ export class FightScene extends Phaser.Scene {
   private replayDone = false;
   private replayUi: Phaser.GameObjects.GameObject[] = [];
   private views: FighterSpriteView[] = [];
+  /** For the end-of-match stats page. */
+  private stats = new MatchStatsTracker();
+  private stage!: StageDefinition;
+  /** The stage's soundtrack (null if it has none). */
+  private music: Phaser.Sound.BaseSound | null = null;
   private sounds: Record<SoundId, string[]>[] = [];
   private lastTake = new Map<string, string>();
   private objectUrls: string[] = [];
@@ -95,6 +107,7 @@ export class FightScene extends Phaser.Scene {
     this.waitingForResult = false;
     this.shownHealth = [MAX_HEALTH, MAX_HEALTH];
     this.views = [];
+    this.stats = new MatchStatsTracker(); // a rematch restarts the scene: fresh stats
     this.sounds = [];
     this.replayBuffer = new ReplayBuffer<FightState>();
     this.replay = null;
@@ -104,9 +117,11 @@ export class FightScene extends Phaser.Scene {
 
   preload(): void {
     this.setup.entries.forEach((e, i) => this.objectUrls.push(...preloadFighterTextures(this, e.fighter, PREFIXES[i])));
+    preloadStage(this, stageFor(this.setup.stageId));
   }
 
   create(): void {
+    stopMenuMusic(this); // practice comes straight here from the menus
     const [a, b] = this.setup.entries;
     this.geometry = [geometryOf(a.fighter), geometryOf(b.fighter)];
     // A fresh seed per match so variant choices differ between fights (and stay replayable within one).
@@ -118,9 +133,11 @@ export class FightScene extends Phaser.Scene {
     this.dummy?.setBehavior("cpuEasy");
     void Promise.all(this.setup.entries.map((e, i) => loadFighterSounds(this, e.fighter, PREFIXES[i]))).then((s) => { this.sounds = s; });
 
-    drawStage(this);
+    this.stage = stageFor(this.setup.stageId);
+    this.stage.build(this, this.add.container(0, 0).setDepth(0));
+    this.music = playStageMusic(this, this.stage, 800);
     const mirrorMatch = a.fighter.fighterId === b.fighter.fighterId;
-    this.views = [0, 1].map((i) => new FighterSpriteView(this, PREFIXES[i], this.geometry[i], i === 1 && mirrorMatch ? MIRROR_TINT : undefined));
+    this.views = [0, 1].map((i) => new FighterSpriteView(this, PREFIXES[i], this.geometry[i], i === 1 && mirrorMatch ? MIRROR_TINT : undefined, this.sim.grips[i]));
     this.views.forEach((v, i) => v.setDepth(10 + i));
     this.motion = this.add.graphics().setDepth(20);
     this.markers = new HitMarkers(this.add.graphics().setDepth(25));
@@ -156,6 +173,8 @@ export class FightScene extends Phaser.Scene {
     });
     if (this.setup.practice) this.buildPracticePanel();
     this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => {
+      stopStageMusic(this, this.music);
+      this.music = null;
       this.scene.stop("pause");
       this.scene.stop("settings");
       this.input.keyboard?.removeAllListeners("keydown-F1");
@@ -244,6 +263,7 @@ export class FightScene extends Phaser.Scene {
       state = this.sim.step(inputs);
       if (!this.setup.practice && clockTicked(before.round, state.round)) this.playEffect("tick", 0.7);
       this.replayBuffer.push(state);
+      this.stats.record(state);
       if (state.events.some((e) => e.type === "ko")) this.replayBuffer.markFinish();
       this.handleEvents(state);
       this.accumulator -= STEP_MS;
@@ -339,6 +359,7 @@ export class FightScene extends Phaser.Scene {
     this.scene.stop("pause");
     this.paused = false;
     this.sound.resumeAll();
+    updateStageMusicVolume(this, this.stage, this.music); // Settings may have changed it
     this.maskHeldButtons();
   }
 
@@ -347,6 +368,8 @@ export class FightScene extends Phaser.Scene {
     if (this.disconnected !== null) return;
     this.scene.stop("pause");
     this.sound.stopAll();
+    this.music?.play(); // from the top, with the round
+    updateStageMusicVolume(this, this.stage, this.music);
     this.paused = false;
     this.sim.restartRound();
     // Starts the dummy's loop (or the CPU's memory of the fight) over.
@@ -423,6 +446,7 @@ export class FightScene extends Phaser.Scene {
   quitToSelect(): void {
     this.sound.stopAll();
     this.scene.stop("round-result");
+    this.scene.stop("match-result");
     this.scene.start("character-select");
   }
 
@@ -443,13 +467,22 @@ export class FightScene extends Phaser.Scene {
 
   private showResult(state: FightState): void {
     this.waitingForResult = true;
+    if (state.round.phase === "matchOver") {
+      const data: MatchResultData = {
+        stats: this.stats.result,
+        winner: state.round.matchWinner ?? "draw",
+        entries: this.setup.entries,
+        inputs: this.setup.inputs,
+        prefixes: PREFIXES,
+      };
+      this.scene.launch("match-result", data);
+      return;
+    }
     const r = state.round;
     const names = this.setup.entries.map((e) => e.fighter.name);
     const data: RoundResultData = {
-      kind: state.round.phase === "matchOver" ? "match" : "round",
       roundNumber: r.roundNumber,
       roundWinner: r.roundWinner ?? "draw",
-      matchWinner: r.matchWinner,
       reason: r.roundEndReason ?? "ko",
       wins: r.wins,
       names: [names[0], names[1]],

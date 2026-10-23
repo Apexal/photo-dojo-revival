@@ -3,7 +3,8 @@ import { trimLeadingSilence } from "../../shared/audio-trim";
 import { SOFT_CUTS, frameGeometry, groundAnchorFor, variantCount, type FighterGeometry } from "../../shared/frame-data";
 import { LANDMARK, POSE_IDS, SOUND_IDS, SPRITE_CANVAS_SIZE, soundTakes, type Fighter, type PoseId, type SoundId } from "../../shared/fighter-model";
 import { torsoLength } from "../../shared/pose-geometry";
-import { allTweens, frameOf, idleSwayOf, tweenOf, type FrameTween } from "../../simulation/fight-simulation";
+import { shakenGrip, type HandshakeGrip } from "../../shared/handshake";
+import { allTweens, frameOf, handshakeShakeOf, idleSwayOf, tweenOf, type FrameTween } from "../../simulation/fight-simulation";
 import type { FighterState } from "../../simulation/fighter-state-machine";
 import { fallPose, hitShake, holdsStruckPose } from "./hit-feel";
 import { PoseTransitions } from "./pose-transitions";
@@ -100,7 +101,14 @@ export class FighterSpriteView {
   private depth = 0;
   private readonly lyingShapes = new Map<string, { turn: number; lift: (rotation: number, facing: 1 | -1) => number }>();
 
-  constructor(scene: Phaser.Scene, private readonly prefix: string, private readonly geometry: FighterGeometry, tint?: number) {
+  /** `grip`: the handshake as the round intro aims it (FightSimulation.grips); without it the hand doesn't shake. */
+  constructor(
+    scene: Phaser.Scene,
+    private readonly prefix: string,
+    private readonly geometry: FighterGeometry,
+    tint?: number,
+    private readonly grip?: HandshakeGrip,
+  ) {
     this.shadow = scene.add.ellipse(0, 0, 150, 22, 0x000000, 0.35);
     this.sprite = scene.add.image(0, 0, textureKey(prefix, "idle"));
     if (tint !== undefined) this.sprite.setTint(tint);
@@ -121,7 +129,7 @@ export class FighterSpriteView {
    */
   render(state: FighterState, frame: number, tweening = true): void {
     let tween: FrameTween | null = null;
-    if (tweening && this.tweener) tween = this.transitions.update(frame, frameOf(state), tweenOf(state), idleSwayOf(state));
+    if (tweening && this.tweener) tween = this.transitions.update(frame, frameOf(state), tweenOf(state) ?? (this.grip ? handshakeShakeOf(state, this.grip.offeredAt) : null), idleSwayOf(state));
     else this.transitions.reset();
     const p = worldToScreen(state.position);
     p.x += hitShake(state, frame);
@@ -212,6 +220,7 @@ export class FighterSpriteView {
     return [
       ...allTweens(),
       { from: { poseId: "idle", variant: 0 }, to: { poseId: "idle", variant: 1 } }, // the idle sway
+      { from: { poseId: "handshake", variant: 1 }, to: { poseId: "handshake", variant: 2 } }, // the intro's shake
       ...SOFT_CUTS.flatMap((cut) => versions(cut.from).flatMap((from) => versions(cut.to).map((to) => ({ from, to })))),
     ];
   }
@@ -231,9 +240,16 @@ export class FighterSpriteView {
 
   /**
    * A capture's landmarks, anchor and alpha mask (read back from its loaded
-   * texture). A fighter from before the second stance gets a stand-in for it.
+   * texture). A fighter from before the second stance gets a stand-in for it;
+   * the shaking hand is the handshake capture warped onto a raised (variant 1)
+   * and a lowered (variant 2) hand.
    */
   private tweenSource(frame: FrameRef): TweenSource | null {
+    if (frame.poseId === "handshake" && frame.variant > 0) {
+      const grip = this.grip;
+      const capture = grip && this.tweenSource({ poseId: "handshake", variant: 0 });
+      return capture ? { ...capture, landmarks: shakenGrip(grip, frame.variant === 1 ? -1 : 1), standIn: true } : null;
+    }
     if (frame.variant > 0 && !this.geometry.variants?.[frame.poseId]?.[frame.variant - 1]) {
       if (frame.poseId !== "idle" || frame.variant !== 1) return null;
       const stance = this.tweenSource({ poseId: "idle", variant: 0 });

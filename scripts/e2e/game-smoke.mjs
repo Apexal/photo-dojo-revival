@@ -118,7 +118,17 @@ try {
   await game.waitForTimeout(100);
   await game.screenshot({ path: `${OUT}/03-picking.png` });
   await game.keyboard.press("Comma"); // P2 ready
+  // VS, then the stage select (there's more than one stage): P2 moves to the second stage and picks it.
+  await game.waitForFunction(() => window.photoDojo.scene.isActive("stage-select"), null, { timeout: 10000 });
+  await game.waitForTimeout(150);
+  await game.keyboard.press("ArrowRight");
+  await game.waitForTimeout(100);
+  const stagePicked = await game.evaluate(() => { const s = window.photoDojo.scene.getScene("stage-select"); return s.options[s.index]; });
+  await game.screenshot({ path: `${OUT}/03a-stage-select.png` });
+  await game.keyboard.press("Comma");
   await game.waitForFunction(() => window.photoDojo.scene.isActive("controls"), null, { timeout: 10000 });
+  check((await game.evaluate(() => window.photoDojo.scene.getScene("controls").setup.stageId)) === stagePicked, `the picked stage (${stagePicked}) goes into the match`);
+  step(`stage select: picked ${stagePicked}`);
   await game.waitForTimeout(1200); // let the move previews animate
   await game.screenshot({ path: `${OUT}/03b-controls.png` });
   const cards = await game.evaluate(() => window.photoDojo.scene.getScene("controls").cards.length);
@@ -203,11 +213,12 @@ try {
   await game.screenshot({ path: `${OUT}/07-round-result.png` });
   await game.waitForTimeout(800);
   await game.keyboard.press("j");
+  // Well before the screen's own 3.5 s auto-continue: the press has to work.
   await game.waitForFunction(() => {
     const s = window.photoDojo.scene.getScene("fight").sim.current.round;
     return s.roundNumber === 2 && !window.photoDojo.scene.isActive("round-result");
-  }, null, { timeout: 5000 });
-  step("round 2 started");
+  }, null, { timeout: 1500 });
+  step("punch on the round result → round 2 started");
 
   // New moves through the real keyboard: S+J uppercut, J+K throw.
   await game.waitForFunction(() => window.photoDojo.scene.getScene("fight").sim.current.round.phase === "fighting", null, { timeout: 5000 });
@@ -239,6 +250,36 @@ try {
   await game.waitForFunction((hp) => window.photoDojo.scene.getScene("fight").sim.current.fighters[1].health < hp, before, { timeout: 3000 });
   step("J+K throw lands on the idle opponent");
 
+  // --- finish the match (P2 down to 1 health: the next clean hit is the KO) → stats page → rematch ---
+  await game.evaluate(() => {
+    const sim = window.photoDojo.scene.getScene("fight").sim; // poking the private state: only to keep the test short
+    sim.state = { ...sim.state, fighters: [sim.state.fighters[0], { ...sim.state.fighters[1], health: 1 }] };
+  });
+  const phaseNow = () => game.evaluate(() => window.photoDojo.scene.getScene("fight").sim.current.round.phase);
+  for (let i = 0; i < 60 && (await phaseNow()) === "fighting"; i++) {
+    await game.keyboard.down(toward);
+    await game.waitForTimeout(120);
+    await game.keyboard.up(toward);
+    await game.keyboard.press("j");
+    await game.waitForTimeout(200);
+  }
+  await game.waitForFunction(() => window.photoDojo.scene.getScene("fight").sim.current.round.phase === "matchOver", null, { timeout: 15000 });
+  await game.waitForTimeout(2500);
+  await game.keyboard.press("j"); // skip the KO replay
+  await game.waitForFunction(() => window.photoDojo.scene.isActive("match-result"), null, { timeout: 8000 });
+  const matchStats = await game.evaluate(() => window.photoDojo.scene.getScene("match-result").result.stats);
+  check(matchStats.rounds.length === 2 && matchStats.players[0].roundsWon === 2, `stats page: P1 won both rounds (${JSON.stringify(matchStats.rounds)})`);
+  check(matchStats.players[0].hits > 0 && matchStats.players[0].throws >= 1 && matchStats.players[0].damageDealt === 200, `stats page counts P1's hits, throw and damage (${JSON.stringify(matchStats.players[0])})`);
+  await game.waitForTimeout(1300); // past the page's input delay
+  await game.screenshot({ path: `${OUT}/08-match-result.png` });
+  await game.keyboard.press("j");
+  await game.waitForFunction(() => {
+    const r = window.photoDojo.scene.getScene("fight").sim?.current.round;
+    return !window.photoDojo.scene.isActive("match-result") && r?.roundNumber === 1 && r.wins[0] === 0 && r.wins[1] === 0;
+  }, null, { timeout: 3000 });
+  step(`match over → stats page (${matchStats.players[0].hits} clean hits, ${matchStats.players[0].throws} throw) → punch: rematch`);
+  await game.waitForFunction(() => window.photoDojo.scene.getScene("fight").sim.current.round.phase === "fighting", null, { timeout: 5000 });
+
   // --- practice mode: quit to select (pause menu: up from Resume wraps to Quit), one player readies and presses punch again ---
   await game.keyboard.press("Escape");
   await game.waitForTimeout(150);
@@ -262,6 +303,8 @@ try {
   const stepTo = async (label, until) => {
     await game.keyboard.press("j");
     await game.waitForFunction(until, null, { timeout: 3000 }).catch(async () => { throw new Error(`practice entry stuck at "${label}": players ${await selectState()}`); });
+    // A player's first frame ignores input (Phaser replays the joining key press), so leave a few frames between presses.
+    await game.waitForTimeout(80);
   };
   await game.evaluate(() => {
     window.__keys = [];
@@ -269,7 +312,8 @@ try {
   });
   await stepTo("join", () => !!window.photoDojo.scene.getScene("character-select").players[0]);
   await stepTo("pick", () => window.photoDojo.scene.getScene("character-select").players[0]?.ready === true);
-  await stepTo("practice", () => window.photoDojo.scene.isActive("fight"));
+  await stepTo("practice", () => window.photoDojo.scene.isActive("stage-select"));
+  await stepTo("stage", () => window.photoDojo.scene.isActive("fight"));
   await game.waitForFunction(() => window.photoDojo.scene.getScene("fight")?.sim?.practice === true && window.photoDojo.scene.isActive("fight"), null, { timeout: 8000 });
   await game.waitForFunction(() => window.photoDojo.scene.getScene("fight").sim.current.round.phase === "fighting", null, { timeout: 5000 });
   check((await game.evaluate(() => window.photoDojo.scene.getScene("fight").dummy.behavior)) === "cpuEasy", "practice opens against the easy CPU");
@@ -341,21 +385,21 @@ try {
   await inject(["idle", "idle-2", "walk", "block", "crouch"]);
   await cap.reload();
   await cap.getByText("Pick up where you left off?").waitFor({ timeout: 10000 });
-  check((await cap.textContent(".resume")).includes("5 of 14"), "resume card shows progress");
+  check((await cap.textContent(".resume")).includes("5 of 15"), "resume card shows progress");
   await cap.getByText("Resume", { exact: true }).click();
   await cap.getByText("Start camera").click();
-  await cap.waitForFunction(() => document.querySelector("[data-hud=step]")?.textContent?.startsWith("6 / 14"), null, { timeout: 60000 });
-  step("draft survived a reload: resumed at pose 6 / 14");
+  await cap.waitForFunction(() => document.querySelector("[data-hud=step]")?.textContent?.startsWith("6 / 15"), null, { timeout: 60000 });
+  step("draft survived a reload: resumed at pose 6 / 15");
 
   // Fill in the rest and drive the remaining capture UI.
-  await inject(["punch", "punch-2", "kick", "kick-2", "jump", "hurt", "hurt-2", "win", "win-2"]);
+  await inject(["punch", "punch-2", "kick", "kick-2", "jump", "hurt", "hurt-2", "win", "win-2", "handshake"]);
   await cap.evaluate(() => {
     const app = window.photoDojoCapture;
     app.stopLive();
     app.flow = { ...app.flow, screen: { name: "review" } };
     app.render();
   });
-  check((await cap.locator(".strip img").count()) === 14, "review strip shows all 14 poses");
+  check((await cap.locator(".strip img").count()) === 15, "review strip shows all 15 poses");
   await cap.getByText("Looks good").click();
   await cap.getByText("Battle cry").waitFor();
   await cap.getByText("Skip this one").click();
