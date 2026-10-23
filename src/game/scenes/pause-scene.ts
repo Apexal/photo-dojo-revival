@@ -4,6 +4,7 @@ import { isPlayerInput } from "../input/input-descriptor";
 import { MenuInput } from "../input/menu-input";
 import { getOptions } from "../options";
 import { Menu } from "../render/menu";
+import { SERIES_INFO } from "../series";
 import { GAME_HEIGHT, GAME_WIDTH } from "../render/stage";
 import type { FightScene } from "./fight-scene";
 
@@ -46,7 +47,7 @@ export class PauseScene extends Phaser.Scene {
       { label: () => "Controls", onConfirm: () => this.showControls(true) },
       { label: () => "Settings", onConfirm: () => this.openSettings() },
       { label: () => (practice ? "Reset positions" : "Restart round"), onConfirm: () => this.fight.restartRound(), disabled: () => this.fight.disconnectedPlayer !== null },
-      { label: () => (this.fight.isTournament ? "Quit to the bracket" : "Quit to fighter select"), onConfirm: () => this.fight.quitToSelect() },
+      { label: () => (this.fight.series ? `Quit to ${SERIES_INFO[this.fight.series].home}` : "Quit to fighter select"), onConfirm: () => this.fight.quitToSelect() },
     ], { width: 420 });
     this.hint = this.add.text(GAME_WIDTH / 2, GAME_HEIGHT - 60, "", { fontSize: "17px", color: "#a8a196" }).setOrigin(0.5);
     const hint = this.hint;

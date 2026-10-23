@@ -12,7 +12,7 @@ import { GAME_HEIGHT, GAME_WIDTH, PLAYER_COLORS } from "../render/stage";
 import { MIRROR_TINT } from "./controls-scene";
 import { REGISTRY } from "./boot-scene";
 import type { FightScene } from "./fight-scene";
-import type { TournamentSession } from "./tournament-scene";
+import { SERIES_INFO, recordSeriesResult, type SeriesKind, type SeriesSession } from "../series";
 
 export interface MatchResultData {
   stats: MatchStats;
@@ -21,8 +21,8 @@ export interface MatchResultData {
   inputs: [InputDescriptor, InputDescriptor];
   /** The fight scene's texture prefixes for each fighter's poses. */
   prefixes: readonly [string, string];
-  /** A tournament match: the winner goes on in the bracket (a draw is played again). */
-  tournament?: boolean;
+  /** A series match (tournament, king of the hill): the result goes on to it (a draw is played again). */
+  series?: SeriesKind;
 }
 
 /** Long enough that mashing through the KO doesn't skip the page. */
@@ -56,8 +56,8 @@ const ROWS: Row[] = [
  * End of a match: who won and how. Each fighter large (the winner in their
  * victory pose), a side-by-side stats table with the better number of each row
  * picked out, and how each round went. Punch (or the button) for a rematch,
- * kick for fighter select. In a tournament, either goes on to the bracket
- * instead (or replays a draw). Runs over the stopped fight.
+ * kick for fighter select. In a series, either goes on to the bracket / the
+ * hill instead (or replays a draw). Runs over the stopped fight.
  */
 export class MatchResultScene extends Phaser.Scene {
   private result!: MatchResultData;
@@ -171,8 +171,8 @@ export class MatchResultScene extends Phaser.Scene {
       t.on("pointerdown", onClick);
       return t;
     };
-    if (this.result.tournament) {
-      button(cx, this.result.winner === "draw" ? "Play it again  (punch)" : "To the bracket  (punch)", true, () => this.rematch());
+    if (this.result.series) {
+      button(cx, `${this.result.winner === "draw" ? "Play it again" : SERIES_INFO[this.result.series].next}  (punch)`, true, () => this.rematch());
       return;
     }
     button(cx - 170, "Rematch  (punch)", true, () => this.rematch());
@@ -185,17 +185,17 @@ export class MatchResultScene extends Phaser.Scene {
 
   private rematch(): void {
     if (this.leaving) return;
-    if (this.result.tournament && this.result.winner !== "draw") return this.advanceTournament();
+    if (this.result.series && this.result.winner !== "draw") return this.advanceSeries();
     this.leaving = true;
     this.scene.stop();
     this.fight.rematch();
   }
 
-  /** The winner moves on; back to the bracket. */
-  private advanceTournament(): void {
+  /** The result counts in the series; back to its scene. */
+  private advanceSeries(): void {
     this.leaving = true;
-    const session: TournamentSession | undefined = this.registry.get(REGISTRY.tournament);
-    if (session && this.result.winner !== "draw") session.bracket.record(this.result.winner);
+    const session: SeriesSession | undefined = this.registry.get(REGISTRY.series);
+    if (session && this.result.winner !== "draw") recordSeriesResult(session, this.result.winner);
     this.fight.quitToSelect();
   }
 
@@ -212,7 +212,7 @@ export class MatchResultScene extends Phaser.Scene {
     this.previous = now;
     if (!ready) return;
     const pressed = (k: keyof InputFrame) => now.some((f, i) => f[k] && !before[i][k]);
-    if (pressed("punch") || (this.result.tournament && pressed("kick"))) this.rematch();
+    if (pressed("punch") || (this.result.series && pressed("kick"))) this.rematch();
     else if (pressed("kick")) this.quit();
   }
 }

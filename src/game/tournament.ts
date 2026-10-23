@@ -19,9 +19,6 @@ export interface NextMatch {
   b: number;
 }
 
-export const MIN_ENTRANTS = 3;
-export const MAX_ENTRANTS = 8;
-
 /** 1-based seeds in bracket order, so seeds 1 and 2 can only meet in the final: [1, 8, 4, 5, 2, 7, 3, 6] for 8. */
 export function seedOrder(size: number): number[] {
   let seeds = [1];

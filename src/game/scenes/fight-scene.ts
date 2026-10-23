@@ -35,6 +35,7 @@ import { stopMenuMusic } from "../menu-music";
 import { controlLabels } from "../input/control-labels";
 import { markPlayed } from "../played-fighters";
 import { NUDGES, TUTORIAL_STEPS, Tutorial, type TutorialEvent } from "../tutorial";
+import type { SeriesKind } from "../series";
 
 export interface FightSceneData {
   entries: [LibraryEntry, LibraryEntry];
@@ -45,13 +46,13 @@ export interface FightSceneData {
   tutorial?: boolean;
   /** StageDefinition id (stages/stages.ts); the default stage when missing or unknown. */
   stageId?: string;
-  /** A match of the tournament in the registry (tournament-scene.ts): it ends back at the bracket. */
-  tournament?: boolean;
+  /** A match of the series in the registry (series.ts): it ends back at that series' scene. */
+  series?: SeriesKind;
 }
 
-/** Where backing out of a match (or its lead-up) goes: the bracket in a tournament, else fighter select. */
+/** Where backing out of a match (or its lead-up) goes: the series' scene (the bracket, the hill), else fighter select. */
 export function menuSceneFor(data: FightSceneData): string {
-  return data.tournament ? "tournament" : "character-select";
+  return data.series ?? "character-select";
 }
 
 const STEP_MS = 1000 / 60;
@@ -455,8 +456,8 @@ export class FightScene extends Phaser.Scene {
     return Boolean(this.setup.practice);
   }
 
-  get isTournament(): boolean {
-    return Boolean(this.setup.tournament);
+  get series(): SeriesKind | undefined {
+    return this.setup.series;
   }
 
   get playerInfo(): { inputs: [PlayerInputDescriptor, InputDescriptor]; names: [string, string] } {
@@ -596,7 +597,7 @@ export class FightScene extends Phaser.Scene {
         entries: this.setup.entries,
         inputs: this.setup.inputs,
         prefixes: PREFIXES,
-        tournament: this.setup.tournament,
+        series: this.setup.series,
       };
       this.scene.launch("match-result", data);
       return;

@@ -12,7 +12,8 @@ import { MatchResultScene } from "./scenes/match-result-scene";
 import { StageSelectScene } from "./scenes/stage-select-scene";
 import { TitleScene } from "./scenes/title-scene";
 import { TournamentScene } from "./scenes/tournament-scene";
-import { TournamentSetupScene } from "./scenes/tournament-setup-scene";
+import { KingOfTheHillScene } from "./scenes/king-of-the-hill-scene";
+import { SeriesSetupScene } from "./scenes/series-setup-scene";
 
 /**
  * Phaser keeps gamepads in an array indexed by pad number, so a controller at
@@ -48,7 +49,7 @@ gatePhones(() => {
     input: { gamepad: true, keyboard: true },
     audio: { disableWebAudio: false },
     // Overlays last so they draw on top.
-    scene: [BootScene, TitleScene, CharacterSelectScene, TournamentSetupScene, TournamentScene, StageSelectScene, ControlsScene, FightScene, RoundResultScene, MatchResultScene, PauseScene, SettingsScene],
+    scene: [BootScene, TitleScene, CharacterSelectScene, SeriesSetupScene, TournamentScene, KingOfTheHillScene, StageSelectScene, ControlsScene, FightScene, RoundResultScene, MatchResultScene, PauseScene, SettingsScene],
   });
 
   // Handy for debugging from the console.

@@ -2,20 +2,17 @@ import Phaser from "phaser";
 import type { InputFrame } from "../../simulation/input-frame";
 import type { LibraryEntry } from "../fighter-library";
 import { gameSoundKey, type GameSoundId } from "../game-sounds";
-import { createInputSource, type PlayerInputDescriptor } from "../input/input-descriptor";
+import { createInputSource } from "../input/input-descriptor";
 import type { InputSource } from "../input/input-source";
 import { playMenuMusic } from "../menu-music";
 import { getOptions } from "../options";
 import { GAME_HEIGHT, GAME_WIDTH } from "../render/stage";
 import type { Tournament } from "../tournament";
+import type { SeriesSession } from "../series";
 import { REGISTRY } from "./boot-scene";
 import { startMatch } from "./stage-select-scene";
 
-/** The tournament in progress, kept in the registry between its matches. */
-export interface TournamentSession {
-  bracket: Tournament<LibraryEntry>;
-  inputs: [PlayerInputDescriptor, PlayerInputDescriptor];
-}
+type TournamentSession = Extract<SeriesSession, { kind: "tournament" }>;
 
 const PLAYER_CSS = ["#e8483b", "#3f86f0"];
 const INPUT_DELAY_MS = 500;
@@ -52,8 +49,8 @@ export class TournamentScene extends Phaser.Scene {
   }
 
   create(): void {
-    const session: TournamentSession | undefined = this.registry.get(REGISTRY.tournament);
-    if (!session) {
+    const session: SeriesSession | undefined = this.registry.get(REGISTRY.series);
+    if (session?.kind !== "tournament") {
       this.scene.start("character-select");
       return;
     }
@@ -180,13 +177,13 @@ export class TournamentScene extends Phaser.Scene {
     this.leaving = true;
     this.playEffect("hit", 0.6);
     const { entrants } = this.session.bracket;
-    startMatch(this, { entries: [entrants[next.a], entrants[next.b]], inputs: [...this.session.inputs], tournament: true });
+    startMatch(this, { entries: [entrants[next.a], entrants[next.b]], inputs: [...this.session.inputs], series: "tournament" });
   }
 
   private quit(): void {
     if (this.leaving) return;
     this.leaving = true;
-    this.registry.remove(REGISTRY.tournament);
+    this.registry.remove(REGISTRY.series);
     this.scene.start("character-select");
   }
 

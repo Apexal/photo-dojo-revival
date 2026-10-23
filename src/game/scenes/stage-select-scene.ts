@@ -31,7 +31,7 @@ function startWithStage(scene: Phaser.Scene, data: FightSceneData): void {
 /**
  * Stage select: the highlighted stage fills the screen behind its name.
  * Either player moves (left / right) and confirms (punch); kick goes back to
- * fighter select (or the tournament bracket). Starts on the last stage picked this session.
+ * fighter select (or the series: the bracket, the hill). Starts on the last stage picked this session.
  */
 export class StageSelectScene extends Phaser.Scene {
   private setup!: FightSceneData;
