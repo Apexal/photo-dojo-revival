@@ -22,7 +22,7 @@ import { gameSoundKey, type GameSoundId } from "../game-sounds";
 import { getOptions, setOption } from "../options";
 import { HitboxDebugView } from "../render/hitbox-debug-view";
 import { LOW_HEALTH, clockCue, clockTicked, lowHealthPulse } from "../render/hud-cues";
-import { GAME_HEIGHT, GAME_WIDTH, worldToScreen } from "../render/stage";
+import { GAME_HEIGHT, GAME_WIDTH, PLAYER_COLORS, worldToScreen } from "../render/stage";
 import { stageFor, type StageDefinition } from "../stages/stages";
 import { playStageMusic, preloadStage, stopStageMusic, updateStageMusicVolume } from "../stages/stage-music";
 import { REGISTRY } from "./boot-scene";
@@ -30,6 +30,7 @@ import { MIRROR_TINT } from "./controls-scene";
 import type { RoundResultData } from "./round-result-scene";
 import type { MatchResultData } from "./match-result-scene";
 import { MatchStatsTracker } from "../../simulation/match-stats";
+import { CalloutTracker, calloutText, type Callout } from "../../simulation/callouts";
 import { stopMenuMusic } from "../menu-music";
 import { controlLabels } from "../input/control-labels";
 import { markPlayed } from "../played-fighters";
@@ -73,6 +74,12 @@ export class FightScene extends Phaser.Scene {
   private views: FighterSpriteView[] = [];
   /** For the end-of-match stats page. */
   private stats = new MatchStatsTracker();
+  /** FIRST BLOOD, N HIT COMBO, PERFECT. */
+  private callouts = new CalloutTracker({ match: true });
+  /** Per player, under their health bar: first blood and combos. */
+  private calloutTexts: Phaser.GameObjects.Text[] = [];
+  /** Under the center banner, after the K.O. */
+  private perfectText!: Phaser.GameObjects.Text;
   private stage!: StageDefinition;
   /** The stage's soundtrack (null if it has none). */
   private music: Phaser.Sound.BaseSound | null = null;
@@ -117,6 +124,7 @@ export class FightScene extends Phaser.Scene {
     this.shownHealth = [MAX_HEALTH, MAX_HEALTH];
     this.views = [];
     this.stats = new MatchStatsTracker(); // a rematch restarts the scene: fresh stats
+    this.callouts = new CalloutTracker({ match: !data.practice });
     this.sounds = [];
     this.replayBuffer = new ReplayBuffer<FightState>();
     this.replay = null;
@@ -163,6 +171,14 @@ export class FightScene extends Phaser.Scene {
     this.bannerText = this.add.text(GAME_WIDTH / 2, GAME_HEIGHT / 2 - 80, "", {
       fontSize: "96px", color: "#f2c14e", fontStyle: "bold", stroke: "#121018", strokeThickness: 10,
     }).setOrigin(0.5).setDepth(200);
+    const callout = { fontSize: "40px", fontStyle: "bold", stroke: "#121018", strokeThickness: 7 };
+    this.calloutTexts = [0, 1].map((i) => {
+      const color = `#${PLAYER_COLORS[i].toString(16).padStart(6, "0")}`;
+      return this.add.text(i === 0 ? 40 : GAME_WIDTH - 40, 150, "", { ...callout, color }).setOrigin(i === 0 ? 0 : 1, 0.5).setDepth(200).setVisible(false);
+    });
+    this.perfectText = this.add.text(GAME_WIDTH / 2, GAME_HEIGHT / 2 + 20, "", {
+      fontSize: "64px", color: "#f3efe6", fontStyle: "bold", stroke: "#121018", strokeThickness: 9,
+    }).setOrigin(0.5).setDepth(200).setVisible(false);
 
     // Pause-menu shortcut (also in Settings).
     this.input.keyboard!.on("keydown-R", () => {
@@ -200,6 +216,7 @@ export class FightScene extends Phaser.Scene {
     this.camera = new FightCamera();
     this.camera.snap(this.sim.current.fighters.map((f) => worldToScreen(f.position)));
     this.handleEvents(this.sim.current);
+    this.showCallouts(this.callouts.record(this.sim.current));
     this.renderState(this.sim.current);
   }
 
@@ -353,6 +370,7 @@ export class FightScene extends Phaser.Scene {
       if (!this.setup.practice && clockTicked(before.round, state.round)) this.playEffect("tick", 0.7);
       this.replayBuffer.push(state);
       this.stats.record(state);
+      this.showCallouts(this.callouts.record(state));
       if (state.events.some((e) => e.type === "ko")) this.replayBuffer.markFinish();
       this.handleEvents(state);
       if (this.tutorial) this.handleTutorial(this.tutorial.update(state));
@@ -386,6 +404,7 @@ export class FightScene extends Phaser.Scene {
       this.add.text(GAME_WIDTH - 40, GAME_HEIGHT - 42, "Press any button to skip", { fontSize: "18px", color: "#c9c3b8" }).setOrigin(1, 0).setDepth(401),
     ];
     this.bannerText.setVisible(false);
+    [...this.calloutTexts, this.perfectText].forEach((t) => { this.tweens.killTweensOf(t); t.setVisible(false); });
     // Players are often still mashing from the knockout: ignore input for the first second.
     this.replaySkipArmedAt = performance.now() + 1000;
     this.replayPrevious = this.sources.map((src) => src.read());
@@ -470,6 +489,7 @@ export class FightScene extends Phaser.Scene {
     this.accumulator = 0;
     this.maskHeldButtons();
     this.handleEvents(this.sim.current);
+    this.showCallouts(this.callouts.record(this.sim.current));
     this.renderState(this.sim.current);
   }
 
@@ -549,6 +569,7 @@ export class FightScene extends Phaser.Scene {
     this.waitingForResult = false;
     this.accumulator = 0;
     this.handleEvents(this.sim.current);
+    this.showCallouts(this.callouts.record(this.sim.current));
   }
 
   rematch(): void {
@@ -605,6 +626,24 @@ export class FightScene extends Phaser.Scene {
   private banner(text: string, ms: number): void {
     this.bannerText.setText(text).setVisible(true);
     this.bannerUntil = performance.now() + ms;
+  }
+
+  /** Pops the text in, holds it, fades it. A bigger combo replaces the smaller one in place. */
+  private showCallouts(callouts: Callout[]): void {
+    for (const c of callouts) {
+      const perfect = c.type === "perfect";
+      const text = perfect ? this.perfectText : this.calloutTexts[c.player];
+      this.tweens.killTweensOf(text);
+      text.setText(calloutText(c)).setAlpha(perfect ? 0 : 1).setScale(1.4).setVisible(true);
+      this.tweens.chain({
+        targets: text,
+        tweens: [
+          // PERFECT waits for the K.O. banner to land first, and is gone before the replay.
+          { alpha: 1, scale: 1, duration: 160, ease: "Back.easeOut", delay: perfect ? 500 : 0 },
+          { alpha: 0, duration: 300, delay: perfect ? 1000 : 900, onComplete: () => text.setVisible(false) },
+        ],
+      });
+    }
   }
 
   private rumbles = [new RumbleScheduler(), new RumbleScheduler()];

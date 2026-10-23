@@ -54,6 +54,35 @@ const emptyStats = (): PlayerStats => ({
 const reeling = (action: string) => action === "hurt" || action === "knockdown" || action === "downed";
 
 /**
+ * Clean hits in a row before the defender recovers. Call `hit` for each clean
+ * hit in a state's events, then `settle` with that state.
+ */
+export class ComboCounter {
+  private readonly combo: [number, number] = [0, 0];
+  /** Per defender: still in hitstun from the attacker's last clean hit. */
+  private readonly open: [boolean, boolean] = [false, false];
+
+  /** A clean hit by `attacker`: the combo it's now on (1 for a fresh hit). */
+  hit(attacker: PlayerIndex): number {
+    this.combo[attacker] = this.open[other(attacker)] ? this.combo[attacker] + 1 : 1;
+    return this.combo[attacker];
+  }
+
+  /** A blocked hit ends the attacker's combo. */
+  blocked(attacker: PlayerIndex): void {
+    this.combo[attacker] = 0;
+  }
+
+  /** After a state's events: a combo is open while the defender is still reeling; it closes the moment they recover. */
+  settle(state: FightState): void {
+    for (const p of [0, 1] as const) {
+      this.open[p] = reeling(state.fighters[p].action);
+      if (!this.open[p]) this.combo[other(p)] = 0;
+    }
+  }
+}
+
+/**
  * Builds MatchStats from the fight as it's played: feed it every state the
  * simulation steps to (not replays), in order. Rendering-free and
  * deterministic, like the simulation it reads.
@@ -63,9 +92,7 @@ export class MatchStatsTracker {
   private readonly rounds: RoundSummary[] = [];
   private frames = 0;
   private roundFrames = 0;
-  private readonly combo: [number, number] = [0, 0];
-  /** Per defender: still in hitstun from the attacker's last clean hit. */
-  private readonly open: [boolean, boolean] = [false, false];
+  private readonly combo = new ComboCounter();
   private readonly landed: [Map<AttackId, number>, Map<AttackId, number>] = [new Map(), new Map()];
 
   record(state: FightState): void {
@@ -83,12 +110,11 @@ export class MatchStatsTracker {
           if (ev.blocked) {
             attacker.blockedByOpponent++;
             this.players[ev.defender].blocks++;
-            this.combo[ev.attacker] = 0;
+            this.combo.blocked(ev.attacker);
             break;
           }
           attacker.hits++;
-          this.combo[ev.attacker] = this.open[ev.defender] ? this.combo[ev.attacker] + 1 : 1;
-          attacker.longestCombo = Math.max(attacker.longestCombo, this.combo[ev.attacker]);
+          attacker.longestCombo = Math.max(attacker.longestCombo, this.combo.hit(ev.attacker));
           const counts = this.landed[ev.attacker];
           counts.set(ev.attack, (counts.get(ev.attack) ?? 0) + 1);
           attacker.favoriteMove = [...counts].sort((a, b) => b[1] - a[1])[0][0];
@@ -118,12 +144,8 @@ export class MatchStatsTracker {
         }
       }
     }
+    this.combo.settle(state);
     // Damage: what came off each fighter's health this step (hits, throws), credited to the other.
-    for (const p of [0, 1] as const) {
-      // A combo is open while the defender is still reeling; it closes the moment they recover.
-      this.open[p] = reeling(state.fighters[p].action);
-      if (!this.open[p]) this.combo[other(p)] = 0;
-    }
     this.trackDamage(state);
   }
 
