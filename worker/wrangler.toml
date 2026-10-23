@@ -8,7 +8,7 @@ compatibility_date = "2025-09-01"
 # With TURN on, also set ALLOWED_ORIGINS (the site's origins, comma-separated, e.g.
 # "https://photo-dojo.pages.dev") so other sites can't mint credentials on your account:
 # [vars]
-# ALLOWED_ORIGINS = "https://photo-dojo.pages.dev"
+# ALLOWED_ORIGINS = "https://photo-dojo.matrangacode.works"
 
 [[durable_objects.bindings]]
 name = "SIGNALING_ROOM"
