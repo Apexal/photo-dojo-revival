@@ -6,7 +6,7 @@ import { GRAVITY, JUMP_IMPULSE, createFighterState, isAttack } from "../../simul
 import type { InputFrame } from "../../simulation/input-frame";
 import { geometryOf } from "../fighter-library";
 import { GRAB_TIPS, GUARD_TIPS, controlLabels, deviceName, moveGuide } from "../input/control-labels";
-import { createInputSource, isPlayerInput, type PlayerInputDescriptor } from "../input/input-descriptor";
+import { createInputSource, describeInput, isPlayerInput, type PlayerInputDescriptor } from "../input/input-descriptor";
 import type { InputSource } from "../input/input-source";
 import { fighterTextureKeys, preloadFighterTextures, textureKey } from "../render/fighter-sprite-view";
 import { GAME_HEIGHT, GAME_WIDTH } from "../render/stage";
@@ -61,6 +61,8 @@ export class ControlsScene extends Phaser.Scene {
   private geometry: FighterGeometry[] = [];
   private cards: Card[] = [];
   private sources: InputSource[] = [];
+  /** Which player each source is (the CPU has none). */
+  private seats: (0 | 1)[] = [];
   private previous: InputFrame[] = [];
   private ready: [boolean, boolean] = [false, false];
   private readyTexts: Phaser.GameObjects.Text[] = [];
@@ -75,7 +77,8 @@ export class ControlsScene extends Phaser.Scene {
   init(data: FightSceneData): void {
     this.setup = data;
     this.cards = [];
-    this.ready = [false, false];
+    // The CPU is always ready.
+    this.ready = [!isPlayerInput(data.inputs[0]), !isPlayerInput(data.inputs[1])];
     this.frame = 0;
   }
 
@@ -87,7 +90,8 @@ export class ControlsScene extends Phaser.Scene {
     stopMenuMusic(this);
     this.openedAt = performance.now();
     this.geometry = this.setup.entries.map((e) => geometryOf(e.fighter));
-    this.sources = this.setup.inputs.filter(isPlayerInput).map((d) => createInputSource(this, d));
+    this.seats = ([0, 1] as const).filter((i) => isPlayerInput(this.setup.inputs[i]));
+    this.sources = this.seats.map((i) => createInputSource(this, this.setup.inputs[i] as PlayerInputDescriptor));
     this.previous = this.sources.map((s) => s.read());
     this.add.text(GAME_WIDTH / 2, 22, "HOW TO FIGHT", { fontSize: "40px", fontStyle: "bold", color: "#f2c14e" }).setOrigin(0.5, 0);
     this.add.rectangle(GAME_WIDTH / 2, 90, 2, GAME_HEIGHT - 150, 0x3a3346).setOrigin(0.5, 0);
@@ -104,11 +108,12 @@ export class ControlsScene extends Phaser.Scene {
   private buildHalf(player: number): void {
     const left = player === 0;
     const x0 = left ? 30 : GAME_WIDTH / 2 + 30;
-    const input = this.setup.inputs[player] as PlayerInputDescriptor; // this screen is only shown for two players
-    const labels = controlLabels(input, left ? "left" : "right");
+    const input = this.setup.inputs[player];
+    // The CPU's half shows its moves, without buttons.
+    const labels = isPlayerInput(input) ? controlLabels(input, left ? "left" : "right") : null;
     const name = this.setup.entries[player].fighter.name;
     this.add.text(x0, 84, `P${player + 1} · ${name}`, { fontSize: "26px", fontStyle: "bold", color: PLAYER_CSS[player] });
-    this.add.text(x0, 116, deviceName(input), { fontSize: "16px", color: "#c9c3b8" });
+    this.add.text(x0, 116, isPlayerInput(input) ? deviceName(input) : describeInput(input), { fontSize: "16px", color: "#c9c3b8" });
 
     moveGuide(this.setup.entries[player].fighter.archetype).forEach((move, i) => {
       const cx = x0 + (i % COLS) * (CARD_W + 6);
@@ -122,7 +127,7 @@ export class ControlsScene extends Phaser.Scene {
       if (!left && this.setup.entries[0].fighter.fighterId === this.setup.entries[1].fighter.fighterId) sprite.setTint(MIRROR_TINT);
       this.cards.push({ sprite, action: move.action, player, baseY, frames: loopFrames(move.action), offset: i * STAGGER_FRAMES });
       fitWidth(this.add.text(cx + 6, cy + 4, move.name, { fontSize: "15px", fontStyle: "bold", color: "#f3efe6" }), CARD_W - 12);
-      fitWidth(this.add.text(cx + CARD_W / 2, cy + CARD_H - 22, move.how(labels), {
+      fitWidth(this.add.text(cx + CARD_W / 2, cy + CARD_H - 22, labels ? move.how(labels) : "", {
         fontSize: "17px", fontStyle: "bold", color: "#f2c14e", align: "center",
       }).setOrigin(0.5), CARD_W - 8);
     });
@@ -132,7 +137,9 @@ export class ControlsScene extends Phaser.Scene {
   }
 
   private updateReadyText(player: number): void {
-    const punch = controlLabels(this.setup.inputs[player] as PlayerInputDescriptor, "left").punch;
+    const input = this.setup.inputs[player];
+    if (!isPlayerInput(input)) return void this.readyTexts[player].setText("READY!");
+    const punch = controlLabels(input, "left").punch;
     this.readyTexts[player].setText(this.ready[player] ? "READY!" : `Press ${punch} when ready`);
   }
 
@@ -142,14 +149,15 @@ export class ControlsScene extends Phaser.Scene {
 
     const now = this.sources.map((s) => s.read());
     const accepting = performance.now() - this.openedAt > INPUT_DELAY_MS;
-    now.forEach((f, i) => {
+    now.forEach((f, s) => {
       if (!accepting) return;
-      if (f.punch && !this.previous[i].punch && !this.ready[i]) {
+      const i = this.seats[s];
+      if (f.punch && !this.previous[s].punch && !this.ready[i]) {
         this.ready[i] = true;
         this.updateReadyText(i);
         announce(this, i === 0 ? "p1-ready" : "p2-ready");
       }
-      if (f.kick && !this.previous[i].kick) {
+      if (f.kick && !this.previous[s].kick) {
         if (this.ready[i]) {
           this.ready[i] = false;
           this.updateReadyText(i);

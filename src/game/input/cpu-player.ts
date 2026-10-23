@@ -18,6 +18,8 @@ import { createFighterState, currentAttackPhase, isAttack, isDown, isGrounded, t
 import { EMPTY_INPUT, type InputFrame } from "../../simulation/input-frame";
 
 export type CpuLevel = "easy" | "normal" | "hard";
+export const CPU_LEVEL_IDS: readonly CpuLevel[] = ["easy", "normal", "hard"];
+export const CPU_LEVEL_NAMES: Record<CpuLevel, string> = { easy: "Easy", normal: "Normal", hard: "Hard" };
 
 interface CpuTuning {
   /** Frames between something happening and the CPU seeing it. */

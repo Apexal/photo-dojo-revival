@@ -7,7 +7,7 @@ import { currentAttackPhase, isAttack, type FighterState } from "../../simulatio
 import type { InputFrame } from "../../simulation/input-frame";
 import { MAX_HEALTH, secondsRemaining, type PlayerIndex } from "../../simulation/round-rules";
 import { geometryOf, type LibraryEntry } from "../fighter-library";
-import { DUMMY_BEHAVIORS, DummyInputSource, nextCpuBehavior } from "../input/dummy-input-source";
+import { DUMMY_BEHAVIORS, DummyInputSource, cpuBehavior, nextCpuBehavior } from "../input/dummy-input-source";
 import { createInputSource, isPlayerInput, sameInput, type InputDescriptor, type PlayerInputDescriptor } from "../input/input-descriptor";
 import { PAD_BUTTON } from "../input/gamepad-input-source";
 import type { InputSource } from "../input/input-source";
@@ -42,7 +42,7 @@ import type { SeriesKind, SeriesSession } from "../series";
 
 export interface FightSceneData {
   entries: [LibraryEntry, LibraryEntry];
-  /** P2 is the training dummy in practice mode. */
+  /** P2 is the training dummy in practice mode, or the CPU (`{ kind: "cpu" }`) in a match against it. */
   inputs: [PlayerInputDescriptor, InputDescriptor];
   practice?: boolean;
   /** Practice that opens with the guided drill (tutorial.ts), then carries on as practice. */
@@ -159,7 +159,8 @@ export class FightScene extends Phaser.Scene {
       isPlayerInput(d) ? createInputSource(this, d) : (this.dummy = new DummyInputSource(this.sim, 1)),
     );
     // Practice opens against an easy CPU; 1–8 / Tab switch to the scripted dummies. The tutorial's dummy waits.
-    this.dummy?.setBehavior(this.tutorial ? "stand" : "cpuEasy");
+    const opponent = this.setup.inputs[1];
+    this.dummy?.setBehavior(opponent.kind === "cpu" ? cpuBehavior(opponent.level) : this.tutorial ? "stand" : "cpuEasy");
     void Promise.all(this.setup.entries.map((e, i) => loadFighterSounds(this, e.fighter, PREFIXES[i]))).then((s) => { this.sounds = s; });
 
     this.stage = stageFor(this.setup.stageId);
@@ -176,7 +177,7 @@ export class FightScene extends Phaser.Scene {
 
     const label = { fontSize: "22px", color: "#f3efe6", fontStyle: "bold" };
     this.add.text(40, 62, a.fighter.name, label).setDepth(100);
-    this.add.text(GAME_WIDTH - 40, 62, b.fighter.name, label).setOrigin(1, 0).setDepth(100);
+    this.add.text(GAME_WIDTH - 40, 62, this.setup.inputs[1].kind === "cpu" ? `${b.fighter.name} · CPU` : b.fighter.name, label).setOrigin(1, 0).setDepth(100);
     this.timerText = this.add.text(GAME_WIDTH / 2, 18, "60", { fontSize: "48px", color: "#f2c14e", fontStyle: "bold" }).setOrigin(0.5, 0).setDepth(100);
     this.bannerText = this.add.text(GAME_WIDTH / 2, GAME_HEIGHT / 2 - 80, "", {
       fontSize: "96px", color: "#f2c14e", fontStyle: "bold", stroke: "#121018", strokeThickness: 10,
@@ -420,10 +421,15 @@ export class FightScene extends Phaser.Scene {
     [...this.calloutTexts, this.perfectText].forEach((t) => { this.tweens.killTweensOf(t); t.setVisible(false); });
     // Players are often still mashing from the knockout: ignore input for the first second.
     this.replaySkipArmedAt = performance.now() + 1000;
-    this.replayPrevious = this.sources.map((src) => src.read());
+    this.replayPrevious = this.players.map((src) => src.read());
   }
 
   private replaySkipArmedAt = 0;
+
+  /** The people's controllers (not the dummy or CPU, which would "press" skip). */
+  private get players(): InputSource[] {
+    return this.sources.filter((s) => s !== this.dummy);
+  }
   private replayPrevious: InputFrame[] = [];
 
   private updateReplay(delta: number): void {
@@ -437,10 +443,10 @@ export class FightScene extends Phaser.Scene {
     this.shownHealth = [state.fighters[0].health, state.fighters[1].health];
     this.renderState(state);
 
-    const now = this.sources.map((src) => src.read());
+    const now = this.players.map((src) => src.read());
     const pressed = now.some((f, i) => (["punch", "kick"] as const).some((k) => f[k] && !this.replayPrevious[i]?.[k]));
     this.replayPrevious = now;
-    const skip = performance.now() > this.replaySkipArmedAt && (pressed || this.sources.map((src) => src.pausePressed()).includes(true));
+    const skip = performance.now() > this.replaySkipArmedAt && (pressed || this.players.map((src) => src.pausePressed()).includes(true));
     if (replay.position >= replay.states.length || skip) this.endReplay();
   }
 
@@ -601,7 +607,8 @@ export class FightScene extends Phaser.Scene {
     if (state.round.phase === "matchOver") {
       const stats = this.stats.result;
       const winner = state.round.matchWinner ?? "draw";
-      if (!this.setup.practice) {
+      // Career records are for fights between people (not practice or the CPU).
+      if (!this.setup.practice && this.setup.inputs.every(isPlayerInput)) {
         const [a, b] = this.setup.entries;
         recordMatch(this.registry, [a.fighter.fighterId, b.fighter.fighterId], stats.players, winner);
       }

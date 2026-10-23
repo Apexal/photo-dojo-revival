@@ -24,6 +24,7 @@ export const DUMMY_BEHAVIORS: readonly { behavior: DummyBehavior; label: string 
 
 const CPU_BEHAVIORS: Partial<Record<DummyBehavior, CpuLevel>> = { cpuEasy: "easy", cpuNormal: "normal", cpuHard: "hard" };
 export const isCpuBehavior = (b: DummyBehavior) => b in CPU_BEHAVIORS;
+export const cpuBehavior = (level: CpuLevel): DummyBehavior => (level === "easy" ? "cpuEasy" : level === "normal" ? "cpuNormal" : "cpuHard");
 
 /** Number key 9 cycles the CPU levels; this is the one after `b` (easy when `b` isn't a CPU). */
 export function nextCpuBehavior(b: DummyBehavior): DummyBehavior {

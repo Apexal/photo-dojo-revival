@@ -88,7 +88,8 @@ export class MatchResultScene extends Phaser.Scene {
 
     this.add.rectangle(0, 0, GAME_WIDTH, GAME_HEIGHT, 0x121018, 0.98).setOrigin(0);
     const title = winner === "draw" ? "DRAW GAME" : `${names[winner]} WINS!`;
-    announce(this, matchWinnerLine(winner));
+    const cpu = this.result.inputs.findIndex((d) => d.kind === "cpu");
+    announce(this, matchWinnerLine(winner, cpu < 0 ? null : (cpu as 0 | 1)));
     this.add.text(cx, 52, title.toUpperCase(), {
       fontSize: "60px", fontStyle: "bold", color: "#f2c14e", stroke: "#121018", strokeThickness: 8, align: "center", wordWrap: { width: 760 },
     }).setOrigin(0.5);

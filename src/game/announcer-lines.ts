@@ -1,5 +1,5 @@
 import type { Callout } from "../simulation/callouts";
-import { MAX_ROUNDS, ROUNDS_TO_WIN, type RoundEndReason, type RoundOutcome } from "../simulation/round-rules";
+import { MAX_ROUNDS, ROUNDS_TO_WIN, type PlayerIndex, type RoundEndReason, type RoundOutcome } from "../simulation/round-rules";
 
 /**
  * Every announcer line, by id, with what it says. Each is a file,
@@ -29,6 +29,8 @@ export const ANNOUNCER_LINES = {
   "p1-wins": "Player one wins!",
   "p2-wins": "Player two wins!",
   "draw-game": "Draw game!",
+  "you-win": "You win!",
+  "you-lose": "You lose!",
   "p1-ready": "Player one, ready!",
   "p2-ready": "Player two, ready!",
   practice: "Practice mode",
@@ -36,6 +38,7 @@ export const ANNOUNCER_LINES = {
   nice: "Nice!",
   "well-done": "Well done! You're ready.",
   "choose-fighter": "Choose your fighter!",
+  "choose-opponent": "Choose your opponent!",
   "new-challenger": "Here comes a new challenger!",
   "choose-stage": "Choose your stage!",
   "stage-dusk-dojo": "Dusk Dojo",
@@ -68,8 +71,11 @@ export function roundEndLine(outcome: RoundOutcome, reason: RoundEndReason): Ann
   return outcome === "draw" ? "double-ko" : "ko";
 }
 
-export function matchWinnerLine(winner: RoundOutcome): AnnouncerLineId {
-  return winner === "draw" ? "draw-game" : winner === 0 ? "p1-wins" : "p2-wins";
+/** Against the CPU (`cpu`: its side) it's the player who won or lost. */
+export function matchWinnerLine(winner: RoundOutcome, cpu: PlayerIndex | null = null): AnnouncerLineId {
+  if (winner === "draw") return "draw-game";
+  if (cpu !== null) return winner === cpu ? "you-lose" : "you-win";
+  return winner === 0 ? "p1-wins" : "p2-wins";
 }
 
 /** A callout's line, or null: hit streaks are only called from three hits, and once past five just the once. */

@@ -29,6 +29,10 @@ describe("announcer lines", () => {
     expect(matchWinnerLine(0)).toBe("p1-wins");
     expect(matchWinnerLine(1)).toBe("p2-wins");
     expect(matchWinnerLine("draw")).toBe("draw-game");
+    // Against the CPU: from the player's side.
+    expect(matchWinnerLine(0, 1)).toBe("you-win");
+    expect(matchWinnerLine(1, 1)).toBe("you-lose");
+    expect(matchWinnerLine("draw", 1)).toBe("draw-game");
   });
 
   it("calls hit streaks from three hits, and a long one once", () => {

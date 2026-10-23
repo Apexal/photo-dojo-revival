@@ -16,6 +16,7 @@ import { createInputSource, describeInput, sameInput, type PlayerInputDescriptor
 import type { InputSource } from "../input/input-source";
 import { KeyboardInputSource } from "../input/keyboard-input-source";
 import { KEY, actionKeyLabel } from "../input/key-bindings";
+import { CPU_LEVEL_IDS, CPU_LEVEL_NAMES, type CpuLevel } from "../input/cpu-player";
 import { JOIN_RUMBLE } from "../input/rumble";
 import { forgetFighterRecord, headToHead, recordOf, winLoss } from "../fighter-records";
 import type { FighterStatsSceneData } from "./fighter-stats-scene";
@@ -66,6 +67,8 @@ const INTRO_HOST_MS = 220;
 /** Cursors and fighters arrive last, once there's something to stand on. */
 const INTRO_SETTLED_MS = 750;
 let introPlayed = false;
+/** The last CPU level picked for a match (this session). */
+let cpuLevel: CpuLevel = "easy";
 
 type IntroTarget = Phaser.GameObjects.GameObject & {
   x: number;
@@ -122,6 +125,25 @@ interface PlayerSlot {
 }
 
 /**
+ * A lone player's opponent, in the empty slot, driven by their controller: first
+ * its fighter, then (picked) Match against the CPU at a level, or Practice.
+ */
+interface CpuSlot {
+  slot: 0 | 1;
+  cursor: number;
+  picked: boolean;
+  /** 0: Match, 1: Practice. */
+  option: 0 | 1;
+}
+
+/** What a slot shows: a player, or the CPU opponent. */
+interface SlotView {
+  cursor: number;
+  ready: boolean;
+  cpu: boolean;
+}
+
+/**
  * Grid of fighters from IndexedDB plus the bundled placeholders. "Press any
  * button" assigns each pad/keyboard half to the next free player slot; each
  * player moves a cursor and confirms with punch. The "Add a fighter" panel
@@ -130,6 +152,7 @@ interface PlayerSlot {
 export class CharacterSelectScene extends Phaser.Scene {
   private library: LibraryEntry[] = [];
   private players: (PlayerSlot | null)[] = [null, null];
+  private cpu: CpuSlot | null = null;
   private tiles!: Phaser.GameObjects.Container;
   private cursors!: Phaser.GameObjects.Graphics;
   /** "P1" / "P2" on the corner of each player's cursor. */
@@ -198,6 +221,7 @@ export class CharacterSelectScene extends Phaser.Scene {
     announce(this, "choose-fighter");
     this.library = this.registry.get(REGISTRY.library) ?? [];
     this.players = [null, null];
+    this.cpu = null;
     this.selected = null;
     this.pendingDelete = null;
     this.tileButtons = [];
@@ -465,6 +489,13 @@ export class CharacterSelectScene extends Phaser.Scene {
    * who hasn't picked yet moves their cursor there; clicking the same tile again picks it.
    */
   private clickTile(index: number): void {
+    const cpu = this.cpu;
+    if (cpu && !cpu.picked) {
+      if (cpu.cursor === index && this.selected === index) this.pickCpu(true);
+      else if (cpu.cursor !== index) playGameSound(this, "tick", 0.3);
+      cpu.cursor = index;
+      this.updatePreviews();
+    }
     const i = this.players.findIndex((p) => p && !p.ready);
     const chooser = this.players[i];
     if (chooser) {
@@ -480,14 +511,15 @@ export class CharacterSelectScene extends Phaser.Scene {
 
   private drawCursors(): void {
     this.cursors.clear();
-    this.players.forEach((p, i) => {
+    [0, 1].forEach((i) => {
+      const p = this.shown(i);
       const tag = this.cursorTags[i];
       if (!p || !this.library.length || !this.onPage(p.cursor)) return tag.setVisible(false);
       const { x, y } = this.tilePosition(p.cursor);
       const inset = i * 6;
       this.cursors.lineStyle(p.ready ? 7 : 4, PLAYER_COLORS[i], 1).strokeRect(x - 4 + inset, y - 4 + inset, TILE + 8 - 2 * inset, TILE + 8 - 2 * inset);
       // P1's tag in the top-left corner of its outline, P2's in the top-right of its (inset) one.
-      tag.setPosition(i ? x + TILE + 4 - inset : x - 4, y - 4 + inset).setVisible(true);
+      tag.setText(p.cpu ? "CPU" : `P${i + 1}`).setPosition(i ? x + TILE + 4 - inset : x - 4, y - 4 + inset).setVisible(true);
     });
     this.drawCursorPoses();
   }
@@ -502,13 +534,14 @@ export class CharacterSelectScene extends Phaser.Scene {
    */
   private drawCursorPoses(): void {
     const owner = new Map<number, number>();
-    const order = [0, 1].sort((a, b) => Number(!!this.players[b]?.ready) - Number(!!this.players[a]?.ready));
+    const order = [0, 1].sort((a, b) => Number(!!this.shown(b)?.ready) - Number(!!this.shown(a)?.ready));
     for (const i of order) {
-      const p = this.players[i];
+      const p = this.shown(i);
       if (p && this.library[p.cursor] && this.onPage(p.cursor) && !owner.has(p.cursor)) owner.set(p.cursor, i);
     }
     const covered = new Set<number>();
-    this.players.forEach((p, i) => {
+    [0, 1].forEach((i) => {
+      const p = this.shown(i);
       const entry = p && owner.get(p.cursor) === i ? this.library[p.cursor] : undefined;
       const key = entry && this.winKey(entry.fighter, p!.ready ? 0 : 1);
       const current = this.cursorPoses[i];
@@ -586,7 +619,7 @@ export class CharacterSelectScene extends Phaser.Scene {
   private afterLibraryGrew(fighter: Fighter): void {
     this.voices.delete(fighter.fighterId);
     // Keep cursors on the same fighters.
-    for (const p of this.players) if (p) p.cursor = Math.min(this.library.length - 1, p.cursor + 1);
+    for (const p of [...this.players, this.cpu]) if (p) p.cursor = Math.min(this.library.length - 1, p.cursor + 1);
     if (this.selected !== null) this.selected = Math.min(this.library.length - 1, this.selected + 1);
     this.updateHostLayout();
     this.refreshGrid();
@@ -609,6 +642,7 @@ export class CharacterSelectScene extends Phaser.Scene {
   /** "Press any button": the first unassigned controller takes the next free slot. */
   private join(input: PlayerInputDescriptor): void {
     if (this.players.some((p) => p && sameInput(p.input, input))) return;
+    this.cpu = null; // a person takes the CPU's place
     const slot = this.players.findIndex((p) => p === null);
     if (slot < 0) return;
     const source = createInputSource(this, input);
@@ -714,10 +748,11 @@ export class CharacterSelectScene extends Phaser.Scene {
   private updatePreviews(): void {
     const alone = this.players.filter(Boolean).length === 1;
     this.previews.forEach((v, i) => {
+      if (this.cpu?.slot === i) return this.updateCpuPreview(v, this.cpu);
       const p = this.players[i];
       const entry = p && this.library[p.cursor];
       v.frame.setStrokeStyle(p?.ready ? 4 : 2, p ? PLAYER_COLORS[i] : 0x3a3346, p ? 1 : 0.6);
-      v.title.setAlpha(p ? 1 : 0.5);
+      v.title.setText(`P${i + 1}`).setAlpha(p ? 1 : 0.5);
       v.name.setText(entry ? entry.fighter.name : "");
       const record = entry && recordOf(this.registry, entry.fighter.fighterId);
       // Ready: down is free (it moves the cursor before), so it opens the career page.
@@ -728,7 +763,7 @@ export class CharacterSelectScene extends Phaser.Scene {
       // The tutorial is one player's: suggest it to anyone alone, and push it for a fighter's first fight.
       const fresh = !!entry && !hasPlayed(this.registry, entry.fighter.fighterId);
       v.tip.setText(
-        !p ? ""
+        !p || this.cpu ? ""
         : alone && p.ready ? (fresh ? "First fight!\nup: TUTORIAL" : "up: tutorial")
         : alone ? (fresh ? "New? Pick, then\nup: TUTORIAL" : "")
         : fresh ? "New? Try the\ntutorial solo" : "",
@@ -737,7 +772,8 @@ export class CharacterSelectScene extends Phaser.Scene {
       v.status.setText(
         !p ? ""
         : !p.ready ? "punch: pick\nkick: leave"
-        : alone ? "READY!\npunch: practice\nkick: change"
+        : this.cpu ? "READY!"
+        : alone ? "READY!\npunch: vs CPU\nkick: change"
         : "READY!\nkick: change",
       ).setY(v.tip.y + (v.tip.text ? v.tip.height + 10 : 0));
       v.device.setText(p ? describeInput(p.input) : "");
@@ -751,7 +787,7 @@ export class CharacterSelectScene extends Phaser.Scene {
 
   /** Between the panels, once both players are on different fighters: their head-to-head, or a first meeting. */
   private updateRivalry(): void {
-    const [a, b] = this.players.map((p) => p && this.library[p.cursor]?.fighter.fighterId);
+    const [a, b] = [0, 1].map((i) => { const p = this.shown(i); return p && this.library[p.cursor]?.fighter.fighterId; });
     const r = this.rivalry;
     if (!a || !b || a === b) return void r.container.setVisible(false);
     const tally = headToHead(this.registry, a, b);
@@ -796,7 +832,7 @@ export class CharacterSelectScene extends Phaser.Scene {
   private drawPreviewSprites(): void {
     if (this.previewsHeld) return;
     this.previews.forEach((v, i) => {
-      const p = this.players[i];
+      const p = this.shown(i);
       const entry = p && this.library[p.cursor];
       const keys = entry && ([0, 1] as const).map((variant) => this.winKey(entry.fighter, variant));
       if (!entry || !keys!.every((k) => this.textures.exists(k))) {
@@ -886,6 +922,7 @@ export class CharacterSelectScene extends Phaser.Scene {
       if (!p) return;
       if (!p.source.connected && p.input.kind === "pad") {
         this.players[i] = null;
+        this.cpu = null;
         changed = true;
         return;
       }
@@ -896,13 +933,13 @@ export class CharacterSelectScene extends Phaser.Scene {
         return;
       }
       const pressed = (k: keyof InputFrame) => now[k] && !p.previous[k];
-      const n = this.library.length;
-      if (!p.ready && n) {
-        let c = p.cursor;
-        if (pressed("left")) c = (c - 1 + n) % n;
-        if (pressed("right")) c = (c + 1) % n;
-        if (pressed("up") && c - this.cols >= 0) c -= this.cols;
-        if (pressed("down") && c + this.cols < n) c += this.cols;
+      if (this.cpu && p.ready) {
+        if (this.updateCpuChoice(p, pressed)) changed = true;
+        p.previous = now;
+        return;
+      }
+      if (!p.ready && this.library.length) {
+        const c = this.moveCursor(p.cursor, pressed);
         if (c !== p.cursor) {
           playGameSound(this, "tick", 0.3);
           p.cursor = c;
@@ -916,10 +953,12 @@ export class CharacterSelectScene extends Phaser.Scene {
       } else if (pressed("down")) {
         p.previous = now;
         return this.openStats(i);
-      } else if ((pressed("punch") || pressed("up")) && this.players.filter(Boolean).length === 1) {
-        const tutorial = pressed("up"); // before `previous` moves on
+      } else if (pressed("up") && this.players.filter(Boolean).length === 1) {
         p.previous = now;
-        return this.startPractice(p, tutorial);
+        return this.startPractice(p, true);
+      } else if (pressed("punch") && this.players.filter(Boolean).length === 1) {
+        this.chooseOpponent(i);
+        changed = true;
       }
       if (!p.ready && pressed("kick") && !changed) {
         this.players[i] = null; // leave the slot
@@ -952,12 +991,115 @@ export class CharacterSelectScene extends Phaser.Scene {
     startMatch(this, data);
   }
 
-  /** One player against a scripted dummy: another fighter from the roster (or the same one). `tutorial`: start with the guided drill. */
-  startPractice(p: PlayerSlot, tutorial = false): void {
+  /**
+   * One player against the training dummy. `opponent`: the fighter it plays
+   * (the tutorial's: another fighter from the roster, or the same one).
+   * `tutorial`: start with the guided drill.
+   */
+  startPractice(p: PlayerSlot, tutorial = false, opponent?: LibraryEntry): void {
     const mine = this.library[p.cursor];
-    const dummy = this.library.find((e) => e.fighter.fighterId !== mine.fighter.fighterId) ?? mine;
+    const dummy = opponent ?? this.library.find((e) => e.fighter.fighterId !== mine.fighter.fighterId) ?? mine;
     const data: FightSceneData = { entries: [mine, dummy], inputs: [p.input, { kind: "dummy" }], practice: true, tutorial };
     startMatch(this, data);
+  }
+
+  // --- the CPU opponent (one player) -------------------------------------------
+
+  /** Where `cursor` moves to on this frame's presses. */
+  private moveCursor(cursor: number, pressed: (k: keyof InputFrame) => boolean): number {
+    const n = this.library.length;
+    let c = cursor;
+    if (pressed("left")) c = (c - 1 + n) % n;
+    if (pressed("right")) c = (c + 1) % n;
+    if (pressed("up") && c - this.cols >= 0) c -= this.cols;
+    if (pressed("down") && c + this.cols < n) c += this.cols;
+    return c;
+  }
+
+  private shown(i: number): SlotView | null {
+    const p = this.players[i];
+    if (p) return { cursor: p.cursor, ready: p.ready, cpu: false };
+    const cpu = this.cpu;
+    return cpu?.slot === i ? { cursor: cpu.cursor, ready: cpu.picked, cpu: true } : null;
+  }
+
+  /** A lone player who has picked: the empty slot becomes the CPU, starting on the next fighter along. */
+  private chooseOpponent(player: number): void {
+    const p = this.players[player]!;
+    const cursor = this.library.length > 1 ? (p.cursor + 1) % this.library.length : p.cursor;
+    this.cpu = { slot: player === 0 ? 1 : 0, cursor, picked: false, option: 0 };
+    playGameSound(this, "hit", 0.6);
+    announce(this, "choose-opponent");
+  }
+
+  private pickCpu(picked: boolean): void {
+    if (!this.cpu || this.cpu.picked === picked) return;
+    this.cpu.picked = picked;
+    playGameSound(this, picked ? "hit" : "block", picked ? 0.6 : 0.4);
+  }
+
+  /** The lone player's presses while the CPU slot is open. Kick steps back. Returns whether anything changed. */
+  private updateCpuChoice(p: PlayerSlot, pressed: (k: keyof InputFrame) => boolean): boolean {
+    const cpu = this.cpu!;
+    if (!cpu.picked) {
+      const c = this.moveCursor(cpu.cursor, pressed);
+      if (c !== cpu.cursor) {
+        playGameSound(this, "tick", 0.3);
+        cpu.cursor = c;
+        this.showPage(Math.floor(c / this.pageSize));
+        return true;
+      }
+      if (pressed("punch")) {
+        this.pickCpu(true);
+        return true;
+      }
+      if (!pressed("kick")) return false;
+      this.cpu = null;
+      playGameSound(this, "block", 0.4);
+      return true;
+    }
+    if (pressed("up") || pressed("down")) {
+      cpu.option = cpu.option ? 0 : 1;
+    } else if (cpu.option === 0 && (pressed("left") || pressed("right"))) {
+      const n = CPU_LEVEL_IDS.length;
+      cpuLevel = CPU_LEVEL_IDS[(CPU_LEVEL_IDS.indexOf(cpuLevel) + (pressed("left") ? n - 1 : 1)) % n];
+    } else if (pressed("kick")) {
+      this.pickCpu(false);
+      return true;
+    } else if (pressed("punch")) {
+      const opponent = this.library[cpu.cursor];
+      if (cpu.option === 1) {
+        this.startPractice(p, false, opponent);
+      } else {
+        playGameSound(this, "hit", 0.6);
+        startMatch(this, { entries: [this.library[p.cursor], opponent], inputs: [p.input, { kind: "cpu", level: cpuLevel }] });
+      }
+      return false;
+    } else {
+      return false;
+    }
+    playGameSound(this, "tick", 0.3);
+    return true;
+  }
+
+  /** The CPU's panel: its fighter, then the Match (level) / Practice choice. */
+  private updateCpuPreview(v: Preview, cpu: CpuSlot): void {
+    const entry = this.library[cpu.cursor];
+    v.frame.setStrokeStyle(cpu.picked ? 4 : 2, PLAYER_COLORS[cpu.slot], 1);
+    v.title.setText("CPU").setAlpha(1);
+    v.name.setText(entry ? entry.fighter.name : "");
+    const record = entry && recordOf(this.registry, entry.fighter.fighterId);
+    v.record.setText(record ? winLoss(record) : "");
+    v.style.setText(entry ? ARCHETYPES[entry.fighter.archetype].moveName : "").setY(PANEL_Y + 62 + v.name.height);
+    v.join.setText("");
+    v.tip.setText("").setY(v.style.y + v.style.height + 12);
+    v.tipPulses = false;
+    const mark = (option: 0 | 1) => (cpu.option === option ? "▶ " : "   ");
+    v.status.setText(
+      !cpu.picked ? "Choose your\nopponent\npunch: pick\nkick: back"
+      : `${mark(0)}Match: ${CPU_LEVEL_NAMES[cpuLevel]}\n${mark(1)}Practice\n${cpu.option === 0 ? "◀ ▶ level\n" : ""}punch: go\nkick: back`,
+    ).setY(v.tip.y);
+    v.device.setText("");
   }
 
   // --- add a fighter (QR + room code) ----------------------------------------
@@ -1167,6 +1309,7 @@ export class CharacterSelectScene extends Phaser.Scene {
     this.library = this.library.filter((e) => e.fighter.fighterId !== id);
     this.registry.set(REGISTRY.library, this.library);
     this.selected = null;
+    this.cpu = null;
     this.updateHostLayout();
     this.players.forEach((p, i) => {
       if (!p) return;

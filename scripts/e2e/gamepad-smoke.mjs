@@ -65,12 +65,15 @@ try {
   check((await sel()).cursor === 1, "d-pad moves the cursor");
   await tap(0); // A: pick
   check((await sel()).ready, "A picks");
-  await tap(0); // A again: practice
+  await tap(0); // A again: choose the opponent
+  await tap(0); // A: take the fighter under the CPU's cursor
+  await tap(13); // d-pad down: Practice
+  await tap(0); // A: go
   await page.waitForFunction(() => window.photoDojo.scene.isActive("stage-select"), null, { timeout: 5000 });
   await tap(0); // A: take the highlighted stage
   await page.waitForFunction(() => window.photoDojo.scene.getScene("fight")?.sim?.practice === true, null, { timeout: 5000 });
   await page.waitForFunction(() => window.photoDojo.scene.getScene("fight").sim.current.round.phase === "fighting", null, { timeout: 5000 });
-  step("A ×2 then A on the stage select started practice (the scene changes survive a pad at index 1)");
+  step("A to pick, A + A to choose the opponent, down + A for practice, then A on the stage select started it (the scene changes survive a pad at index 1)");
 
   // Dummy punches; walk the pad's fighter into it and get hit.
   await page.keyboard.press("6"); // dummy: punch

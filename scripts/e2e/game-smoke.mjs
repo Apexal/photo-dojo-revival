@@ -284,7 +284,7 @@ try {
   step(`match over → stats page (${matchStats.players[0].hits} clean hits, ${matchStats.players[0].throws} throw) → punch: rematch`);
   await game.waitForFunction(() => window.photoDojo.scene.getScene("fight").sim.current.round.phase === "fighting", null, { timeout: 5000 });
 
-  // --- practice mode: quit to select (pause menu: up from Resume wraps to Quit), one player readies and presses punch again ---
+  // --- vs CPU, then practice: quit to select (pause menu: up from Resume wraps to Quit); one player picks, punch opens the CPU's slot ---
   await game.keyboard.press("Escape");
   await game.waitForTimeout(150);
   await game.keyboard.press("w");
@@ -314,8 +314,46 @@ try {
     window.__keys = [];
     for (const t of ["keydown", "keyup"]) window.addEventListener(t, (e) => window.__keys.push(`${t}:${e.key}@${e.timeStamp.toFixed(1)}`), true);
   });
+  const cpuSlot = () => game.evaluate(() => window.photoDojo.scene.getScene("character-select").cpu);
+  const press = async (key) => { await game.keyboard.press(key); await game.waitForTimeout(80); };
   await stepTo("join", () => !!window.photoDojo.scene.getScene("character-select").players[0]);
   await stepTo("pick", () => window.photoDojo.scene.getScene("character-select").players[0]?.ready === true);
+  await stepTo("opponent", () => !!window.photoDojo.scene.getScene("character-select").cpu);
+  const opened = await cpuSlot();
+  check(opened.slot === 1 && !opened.picked, `punch opens the CPU's slot (${JSON.stringify(opened)})`);
+  await press("d");
+  check((await cpuSlot()).cursor === (opened.cursor + 1) % (await game.evaluate(() => window.photoDojo.scene.getScene("character-select").library.length)), "the player's controller moves the CPU's cursor");
+  const opponentId = await game.evaluate(() => { const sc = window.photoDojo.scene.getScene("character-select"); return sc.library[sc.cpu.cursor].fighter.fighterId; });
+  await stepTo("cpu pick", () => window.photoDojo.scene.getScene("character-select").cpu?.picked === true);
+  await press("d"); // level: easy → normal
+  await stepTo("cpu match", () => window.photoDojo.scene.isActive("stage-select"));
+  await stepTo("cpu stage", () => window.photoDojo.scene.isActive("controls"));
+  await game.waitForTimeout(600); // the controls screen ignores input at first
+  await stepTo("cpu ready", () => window.photoDojo.scene.isActive("fight"));
+  await game.waitForFunction(() => window.photoDojo.scene.getScene("fight").sim.current.round.phase === "fighting", null, { timeout: 8000 });
+  const vsCpu = await game.evaluate(() => {
+    const f = window.photoDojo.scene.getScene("fight");
+    return { input: f.setup.inputs[1], behavior: f.dummy.behavior, practice: f.sim.practice, opponent: f.setup.entries[1].fighter.fighterId, timer: f.timerText.text };
+  });
+  check(vsCpu.input.kind === "cpu" && vsCpu.input.level === "normal" && vsCpu.behavior === "cpuNormal" && !vsCpu.practice && vsCpu.timer !== "PRACTICE",
+    `a real match against the normal CPU (${JSON.stringify(vsCpu)})`);
+  check(vsCpu.opponent === opponentId, "against the fighter the player chose");
+  // The CPU fights back on its own.
+  await game.waitForFunction(() => window.photoDojo.scene.getScene("fight").stats.result.players[1].attacks > 0, null, { timeout: 10000 });
+  step("vs CPU: chose the opponent and level, then a match with a clock against a CPU that attacks");
+  await game.keyboard.press("Escape");
+  await game.waitForTimeout(150);
+  await game.keyboard.press("w");
+  await game.waitForTimeout(80);
+  await game.keyboard.press("j");
+  await game.waitForFunction(() => window.photoDojo.scene.isActive("character-select"), null, { timeout: 5000 });
+  await game.waitForTimeout(300);
+
+  await stepTo("join again", () => !!window.photoDojo.scene.getScene("character-select").players[0]);
+  await stepTo("pick again", () => window.photoDojo.scene.getScene("character-select").players[0]?.ready === true);
+  await stepTo("opponent again", () => !!window.photoDojo.scene.getScene("character-select").cpu);
+  await stepTo("practice opponent", () => window.photoDojo.scene.getScene("character-select").cpu?.picked === true);
+  await press("s"); // Practice
   await stepTo("practice", () => window.photoDojo.scene.isActive("stage-select"));
   await stepTo("stage", () => window.photoDojo.scene.isActive("fight"));
   await game.waitForFunction(() => window.photoDojo.scene.getScene("fight")?.sim?.practice === true && window.photoDojo.scene.isActive("fight"), null, { timeout: 8000 });
