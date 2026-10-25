@@ -15,6 +15,10 @@ import {
   anchorTargetFor,
   type NormalizationTransform,
 } from "../shared/pose-geometry";
+import { canvasToPng, createCanvas, context2d, type AnyCanvas } from "../shared/canvas";
+
+// Moved to src/shared/canvas.ts; re-exported so callers don't churn.
+export { canvasToPng, createCanvas, context2d };
 
 export interface SpritePlan {
   transform: NormalizationTransform;
@@ -78,30 +82,6 @@ export function planFighterSprites(captures: Record<string, PoseCaptureGeometry>
   }
   return Object.fromEntries(
     entries.map(([key, c]) => [key, planSpriteNormalization(c.landmarks, c.poseId, c.frameWidth, c.frameHeight, { fitScale })]),
-  );
-}
-
-type AnyCanvas = HTMLCanvasElement | OffscreenCanvas;
-type AnyContext = CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D;
-
-export function createCanvas(width: number, height: number): AnyCanvas {
-  if (typeof OffscreenCanvas !== "undefined") return new OffscreenCanvas(width, height);
-  const c = document.createElement("canvas");
-  c.width = width;
-  c.height = height;
-  return c;
-}
-
-export function context2d(canvas: AnyCanvas): AnyContext {
-  const ctx = canvas.getContext("2d", { willReadFrequently: true }) as AnyContext | null;
-  if (!ctx) throw new Error("2D canvas not available");
-  return ctx;
-}
-
-export async function canvasToPng(canvas: AnyCanvas): Promise<Blob> {
-  if ("convertToBlob" in canvas) return canvas.convertToBlob({ type: "image/png" });
-  return new Promise((resolve, reject) =>
-    canvas.toBlob((b) => (b ? resolve(b) : reject(new Error("PNG encode failed"))), "image/png"),
   );
 }
 

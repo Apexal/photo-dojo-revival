@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { ROOM_CODE_ALPHABET, generateRoomCode, isValidRoomCode, normalizeRoomCode } from "../src/shared/room-code";
+import { ROOM_CODE_ALPHABET, captureUrl, generateRoomCode, isValidRoomCode, normalizeRoomCode } from "../src/shared/room-code";
 
 describe("room codes", () => {
   it("generates 6-char codes from the unambiguous alphabet", () => {
@@ -22,5 +22,13 @@ describe("room codes", () => {
     expect(normalizeRoomCode("ABCDE")).toBeNull();
     expect(normalizeRoomCode(null)).toBeNull();
     expect(isValidRoomCode("ABCDEFG")).toBe(false);
+  });
+});
+
+
+describe("capture URLs", () => {
+  it("points the QR at the phone page for a code", () => {
+    expect(captureUrl("ABC234", { origin: "https://dojo.example", base: "/" })).toBe("https://dojo.example/capture?room=ABC234");
+    expect(captureUrl("ABC234", { origin: "http://192.168.1.5:5173", base: "/dojo/" })).toBe("http://192.168.1.5:5173/dojo/capture?room=ABC234");
   });
 });

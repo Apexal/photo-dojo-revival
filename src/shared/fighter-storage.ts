@@ -2,8 +2,11 @@ import { openDB, type DBSchema, type IDBPDatabase } from "idb";
 import type { Fighter } from "./fighter-model";
 
 export const DB_NAME = "photo-dojo";
-/** v2 adds the `drafts` store (in-progress captures on the phone). */
-export const DB_VERSION = 2;
+/**
+ * v2 adds the `drafts` store (in-progress captures); v3 `fighterSources`
+ * (the cut-outs a studio-built fighter was made from, keyed by fighter id).
+ */
+export const DB_VERSION = 3;
 
 export interface Settings {
   controllerMapping: Record<string, unknown>;
@@ -37,19 +40,51 @@ interface PhotoDojoDB extends DBSchema {
   fighters: { key: string; value: Fighter };
   settings: { key: string; value: unknown };
   drafts: { key: string; value: unknown };
+  /** The studio's FighterSources (studio/capture-draft.ts); typed loosely here so shared code doesn't depend on the studio. */
+  fighterSources: { key: string; value: StoredSources };
 }
 
+/** What the storage layer needs of a FighterSources record. */
+export interface StoredSources { fighterId: string }
+
 let dbPromise: Promise<IDBPDatabase<PhotoDojoDB>> | null = null;
+const blockedListeners = new Set<() => void>();
+
+/**
+ * Called when this tab wants to upgrade the database but another Photo Dojo
+ * tab (an older version) still holds it open. Returns an unsubscribe.
+ */
+export function onDbBlocked(listener: () => void): () => void {
+  blockedListeners.add(listener);
+  return () => { blockedListeners.delete(listener); };
+}
 
 export function openFighterDb(): Promise<IDBPDatabase<PhotoDojoDB>> {
-  dbPromise ??= openDB<PhotoDojoDB>(DB_NAME, DB_VERSION, {
+  if (dbPromise) return dbPromise;
+  const opening = openDB<PhotoDojoDB>(DB_NAME, DB_VERSION, {
     upgrade(db) {
       if (!db.objectStoreNames.contains("fighters")) db.createObjectStore("fighters", { keyPath: "fighterId" });
       if (!db.objectStoreNames.contains("settings")) db.createObjectStore("settings");
       if (!db.objectStoreNames.contains("drafts")) db.createObjectStore("drafts");
+      if (!db.objectStoreNames.contains("fighterSources")) db.createObjectStore("fighterSources", { keyPath: "fighterId" });
+    },
+    blocked() {
+      console.warn("[storage] another Photo Dojo tab is holding the database open");
+      for (const l of blockedListeners) l();
+    },
+    // A newer tab wants to upgrade: let it, and reopen (at the new version) on the next use here.
+    blocking() {
+      void opening.then((db) => db.close());
+      if (dbPromise === opening) dbPromise = null;
+    },
+    terminated() {
+      if (dbPromise === opening) dbPromise = null;
     },
   });
-  return dbPromise;
+  dbPromise = opening;
+  // A failed open (e.g. an old tab refusing the upgrade) is retried next time.
+  opening.catch(() => { if (dbPromise === opening) dbPromise = null; });
+  return opening;
 }
 
 /** For tests: drop the cached connection. */
@@ -93,8 +128,32 @@ export async function listFighters(): Promise<Fighter[]> {
   return all.sort((a, b) => b.createdAt - a.createdAt);
 }
 
+/** Deletes the fighter and its sources together. */
 export async function deleteFighter(fighterId: string): Promise<void> {
-  await (await openFighterDb()).delete("fighters", fighterId);
+  const tx = (await openFighterDb()).transaction(["fighters", "fighterSources"], "readwrite");
+  await Promise.all([tx.objectStore("fighters").delete(fighterId), tx.objectStore("fighterSources").delete(fighterId), tx.done]);
+}
+
+/**
+ * A fighter from a `.photodojo` file: any sources stored under its id
+ * described another version of it (the file has none), so they go.
+ */
+export async function saveImportedFighter(fighter: Fighter): Promise<void> {
+  const tx = (await openFighterDb()).transaction(["fighters", "fighterSources"], "readwrite");
+  await Promise.all([tx.objectStore("fighters").put(fighter), tx.objectStore("fighterSources").delete(fighter.fighterId), tx.done]);
+  await requestPersistence();
+}
+
+/** A studio-built fighter and the cut-outs it was made from, written together. */
+export async function saveFighterWithSources(fighter: Fighter, sources: StoredSources): Promise<void> {
+  if (sources.fighterId !== fighter.fighterId) throw new Error("Sources belong to another fighter");
+  const tx = (await openFighterDb()).transaction(["fighters", "fighterSources"], "readwrite");
+  await Promise.all([tx.objectStore("fighters").put(fighter), tx.objectStore("fighterSources").put(sources), tx.done]);
+  await requestPersistence();
+}
+
+export async function loadFighterSources<T extends StoredSources>(fighterId: string): Promise<T | undefined> {
+  return (await (await openFighterDb()).get("fighterSources", fighterId)) as T | undefined;
 }
 
 export async function getSetting<K extends keyof Settings>(key: K): Promise<Settings[K] | undefined> {
@@ -114,7 +173,7 @@ export async function isStoragePersisted(): Promise<boolean> {
 
 const DRAFT_KEY = "current";
 
-/** The phone's in-progress capture, so a reload or a locked phone doesn't lose it. */
+/** The in-progress capture (a new fighter in the studio), so a reload doesn't lose it. */
 export async function saveDraft<T>(draft: T): Promise<void> {
   await (await openFighterDb()).put("drafts", draft, DRAFT_KEY);
 }

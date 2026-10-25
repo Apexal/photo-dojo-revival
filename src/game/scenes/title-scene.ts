@@ -5,7 +5,6 @@ import { FightSimulation, type FightState } from "../../simulation/fight-simulat
 import type { InputFrame } from "../../simulation/input-frame";
 import type { PlayerIndex } from "../../simulation/round-rules";
 import { geometryOf, type LibraryEntry } from "../fighter-library";
-import type { HostSession } from "../host-session";
 import { DummyInputSource, type DummyBehavior } from "../input/dummy-input-source";
 import type { PlayerInputDescriptor } from "../input/input-descriptor";
 import { KeyboardInputSource } from "../input/keyboard-input-source";
@@ -47,7 +46,7 @@ const OVERLAY_DEPTH = 50;
  * explains itself; with no captured fighters yet, a three-step strip says how
  * to get in. Any button goes to fighter select: a controller's press joins it
  * as P1, and plays a random fighter's victory line as the announcer (browsers
- * only allow sound after that first press). A phone linking up skips ahead too.
+ * only allow sound after that first press).
  */
 export class TitleScene extends Phaser.Scene {
   private setup: TitleSceneData = {};
@@ -63,7 +62,6 @@ export class TitleScene extends Phaser.Scene {
   /** Fading out to the next bout. */
   private leaving = false;
   private started = false;
-  private unsubscribeHost: (() => void) | null = null;
   /** Kept across bouts (the scene restarts for each pair): decoded once per page. */
   private announcerTakes: string[] | null = null;
   private announcerLoading = false;
@@ -115,15 +113,8 @@ export class TitleScene extends Phaser.Scene {
     });
     this.input.gamepad?.on("down", (pad: Phaser.Input.Gamepad.Gamepad) => this.start({ kind: "pad", index: pad.index }));
     this.input.on("pointerdown", () => this.start(null));
-    // A phone linking up means someone's capturing: show them the transfer on fighter select.
-    const host: HostSession | undefined = this.registry.get(REGISTRY.host);
-    this.unsubscribeHost = host?.subscribe((s) => {
-      if ((s.phones ?? 0) > 0 || s.kind === "receiving") this.start(null, false);
-    }) ?? null;
 
     this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => {
-      this.unsubscribeHost?.();
-      this.unsubscribeHost = null;
       this.input.keyboard?.removeAllListeners("keydown");
       this.input.gamepad?.removeAllListeners("down");
       this.input.removeAllListeners("pointerdown");
@@ -201,7 +192,7 @@ export class TitleScene extends Phaser.Scene {
 
   /** First visit (nothing captured yet): how to get yourself in the game. */
   private buildHowTo(cx: number, y: number): Phaser.GameObjects.GameObject[] {
-    const steps = ["📱 Scan the code", `🥋 Strike ${CAPTURE_TARGET_COUNT} poses`, "🥊 Fight as yourself"];
+    const steps = ["📷 Open the studio", `🥋 Strike ${CAPTURE_TARGET_COUNT} poses`, "🥊 Fight as yourself"];
     const gap = 330;
     const band = this.add.rectangle(cx, y, gap * steps.length + 40, 46, 0x121018, 0.7).setDepth(OVERLAY_DEPTH);
     const items: Phaser.GameObjects.GameObject[] = [band];
@@ -281,14 +272,12 @@ export class TitleScene extends Phaser.Scene {
     void loadFighterSounds(this, fighter, "announcer").then((keys) => { this.announcerTakes = keys.win; });
   }
 
-  private start(join: PlayerInputDescriptor | null, announce = true): void {
+  private start(join: PlayerInputDescriptor | null): void {
     if (this.started) return;
     this.started = true;
-    if (announce) {
-      const key = pickTake(this.announcerTakes ?? [fallbackSoundKey("win")], undefined);
-      const volume = getOptions(this.registry).voiceVolume;
-      if (volume > 0 && this.cache.audio.exists(key)) this.sound.play(key, { volume });
-    }
+    const key = pickTake(this.announcerTakes ?? [fallbackSoundKey("win")], undefined);
+    const volume = getOptions(this.registry).voiceVolume;
+    if (volume > 0 && this.cache.audio.exists(key)) this.sound.play(key, { volume });
     this.scene.start("character-select", { join: join ?? undefined } satisfies CharacterSelectData);
   }
 }

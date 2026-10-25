@@ -20,8 +20,11 @@ export function isValidRoomCode(code: string): boolean {
   return true;
 }
 
-/** "3:12" — time left before a room code refreshes (rounded up to the second). */
-export function formatCountdown(ms: number): string {
-  const total = Math.max(0, Math.ceil(ms / 1000));
-  return `${Math.floor(total / 60)}:${String(total % 60).padStart(2, "0")}`;
+/**
+ * The phone camera page a studio's QR opens: `/capture?room=CODE`. `site` is
+ * the page's origin and base path (passed in: the Worker shares this module
+ * and has neither).
+ */
+export function captureUrl(roomCode: string, site: { origin: string; base: string }): string {
+  return `${site.origin}${site.base}capture?room=${roomCode}`;
 }

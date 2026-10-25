@@ -4,10 +4,10 @@ import basicSsl from "@vitejs/plugin-basic-ssl";
 import { defaultClientConditions, type Connect, type Plugin } from "vite";
 import { defineConfig } from "vitest/config";
 
-/** Serve /capture and /about like Cloudflare Pages does (pretty URLs for capture.html, about.html). */
+/** Serve /capture, /studio and /about like Cloudflare Pages does (pretty URLs for their .html files). */
 function prettyUrls(): Plugin {
   const rewrite: Connect.NextHandleFunction = (req, _res, next) => {
-    const match = req.url?.match(/^\/(capture|about)\/?(\?.*)?$/);
+    const match = req.url?.match(/^\/(capture|studio|about)\/?(\?.*)?$/);
     if (match) req.url = `/${match[1]}.html${match[2] ?? ""}`;
     next();
   };
@@ -66,6 +66,7 @@ export default defineConfig({
     // The signaling Worker (wrangler dev on :8787) is proxied through the dev server, so pages
     // use same-origin ws(s):// and a phone only has to trust one certificate.
     proxy: workerProxy,
+    allowedHosts: [".ngrok-free.dev", "localhost"]
   },
   preview: { host: true, proxy: workerProxy },
   resolve: {
@@ -80,8 +81,11 @@ export default defineConfig({
     rollupOptions: {
       input: {
         main: resolve(import.meta.dirname, "index.html"),
+        // The phone camera page: streams to the studio (docs/character-studio.md §4).
         capture: resolve(import.meta.dirname, "capture.html"),
         about: resolve(import.meta.dirname, "about.html"),
+        // The Character Studio: builds fighters on the computer (docs/character-studio.md).
+        studio: resolve(import.meta.dirname, "studio.html"),
       },
     },
   },

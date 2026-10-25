@@ -12,7 +12,6 @@ import {
   setKeyBindings,
 } from "../src/game/input/key-bindings";
 import { CLOCK_WARNING_SECONDS, LOW_HEALTH, clockCue, clockTicked, lowHealthPulse } from "../src/game/render/hud-cues";
-import { formatCountdown } from "../src/shared/room-code";
 import { ROUND_FRAMES, createMatch, type RoundState } from "../src/simulation/round-rules";
 
 afterEach(() => setKeyBindings(DEFAULT_KEY_BINDINGS));
@@ -103,15 +102,5 @@ describe("HUD cues", () => {
     let ticks = 0;
     for (let f = 700; f > 0; f--) if (clockTicked(fighting(f), fighting(f - 1))) ticks++;
     expect(ticks).toBe(10);
-  });
-});
-
-describe("room code countdown", () => {
-  it("shows minutes and seconds, rounded up", () => {
-    expect(formatCountdown(192_000)).toBe("3:12");
-    expect(formatCountdown(191_001)).toBe("3:12");
-    expect(formatCountdown(600_000)).toBe("10:00");
-    expect(formatCountdown(500)).toBe("0:01");
-    expect(formatCountdown(-5)).toBe("0:00");
   });
 });

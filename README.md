@@ -1,6 +1,6 @@
 # Photo Dojo: Revival
 
-A browser-only 2D fighting game. Pick a fighting style and pose for sixteen photos on a phone, the phone turns them into a sprite fighter locally, sends it to a laptop over WebRTC, and two people fight with controllers or a shared keyboard. No accounts, no backend storage: fighters live in each browser's IndexedDB. See [PLAN.md](PLAN.md) for the design.
+A browser-only 2D fighting game. Open the Character Studio on a computer, pick a fighting style and pose for sixteen photos in front of a camera (a phone streaming to the computer, or the computer's own webcam), and the computer turns them into a sprite fighter locally. Then two people fight with controllers or a shared keyboard. No accounts, no backend storage: fighters live in each browser's IndexedDB. See [PLAN.md](PLAN.md) for the design and [docs/character-studio.md](docs/character-studio.md) for the studio and the phone camera.
 
 ## Run it
 
@@ -13,9 +13,20 @@ npm run dev             # Vite; open http://localhost:5173
 
 The Vite dev server proxies `/room/*` and `/turn-credentials` to the Worker, so the pages talk to signaling on their own origin.
 
-**Phones need HTTPS for the camera.** Use `npm run dev:https` (self-signed certificate), open the Network URL Vite prints on the laptop, and scan the QR code. The phone has to accept the certificate once.
+### Make a fighter
 
-Without a phone, open `/capture` on the laptop to capture with its webcam (it saves locally, then download the `.photodojo` file and use **Import fighter file**), or just pick the two built-in stick figures.
+On fighter select, **Open the studio** (or go to `/studio`). Pick a camera:
+
+- **Use a phone:** the studio shows a QR code and a 6-character code. Scan it with the phone (or open `/capture` on it and type the code), prop the phone up 3–4 m away, and its camera streams to the studio. The phone runs no models and stores nothing; it shows "Streaming to the studio" and the studio's status line. One phone at a time; if it drops (Wi-Fi blip, screen locked) it reconnects on the same code by itself.
+- **This computer's camera:** a webcam, a USB camera, or an iPhone through macOS Continuity Camera (it shows up as an ordinary webcam). Pick one from the list.
+
+Then choose **On my own** (big prompts, a pause after each pose) or **Someone's helping**, and strike the poses: match the ghost and hold still. Pose detection, background removal and the sprites all run on the computer, and the sounds are recorded with its mic. Save, and **Back to the game** returns to fighter select with the new fighter. An unfinished fighter can be picked up again after a reload.
+
+**Phones need HTTPS for the camera.** In dev, use `npm run dev:https` (self-signed certificate), open the Network URL Vite prints on the laptop, and scan the studio's QR code. The phone has to accept the certificate once.
+
+**Editing:** select a captured fighter on fighter select and click **✂ Edit** to open it in the studio: retake any pose, change the fighting style, redo the sounds or rename it, then save (same fighter, career record kept). Fighters imported from a file or made with the old phone capture can be renamed, get new sounds, or have every pose captured again, but single poses can't be retaken (the studio keeps the original cut-outs only for fighters it built).
+
+To move fighters between computers, use **Export** on fighter select and **Import fighter file** on the other one. Without any camera, just pick the built-in stick figures.
 
 ### Controls
 
@@ -60,7 +71,7 @@ Keyboard keys can be remapped in **Settings** (Tab or a pad's Select button on f
 - Callouts: FIRST BLOOD for the round's first clean hit or throw, "N HIT STREAK" for clean hits in a row (it ends when the opponent hits or throws back, or blocks, parries or breaks a throw), and PERFECT for a round won without losing any health (practice only shows hit streaks).
 - The match ends on a stats page: damage, clean hits, accuracy, longest hit streak, blocks, throws, knockdowns, perfect rounds, each player's favorite move, and how every round went. Punch for a rematch, kick for fighter select.
 - Each fighter keeps a career record across matches (not practice): wins, losses and best hit streak show on fighter select, and the stats page shows both fighters' records. Once you've picked, press down (or click the record) for the fighter's full career page: every total, clean hits by move, their favorite move and their rivals. When the two players are on different fighters, their head-to-head (or "first meeting") shows between the panels. Records are saved in this browser with the rest of your settings; deleting a fighter deletes its record and everyone's rivalry with it.
-- Fighter select works with a mouse or touch too. Click a tile to select it, then use the tile's Export or 🗑 button, or ✎ Rename on a captured fighter (type the new name, Enter to save, Esc to cancel; the fighting style can't change, since the signature photo is that style's pose). Clicking a selected tile again picks it for a player who has joined. With more than 12 fighters the grid pages: move past the last row, or click ◀ ▶.
+- Fighter select works with a mouse or touch too. Click a tile to select it, then use the tile's Export or 🗑 button, ✎ Rename on a captured fighter (type the new name, Enter to save, Esc to cancel), or ✂ Edit to open it in the studio. Clicking a selected tile again picks it for a player who has joined. With more than 12 fighters the grid pages: move past the last row, or click ◀ ▶.
 
 The frame data and the reasoning behind it are in [docs/fighting-mechanics.md](docs/fighting-mechanics.md).
 
@@ -70,7 +81,7 @@ The frame data and the reasoning behind it are in [docs/fighting-mechanics.md](d
 npm test                 # Vitest unit tests (Node, no DOM)
 npm run typecheck        # app + Worker
 npm run test:signaling   # needs worker:dev running
-npm run test:e2e         # needs dev + worker:dev; headless Chrome, real WebRTC between two tabs
+npm run test:e2e         # needs dev + worker:dev; headless Chrome: the game, the studio with a fake camera, a /capture tab streaming to /studio over real WebRTC, editing
 npm run test:e2e:gamepad # needs dev; a virtual gamepad: joining, menus, practice, rumble
 ```
 
@@ -80,32 +91,35 @@ Anything that needs a real person, phone, gamepad or another network is in [docs
 
 ## Deploy
 
-- **Site**: static, `npm run build` → `dist/`, hosted on Cloudflare Pages (`/capture` and `/about` are served from `capture.html` and `about.html`).
+- **Site**: static, `npm run build` → `dist/`, hosted on Cloudflare Pages (`/studio`, `/capture` and `/about` are served from `studio.html`, `capture.html` and `about.html`).
 - **Link previews**: set `VITE_SITE_URL` (e.g. `https://photo-dojo.pages.dev`, the repo variable `SITE_URL` in CI) so the Open Graph image URL is absolute. `public/og-image.png` is a shot of the title screen: regenerate it with `node scripts/generate-og-image.mjs` while `npm run dev` runs.
-- **Signaling**: `worker/`, a Worker plus a `SignalingRoom` Durable Object. It relays SDP/ICE between at most two sockets per room code and stores nothing. Rooms expire after 10 minutes.
+- **Signaling**: `worker/`, a Worker plus a `SignalingRoom` Durable Object. It relays SDP/ICE between at most two sockets per room code (the studio and its phone) and stores nothing. Rooms expire after 10 minutes.
 - Build the site with `VITE_SIGNALING_URL=wss://<your-worker>.workers.dev`.
 - `.github/workflows/deploy.yml` tests every push and deploys both on `main`. It needs the repo secrets `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID`, and the repo variables `VITE_SIGNALING_URL` and optionally `PAGES_PROJECT` and `SITE_URL`.
-- **TURN (optional)**: phones on cellular may need TURN. Create a Cloudflare Realtime TURN key, then run `wrangler secret put TURN_KEY_ID` and `wrangler secret put TURN_KEY_API_TOKEN` in `worker/`. Clients fetch short-lived credentials from `/turn-credentials` and fall back to STUN only when it isn't configured.
+- **TURN (optional)**: a phone on cellular, or on a network that blocks direct connections, may need TURN to stream to the studio. Create a Cloudflare Realtime TURN key, then run `wrangler secret put TURN_KEY_ID` and `wrangler secret put TURN_KEY_API_TOKEN` in `worker/`. Clients fetch short-lived credentials from `/turn-credentials` and fall back to STUN only when it isn't configured.
 
-Background removal runs ISNet (a 1024×1024 background-removal model) on a crop around the person, with ONNX Runtime Web on WebGPU (falling back to WASM, which is much slower), and keeps only what's attached to the detected skeleton (`src/capture/background-remover.ts`, `src/capture/matting.ts`). `/capture?debug=1` adds an export of the model's output and the final alpha.
+Background removal runs in the studio, on the computer: ISNet (a 1024×1024 background-removal model) on a crop around the person, with ONNX Runtime Web on WebGPU (falling back to WASM, which is much slower), and keeps only what's attached to the detected skeleton (`src/capture/background-remover.ts`, `src/capture/matting.ts`). `/studio?debug=1` adds an export of the model's output and the final alpha.
 
-The MediaPipe WASM runtime is bundled (about 13.5 MB). The pose model loads from Google's model CDN (override with `VITE_POSE_MODEL_URL`), and ONNX Runtime's WASM (~28 MB) from jsDelivr. The ISNet model (~179 MB, plus a ~91 MB fp16 copy that WebGPU uses where it can, for memory) is built locally with `uv run --with onnx --with onnxruntime --with numpy python scripts/build-matting-model.py` into `models/`, which the dev server serves; production builds point `VITE_MATTING_MODEL_URL` and `VITE_MATTING_MODEL_FP16_URL` at hosted copies. Capture favors quality over speed: it uses the heavy pose model (~31 MB) for live tracking and stills. The loading screen shows download progress, and the models are kept in the browser's Cache API (`photodojo-models-v1`), so they download once per device rather than every session.
+The MediaPipe WASM runtime is bundled (about 13.5 MB). The pose model loads from Google's model CDN (override with `VITE_POSE_MODEL_URL`), and ONNX Runtime's WASM (~28 MB) from jsDelivr. The ISNet model (~179 MB, plus a ~91 MB fp16 copy that WebGPU uses where it can, for memory) is built locally with `uv run --with onnx --with onnxruntime --with numpy python scripts/build-matting-model.py` into `models/`, which the dev server serves; production builds point `VITE_MATTING_MODEL_URL` and `VITE_MATTING_MODEL_FP16_URL` at hosted copies. The studio favors quality over speed: it uses the heavy pose model (~31 MB) for live tracking and stills. The loading screen shows download progress, and the models are kept in the browser's Cache API (`photodojo-models-v1`), so they download once per computer rather than every session.
 
-Each capture takes the sharpest of a short burst of 1080p frames.
+Each capture takes the sharpest of a short burst of frames at the camera's full resolution. With a phone, the burst is grabbed on the phone from its own camera (not from the compressed video) and sent to the studio as a PNG over the WebRTC data channel.
 
 ## Layout
 
-- `src/shared/`: fighter model, codec (chunks + `.photodojo` zip), IndexedDB storage, pose definitions and geometry, frame data, room codes. Also canonical stick-figure skeletons, used for placeholders, ghosts and test landmarks.
+- `src/shared/`: fighter model, `.photodojo` codec, IndexedDB storage, pose definitions and geometry, frame data, room codes. Also canonical stick-figure skeletons, used for placeholders, ghosts and test landmarks.
 - `src/simulation/`: the fight, in pure TypeScript with no Phaser imports. Fixed-timestep and deterministic.
-- `src/capture/`: phone pipeline (camera, MediaPipe pose + segmentation, matcher, normalizer, sounds, flow state machine, DOM UI).
-- `src/transfer/`: signaling client, peer connection, chunked sender/receiver with backpressure.
+- `src/capture/`: the capture pipeline (camera, MediaPipe pose, matcher, ISNet background removal, normalizer, sounds), used by the studio.
+- `src/studio/`: the Character Studio (`/studio`): flow, camera sources (this computer's camera or a phone), the phone's room, drafts, editing, screens.
+- `src/phone/`: the phone camera page (`/capture`).
+- `src/transfer/`: signaling client, peer connection, the phone camera protocol, and still sender/receiver with backpressure.
 - `src/game/`: Phaser scenes, input sources, rendering. Stages (scenery and an optional looping soundtrack) are in `src/game/stages/`: add a `StageDefinition` file and list it in `STAGES`; with more than one, a stage select step appears after fighter select. There are two: Dusk Dojo and Lunar Dojo (music: "Space-Time" by TomboFry, credited on stage select and the About page). The menus play "Get A Move On" by TomboFry. The music is licensed, not MIT, so it isn't in the repo: for local dev drop the files into git-ignored `public/music/`; production builds load them from an R2 bucket via `VITE_MUSIC_BASE_URL`. Without them the game just plays silently.
 - `worker/`: signaling Worker.
 - `scripts/`: asset generator (`npm run generate:assets` rebuilds `public/placeholders` and `public/sounds`), announcer placeholders (`npm run generate:announcer`: text-to-speech stand-ins for any missing `public/announcer/*.mp3`), signaling and browser smoke tests.
 
 ## Known limits
 
-- iOS may evict IndexedDB under storage pressure, so export fighters you care about. There is no cloud backup by design.
+- Fighters are built on a computer: a phone alone can't make one any more (the models don't fit in a phone's browser tab). An iPad can open the studio, with a warning that it may run out of memory.
+- Browsers (Safari especially) may evict IndexedDB under storage pressure, so export fighters you care about. There is no cloud backup by design.
 
 ## License
 

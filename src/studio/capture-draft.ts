@@ -1,10 +1,16 @@
 import type { ArchetypeId } from "../shared/archetypes";
 import type { LimbSide, SoundId } from "../shared/fighter-model";
 import { CAPTURE_KEYS } from "../shared/pose-definitions";
-import type { CaptureMode } from "./capture-flow";
-import type { PoseCaptureGeometry } from "./sprite-normalizer";
+import type { PoseCaptureGeometry } from "../capture/sprite-normalizer";
 
-export const DRAFT_VERSION = 2;
+/**
+ * "On my own" (`solo`: a long pause after each pose to get back in place, a
+ * bigger overlay) or "Someone's helping" (`helped`).
+ */
+export type CaptureMode = "helped" | "solo";
+
+/** v3: the studio's drafts (no room code; `helped`/`solo`). v2 drafts, e.g. on phones, aren't offered. */
+export const DRAFT_VERSION = 3;
 /** Drafts older than this aren't offered for resuming. */
 export const DRAFT_MAX_AGE_MS = 3 * 24 * 60 * 60 * 1000;
 
@@ -25,11 +31,24 @@ export interface CaptureDraft {
   fighterId: string;
   name: string;
   mode: CaptureMode;
-  roomCode: string | null;
   /** Null until it's picked (just before the signature pose). */
   archetype: ArchetypeId | null;
   captures: DraftCapture[];
   sounds: Partial<Record<SoundId, Blob[]>>;
+}
+
+export const FIGHTER_SOURCES_VERSION = 1;
+
+/**
+ * A saved fighter's cut-outs (the `fighterSources` store): exactly what a
+ * draft holds of each pose, so its sprites can be re-planned at one
+ * fighter-wide scale after a retake (docs/character-studio.md §6).
+ */
+export interface FighterSources {
+  version: typeof FIGHTER_SOURCES_VERSION;
+  fighterId: string;
+  captures: DraftCapture[];
+  savedAt: number;
 }
 
 /**
@@ -46,7 +65,7 @@ export interface DraftSummary {
   ageMs: number;
 }
 
-export function summarizeDraft(draft: CaptureDraft, now = Date.now()): DraftSummary {
+export function summarizeDraft(draft: Pick<CaptureDraft, "captures" | "savedAt">, now = Date.now()): DraftSummary {
   const keys = new Set(draft.captures.map((c) => c.key));
   const missing = CAPTURE_KEYS.findIndex((k) => !keys.has(k));
   return {
@@ -57,8 +76,10 @@ export function summarizeDraft(draft: CaptureDraft, now = Date.now()): DraftSumm
 }
 
 /** Worth offering: recent, current format, and at least one pose captured. */
-export function isResumable(draft: CaptureDraft | undefined, now = Date.now()): draft is CaptureDraft {
-  return !!draft && draft.version === DRAFT_VERSION && draft.captures.length > 0 && now - draft.savedAt < DRAFT_MAX_AGE_MS;
+export function isResumable(draft: unknown, now = Date.now()): draft is CaptureDraft {
+  const d = draft as Partial<CaptureDraft> | undefined;
+  return !!d && d.version === DRAFT_VERSION && Array.isArray(d.captures) && d.captures.length > 0
+    && typeof d.savedAt === "number" && now - d.savedAt < DRAFT_MAX_AGE_MS;
 }
 
 export function describeAge(ms: number): string {

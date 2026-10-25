@@ -1,14 +1,23 @@
 import "fake-indexeddb/auto";
 import { afterEach, describe, expect, it } from "vitest";
+import { openDB } from "idb";
 import {
+  DB_NAME,
+  DB_VERSION,
   closeFighterDb,
   deleteFighter,
   getSetting,
   listFighters,
   loadFighter,
+  loadFighterSources,
+  onDbBlocked,
+  openFighterDb,
   saveFighter,
+  saveFighterWithSources,
+  saveImportedFighter,
   setSetting,
 } from "../src/shared/fighter-storage";
+import { FIGHTER_SOURCES_VERSION, type FighterSources } from "../src/studio/capture-draft";
 import { fighterSnapshot, makeFighter } from "./helpers";
 
 afterEach(async () => {
@@ -28,6 +37,70 @@ describe("fighter storage", () => {
     expect(await fighterSnapshot(loaded!)).toEqual(await fighterSnapshot(a));
     await deleteFighter(a.fighterId);
     expect((await listFighters()).map((f) => f.name)).toEqual(["B"]);
+  });
+
+  it("keeps a studio fighter's sources with it, and drops them with it", async () => {
+    const f = makeFighter({ name: "Studio" });
+    const sources: FighterSources = {
+      version: FIGHTER_SOURCES_VERSION, fighterId: f.fighterId, savedAt: 5,
+      captures: [{ key: "idle", cutPng: new Blob([new Uint8Array([9, 8, 7])], { type: "image/png" }), offsetX: 1, offsetY: 2, capturedAt: 3,
+        geometry: { poseId: "idle", landmarks: [], frameWidth: 1080, frameHeight: 1920 } }],
+    };
+    await saveFighterWithSources(f, sources);
+    const back = await loadFighterSources<FighterSources>(f.fighterId);
+    expect(back?.captures[0].geometry.frameHeight).toBe(1920);
+    expect(Array.from(new Uint8Array(await back!.captures[0].cutPng.arrayBuffer()))).toEqual([9, 8, 7]);
+    // A rename (plain save) keeps them.
+    await saveFighter({ ...f, name: "Renamed" });
+    expect(await loadFighterSources(f.fighterId)).toBeDefined();
+    await deleteFighter(f.fighterId);
+    expect(await loadFighter(f.fighterId)).toBeUndefined();
+    expect(await loadFighterSources(f.fighterId)).toBeUndefined();
+    await expect(saveFighterWithSources(f, { ...sources, fighterId: "other" })).rejects.toThrow(/another fighter/);
+  });
+
+  it("an import over a studio fighter's id drops the sources (they describe another version)", async () => {
+    const f = makeFighter({ name: "Original" });
+    const sources: FighterSources = { version: FIGHTER_SOURCES_VERSION, fighterId: f.fighterId, savedAt: 1, captures: [] };
+    await saveFighterWithSources(f, sources);
+    await saveImportedFighter({ ...f, name: "From a file" });
+    expect((await loadFighter(f.fighterId))?.name).toBe("From a file");
+    expect(await loadFighterSources(f.fighterId)).toBeUndefined();
+  });
+
+  it("upgrades a v2 database, keeping its fighters", async () => {
+    await closeFighterDb();
+    const f = makeFighter({ name: "Old" });
+    const v2 = await openDB(DB_NAME, 2, {
+      upgrade(db) {
+        db.createObjectStore("fighters", { keyPath: "fighterId" });
+        db.createObjectStore("settings");
+        db.createObjectStore("drafts");
+      },
+    });
+    await v2.put("fighters", f);
+    v2.close();
+    expect(DB_VERSION).toBe(3);
+    expect((await loadFighter(f.fighterId))?.name).toBe("Old");
+    expect((await openFighterDb()).objectStoreNames.contains("fighterSources")).toBe(true);
+  });
+
+  it("an older tab holding the database open: told it's blocked; this tab gives way to a newer one", async () => {
+    await closeFighterDb();
+    // An old tab (v2) that doesn't close for upgrades.
+    const old = await openDB(DB_NAME, 2, { upgrade(db) { db.createObjectStore("fighters", { keyPath: "fighterId" }); } });
+    let blocked = 0;
+    const off = onDbBlocked(() => { blocked++; old.close(); });
+    await openFighterDb();
+    off();
+    expect(blocked).toBe(1);
+    // A newer tab upgrading: ours closes (blocking), so it isn't blocked, and ours reopens on next use.
+    const newer = await openDB(DB_NAME, DB_VERSION + 1);
+    newer.close();
+    await expect(openFighterDb()).rejects.toThrow(); // the database is newer than this code now
+    indexedDB.deleteDatabase(DB_NAME);
+    await saveFighter(makeFighter({ name: "After" }));
+    expect((await listFighters()).map((x) => x.name)).toEqual(["After"]);
   });
 
   it("stores settings", async () => {

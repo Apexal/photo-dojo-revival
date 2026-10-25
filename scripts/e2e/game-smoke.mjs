@@ -1,4 +1,4 @@
-// Headless browser smoke test of the game + phone→laptop transfer.
+// Headless browser smoke test of the game, and the Character Studio with its phone camera (/capture) and fighter editing.
 // Needs `npm run dev` (Vite) and `npm run worker:dev` running.
 //   node scripts/e2e/game-smoke.mjs [http://localhost:5173] [out-dir]
 import { chromium } from "playwright-core";
@@ -41,47 +41,34 @@ try {
   await game.waitForFunction(() => window.photoDojo.scene.isActive("character-select"), null, { timeout: 5000 });
   check((await game.evaluate(() => window.photoDojo.scene.getScene("character-select").players.every((p) => p === null))), "Enter on the title joins nobody");
   step("character select is up");
-  await game.waitForFunction(() => /^[A-Z2-9]{6}$/.test(window.photoDojo.scene.getScene("character-select").codeText.text), null, { timeout: 10000 });
-  await game.waitForFunction(() => window.photoDojo.scene.getScene("character-select").hostText.text.startsWith("Or open"), null, { timeout: 10000 });
-  const roomCode = await game.evaluate(() => window.photoDojo.scene.getScene("character-select").codeText.text);
-  step(`hosting room ${roomCode}`);
+  const panel = () => game.evaluate(() => window.photoDojo.scene.getScene("character-select").addObjects.filter((o) => o.type === "Text").map((o) => o.text));
+  check((await panel()).includes("Open the studio (N)"), `the Add a fighter panel offers the studio (${JSON.stringify(await panel())})`);
   await game.waitForTimeout(500);
   await game.screenshot({ path: `${OUT}/01-select.png` });
 
-  // --- phone → laptop transfer over real WebRTC, using the app's own modules ---
-  const phone = await ctx.newPage();
-  watch(phone, "phone");
-  await phone.goto(BASE + "/capture.html?room=" + roomCode);
-  const sent = await phone.evaluate(async (code) => {
+  // --- a test fighter straight into IndexedDB (as the studio or an import would), then /?to=select boots into fighter select ---
+  const sent = await game.evaluate(async () => {
     const { loadPlaceholderFighter } = await import("/src/game/fighter-library.ts");
-    const { SignalingClient } = await import("/src/transfer/signaling-client.ts");
-    const { connectAsGuest } = await import("/src/transfer/peer-connection.ts");
-    const { sendFighter } = await import("/src/transfer/fighter-sender.ts");
+    const { saveFighter } = await import("/src/shared/fighter-storage.ts");
     const f = await loadPlaceholderFighter("placeholder-blue", "/");
     const fighter = { ...f, fighterId: crypto.randomUUID(), name: "Wire Blue", createdAt: Date.now(),
       sounds: { attack: null, hurt: null, win: null } };
-    const { client, welcome } = await SignalingClient.connect(code, "guest");
-    const link = await connectAsGuest(client, welcome.peerPresent);
-    let last = 0;
-    await sendFighter(link.channel, fighter, { onProgress: (p) => { last = p.sentBytes / p.totalBytes; } });
-    link.close();
-    client.close();
-    return { id: fighter.fighterId, progress: last };
-  }, roomCode);
-  check(sent.progress === 1, "sender reported full progress");
-  step("phone sent a fighter over WebRTC and got an ack");
-  await game.waitForFunction((id) => window.photoDojo.registry.get("library").some((e) => e.fighter.fighterId === id), sent.id, { timeout: 10000 });
+    await saveFighter(fighter);
+    return { id: fighter.fighterId };
+  });
+  await game.goto(BASE + "/?to=select");
+  await game.waitForFunction(() => window.photoDojo?.scene.isActive("character-select"), null, { timeout: 20000 });
+  check(!(await game.evaluate(() => window.photoDojo.scene.isActive("title"))) && (await game.evaluate(() => location.search)) === "", "/?to=select opens fighter select (not the title) and drops the parameter");
+  check(await game.evaluate((id) => window.photoDojo.registry.get("library")[0]?.fighter.fighterId === id, sent.id), "the saved fighter is first in the library after the reload");
   const stored = await game.evaluate(async (id) => {
     const { loadFighter } = await import("/src/shared/fighter-storage.ts");
     const f = await loadFighter(id);
     return f ? { name: f.name, kickBytes: f.poses.kick.imageBlob.size, alternates: Object.values(f.poseVariants ?? {}).flat().length } : null;
   }, sent.id);
-  check(stored?.name === "Wire Blue" && stored.kickBytes > 1000, "received fighter is in IndexedDB");
-  check(stored.alternates === 5, `pose alternates (second stance included) survived the transfer (${stored.alternates})`);
-  step(`laptop saved it to IndexedDB and the grid updated (${JSON.stringify(stored)})`);
+  check(stored?.name === "Wire Blue" && stored.kickBytes > 1000 && stored.alternates === 5, `test fighter stored with its pose alternates (${JSON.stringify(stored)})`);
+  step(`saved a test fighter; /?to=select booted straight into fighter select with it (${JSON.stringify(stored)})`);
   await game.waitForTimeout(400);
-  await game.screenshot({ path: `${OUT}/02-select-after-transfer.png` });
-  await phone.close();
+  await game.screenshot({ path: `${OUT}/02-select-with-fighter.png` });
 
   // --- mouse: select a tile, export from the tile's own button, re-import through the toolbar ---
   // First tile of the grid (character-select-scene.ts: GRID_X 40, GRID_Y 116, TILE 120); its buttons sit along its bottom edge.
@@ -97,6 +84,9 @@ try {
   await game.setInputFiles("#import-file", exportPath);
   await game.waitForFunction(() => /^(Imported|Updated)/.test(document.getElementById("toolbar-status").textContent), null, { timeout: 5000 });
   step("re-imported the exported file");
+  // The same fighter again reloads its images (a new revision): let the grid redraw with them before clicking it.
+  await game.waitForFunction(() => !window.photoDojo.scene.getScene("character-select").load.isLoading(), null, { timeout: 5000 });
+  await game.waitForTimeout(100);
   // Delete needs a confirm on the tile; "Keep" backs out.
   await clickGame(game, TILE_X + TILE / 2, TILE_Y + TILE / 2);
   await clickGame(game, TILE_X + 96, TILE_Y + TILE - 16); // 🗑
@@ -392,41 +382,104 @@ try {
   check(timer === "PRACTICE" && hurt < 100, `practice: no clock (${timer}), health refills (was ${hurt})`);
   step("practice mode: dummy blocks on command, health refills, no timer");
 
-  // --- capture page renders and reaches the live camera screen with the fake camera ---
-  const cap = await ctx.newPage();
-  watch(cap, "capture");
-  await cap.goto(BASE + "/capture?room=" + roomCode);
-  await cap.getByText("Friend holds the phone").click();
-  await cap.getByText("Start camera").click();
-  // The phone connects to the laptop as soon as the camera starts, not after the poses.
-  await cap.waitForSelector(".link-chip[data-state=connected]", { timeout: 30000 });
-  await cap.waitForSelector(".capture video", { timeout: 60000 });
-  await cap.waitForTimeout(1500);
-  const hud = await cap.evaluate(() => ({
-    label: document.querySelector("[data-hud=label]")?.textContent,
-    hint: document.querySelector("[data-hud=hint]")?.textContent,
-    videoWidth: document.querySelector("video")?.videoWidth,
-  }));
-  check(hud.label === "Fighting stance" && hud.videoWidth > 0, `capture HUD live: ${JSON.stringify(hud)}`);
-  step(`capture page live: ${JSON.stringify(hud)}`);
-  await cap.screenshot({ path: `${OUT}/08-capture-live.png` });
+  // --- phone camera page (/capture): code entry (with a link to the studio on a computer), then the camera starts ---
+  const cam = await ctx.newPage();
+  watch(cam, "camera");
+  await cam.goto(BASE + "/capture");
+  await cam.getByText("Enter the code the studio shows").waitFor({ timeout: 15000 });
+  check((await cam.getByRole("link", { name: "Open the studio" }).getAttribute("href")) === "/studio", "/capture on a computer links to the studio");
+  await cam.fill("#studio-code", "nope");
+  await cam.getByRole("button", { name: "Connect" }).click();
+  await cam.getByText("That isn't a studio code").waitFor({ timeout: 5000 });
+  await cam.screenshot({ path: `${OUT}/11-camera-code-entry.png` });
+  step("/capture shows code entry and rejects a bad code");
+  await cam.fill("#studio-code", "zz2345");
+  await cam.getByRole("button", { name: "Connect" }).click();
+  await cam.waitForFunction(() => document.querySelector("video.preview")?.videoWidth > 0, null, { timeout: 15000 });
+  const camState = await cam.evaluate(() => ({ url: location.search, headline: document.querySelector(".headline")?.textContent }));
+  check(camState.url === "?room=ZZ2345" && camState.headline === "Connecting to the studio…", `camera page live: ${JSON.stringify(camState)}`);
+  step(`/capture opened the camera and is waiting for studio ZZ2345`);
+  await cam.close();
 
-  // No person in the fake camera: after 10 s the manual fallback appears; capturing fails cleanly and retries the pose.
-  await cap.waitForSelector("[data-hud=manual]:not([hidden])", { timeout: 15000 });
-  await cap.click("[data-hud=manual]");
-  await cap.waitForSelector(".toast", { timeout: 5000 });
-  await cap.waitForFunction(() => window.photoDojoCapture.flow.screen.name === "pose", null, { timeout: 8000 });
-  step("manual capture with nobody in frame fails gracefully and retries the pose");
+  // --- Character Studio (/studio, docs/character-studio.md) ---
+  // A /capture?room= tab streams to the studio: the video arrives, a still comes back as a PNG at the phone camera's size,
+  // and a phone that drops pauses the studio on "Phone disconnected" until it reconnects on the same code by itself.
+  const studio = await ctx.newPage();
+  watch(studio, "studio");
+  await studio.goto(BASE + "/studio");
+  await studio.click("[data-camera=phone]");
+  await studio.waitForFunction(() => /^[A-Z2-9]{6}$/.test(document.querySelector("[data-room-code]")?.textContent ?? ""), null, { timeout: 10000 });
+  const studioCode = await studio.textContent("[data-room-code]");
+  await studio.waitForSelector("img.qr", { timeout: 10000 });
+  check(await studio.evaluate(() => window.photoDojoStudio.cameraEnv().phone.url.endsWith("/capture?room=" + window.photoDojoStudio.phoneHost.roomCode)), "the studio's QR opens /capture?room=CODE");
+  await studio.waitForFunction(() => window.photoDojoStudio.phoneHost.status.kind === "waiting", null, { timeout: 10000 });
+  await studio.screenshot({ path: `${OUT}/12-studio-phone-setup.png` });
+  step(`studio opened room ${studioCode} for a phone`);
+  const phoneCam = await ctx.newPage();
+  watch(phoneCam, "phone camera");
+  await phoneCam.goto(BASE + "/capture?room=" + studioCode);
+  await studio.waitForFunction(() => { const s = window.photoDojoStudio.source; return s?.kind === "phone" && s.status.kind === "ready" && s.video.videoWidth > 0; }, null, { timeout: 30000 });
+  await phoneCam.waitForFunction(() => document.querySelector(".headline")?.textContent === "Streaming to the studio", null, { timeout: 10000 });
+  const phoneVideo = await phoneCam.evaluate(() => ({ width: document.querySelector("video.preview").videoWidth, height: document.querySelector("video.preview").videoHeight }));
+  const remoteStill = await studio.evaluate(async () => {
+    const source = window.photoDojoStudio.source;
+    const raw = await source.link.requestStill({ x: 0.25, y: 0.1, width: 0.5, height: 0.8 }, 3);
+    const magic = Array.from(new Uint8Array(await raw.blob.slice(0, 8).arrayBuffer()));
+    const { frame, sharpness } = await source.grabStill(null, 3);
+    return { mime: raw.blob.type, width: raw.width, height: raw.height, bytes: raw.blob.size, magic, frame: [frame.width, frame.height], sharpness: sharpness.length, live: [source.width, source.height] };
+  });
+  check(remoteStill.mime === "image/png" && remoteStill.magic.join() === "137,80,78,71,13,10,26,10", `the phone's still is a PNG (${JSON.stringify(remoteStill)})`);
+  check(remoteStill.width === phoneVideo.width && remoteStill.height === phoneVideo.height && remoteStill.frame.join() === `${phoneVideo.width},${phoneVideo.height}` && remoteStill.sharpness === 3,
+    `still at the phone camera's size ${JSON.stringify(phoneVideo)}: ${JSON.stringify(remoteStill)}`);
+  step(`phone video reached the studio (${remoteStill.live.join("×")}); still request → ${remoteStill.width}×${remoteStill.height} PNG, ${(remoteStill.bytes / 1024).toFixed(0)} KB`);
+  await studio.screenshot({ path: `${OUT}/13-studio-phone-ready.png` });
+  await studio.click("[data-mode=helped]");
+  await studio.click("[data-action=start]");
+  await studio.getByText("Let's go").click();
+  await studio.waitForFunction(() => window.photoDojoStudio.flow.screen.name === "pose", null, { timeout: 90000 });
+  await phoneCam.waitForFunction(() => document.body.innerText.includes("Pose 1/16 — Fighting stance"), null, { timeout: 10000 });
+  await studio.waitForTimeout(1000);
+  await studio.screenshot({ path: `${OUT}/14-studio-phone-live.png` });
+  step("studio live on the phone's video; the phone shows the studio's status line");
+  // The phone drops without a bye (as when Wi-Fi blips).
+  await phoneCam.evaluate(() => window.photoDojoCamera.connection.session.lose("e2e: link dropped"));
+  await studio.waitForFunction(() => window.photoDojoStudio.flow.screen.name === "cameraLost", null, { timeout: 15000 });
+  await studio.screenshot({ path: `${OUT}/15-studio-phone-lost.png` });
+  check((await studio.textContent("[data-room-code]")) === studioCode, "the studio shows the same code again");
+  await studio.waitForFunction(() => {
+    const app = window.photoDojoStudio;
+    return app.flow.screen.name === "pose" && app.flow.screen.poseIndex === 0 && app.source?.status.kind === "ready";
+  }, null, { timeout: 30000 });
+  check((await studio.evaluate(() => window.photoDojoStudio.phoneHost.roomCode)) === studioCode, "reconnected on the same room code");
+  await phoneCam.waitForFunction(() => document.querySelector(".headline")?.textContent === "Streaming to the studio", null, { timeout: 10000 });
+  step("phone dropped → studio on cameraLost → phone reconnected on the same code → back on pose 1");
+  // Leaving the studio says bye: the phone stops retrying.
+  await studio.goto("about:blank");
+  await phoneCam.waitForFunction(() => document.querySelector(".headline")?.textContent === "The studio closed", null, { timeout: 15000 });
+  step("left the studio → the phone shows “The studio closed”");
+  await phoneCam.close();
+  await studio.close();
 
-  step(`phone pre-connected: ${await cap.textContent(".link-chip")}`);
-
-  // Capture draft: five poses in, reload the page, resume at pose 6.
-  const inject = (keys) => cap.evaluate(async (keys) => {
+  // The studio with this computer's camera (Chrome's fake one): live, then injected captures through to a saved fighter.
+  const local = await ctx.newPage();
+  watch(local, "studio local");
+  await local.goto(BASE + "/studio");
+  await local.click("[data-camera=local]");
+  await local.waitForFunction(() => { const s = window.photoDojoStudio.source; return s?.kind === "local" && s.status.kind === "ready"; }, null, { timeout: 15000 });
+  await local.click("[data-action=start]");
+  await local.getByText("Let's go").click();
+  await local.waitForFunction(() => window.photoDojoStudio.flow.screen.name === "pose", null, { timeout: 90000 });
+  await local.waitForTimeout(1000);
+  const localHud = await local.evaluate(() => ({ label: document.querySelector("[data-hud=label]")?.textContent, videoWidth: document.querySelector(".live video")?.videoWidth }));
+  check(localHud.label === "Fighting stance" && localHud.videoWidth > 0, `studio live on the local camera: ${JSON.stringify(localHud)}`);
+  await local.screenshot({ path: `${OUT}/16-studio-local-live.png` });
+  step(`studio live on this computer's camera: ${JSON.stringify(localHud)}`);
+  await local.evaluate(async () => {
     const { loadPlaceholderFighter } = await import("/src/game/fighter-library.ts");
     const { captureTargetsFor } = await import("/src/shared/pose-definitions.ts");
-    const f = await loadPlaceholderFighter("placeholder-red", "/"); // a brawler
-    const app = window.photoDojoCapture;
-    for (const t of captureTargetsFor(f.archetype).filter((t) => keys.includes(t.key))) {
+    const f = await loadPlaceholderFighter("placeholder-green", "/");
+    const app = window.photoDojoStudio;
+    for (const t of captureTargetsFor(f.archetype)) {
       const pose = t.variant ? f.poseVariants[t.poseId][t.variant - 1] : f.poses[t.poseId];
       const bmp = await createImageBitmap(pose.imageBlob);
       const image = new OffscreenCanvas(512, 512);
@@ -439,48 +492,145 @@ try {
       });
     }
     await app.renderSprites();
-    await app.saveDraftNow();
-  }, keys);
-  await inject(["idle", "idle-2", "walk", "block", "crouch"]);
-  await cap.reload();
-  await cap.getByText("Pick up where you left off?").waitFor({ timeout: 10000 });
-  check((await cap.textContent(".resume")).includes("5 of 16"), "resume card shows progress");
-  await cap.getByText("Resume", { exact: true }).click();
-  await cap.getByText("Start camera").click();
-  await cap.waitForFunction(() => document.querySelector("[data-hud=step]")?.textContent?.startsWith("6 / 16"), null, { timeout: 60000 });
-  step("draft survived a reload: resumed at pose 6 / 16");
-
-  // Fill in the rest and drive the remaining capture UI.
-  await inject(["punch", "punch-2", "kick", "kick-2", "jump", "hurt", "hurt-2", "win", "win-2", "signature", "handshake"]);
-  await cap.evaluate(() => {
-    const app = window.photoDojoCapture;
     app.stopLive();
-    app.flow = { ...app.flow, archetype: "brawler", screen: { name: "review" } };
+    app.flow = { ...app.flow, archetype: f.archetype, screen: { name: "review" } };
     app.render();
   });
-  check((await cap.locator(".strip img").count()) === 16, "review strip shows all 16 poses");
-  check((await cap.getByText("Style: Brawler · change").count()) === 1, "review shows the fighting style");
-  await cap.getByText("Looks good").click();
-  await cap.getByText("Battle cry").waitFor();
-  await cap.getByText("Skip this one").click();
-  await cap.getByText("Skip all sounds").click();
-  await cap.getByPlaceholder("Fighter name").fill("Phone Red");
-  await cap.waitForTimeout(1200);
-  await cap.screenshot({ path: `${OUT}/09-capture-preview.png` });
-  await cap.getByText("Send to game").click();
-  await cap.getByText("Sent!").waitFor({ timeout: 30000 }).catch(async (e) => {
-    await cap.screenshot({ path: `${OUT}/10-send-failed.png` });
-    console.log("capture screen:", await cap.evaluate(() => JSON.stringify(window.photoDojoCapture.flow.screen)));
-    throw e;
+  check((await local.locator(".strip img").count()) === 16, "studio review strip shows all 16 poses");
+  await local.screenshot({ path: `${OUT}/17-studio-review.png` });
+  await local.getByText("Looks good").click();
+  await local.getByText("Battle cry").waitFor();
+  await local.getByText("Skip all sounds").click();
+  await local.getByPlaceholder("Fighter name").fill("Studio Green");
+  await local.waitForTimeout(800);
+  await local.screenshot({ path: `${OUT}/18-studio-preview.png` });
+  await local.getByText("Save fighter").click();
+  await local.getByRole("heading", { name: "Saved" }).waitFor({ timeout: 15000 });
+  const saved = await local.evaluate(async () => {
+    const { listFighters, loadFighterSources, loadDraft } = await import("/src/shared/fighter-storage.ts");
+    const f = (await listFighters()).find((x) => x.name === "Studio Green");
+    const sources = f && await loadFighterSources(f.fighterId);
+    return f ? { id: f.fighterId, sources: sources?.captures.length, draft: (await loadDraft()) ?? null } : null;
   });
-  step("capture UI: review → sounds → preview → Send to game → Sent!");
-  await game.waitForFunction(() => window.photoDojo.registry.get("library").some((e) => e.fighter.name === "Phone Red"), null, { timeout: 10000 });
-  step("laptop received the fighter sent from the capture page");
-  const phoneCopy = await cap.evaluate(async () => {
-    const { listFighters } = await import("/src/shared/fighter-storage.ts");
-    return (await listFighters()).some((f) => f.name === "Phone Red");
+  check(saved?.sources === 16 && saved.draft === null, `studio saved the fighter with its 16 sources and dropped the draft (${JSON.stringify(saved)})`);
+  await local.screenshot({ path: `${OUT}/19-studio-saved.png` });
+  step("studio: review → sounds → preview → Save → saved with its sources");
+  // "Back to the game" goes to /?to=select: fighter select, with the new fighter loaded at boot.
+  await local.getByRole("link", { name: "Back to the game" }).last().click();
+  await local.waitForFunction(() => window.photoDojo?.scene.isActive("character-select"), null, { timeout: 20000 });
+  check(await local.evaluate((id) => window.photoDojo.registry.get("library").some((e) => e.fighter.fighterId === id && e.fighter.name === "Studio Green"), saved.id), "back in the game, the studio's fighter is in the library");
+  step("studio → Back to the game → fighter select with the studio's fighter");
+  // The panel is compact now (there are captured fighters): its "Open the studio" sits beside the previews.
+  await local.waitForTimeout(800); // past the intro
+  const studioButton = await local.evaluate(() => {
+    const b = window.photoDojo.scene.getScene("character-select").addObjects.find((o) => o.text === "Open the studio (N)");
+    return b && { x: b.x, y: b.y + b.height / 2 };
   });
-  check(phoneCopy, "phone saved its own copy first");
+  check(studioButton, "fighter select has an Open the studio button");
+  await local.screenshot({ path: `${OUT}/20-select-back-from-studio.png` });
+  await Promise.all([local.waitForURL(/\/studio$/, { timeout: 10000 }), clickGame(local, studioButton.x, studioButton.y)]);
+  await local.waitForSelector("[data-camera=phone]", { timeout: 15000 });
+  step("fighter select → Open the studio → /studio");
+
+  // --- editing saved fighters (docs/character-studio.md §6) ---
+  await local.goto(BASE + "/studio?edit=not-a-fighter");
+  await local.getByText("That fighter isn't on this computer").waitFor({ timeout: 15000 });
+  step("/studio?edit= with an unknown id: “That fighter isn't on this computer”");
+  // Wire Blue II was saved straight into storage: no sources, so no single retakes.
+  await local.goto(BASE + "/studio?edit=" + sent.id);
+  await local.waitForFunction(() => window.photoDojoStudio.flow.screen.name === "review", null, { timeout: 15000 });
+  const sourceless = await local.evaluate(() => ({
+    edit: window.photoDojoStudio.flow.edit,
+    images: document.querySelectorAll(".strip img").length,
+    enabled: document.querySelectorAll(".strip button:not(:disabled)").length,
+    recapture: !!document.querySelector("[data-action=recapture-all]"),
+    heading: document.querySelector("h2")?.textContent,
+  }));
+  check(sourceless.edit?.hasSources === false && sourceless.images === 16 && sourceless.enabled === 0 && sourceless.recapture && sourceless.heading === "Editing Wire Blue II",
+    `a fighter without sources opens for rename / sounds / capture everything again (${JSON.stringify(sourceless)})`);
+  await local.screenshot({ path: `${OUT}/21-studio-edit-sourceless.png` });
+  step("editing a fighter without sources: its sprites shown, single retakes off, “Capture all poses again”");
+
+  // The studio's fighter, from its tile's Edit: retake one pose (injected), rename, save. Same id, its record kept.
+  await local.evaluate(async (id) => {
+    const { getSetting, setSetting } = await import("/src/shared/fighter-storage.ts");
+    await setSetting("fighterRecords", { ...((await getSetting("fighterRecords")) ?? {}), [id]: { matches: 2, wins: 1, losses: 1 } });
+  }, saved.id);
+  const beforeEdit = await local.evaluate(async (id) => {
+    const { listFighters, loadFighter, loadFighterSources } = await import("/src/shared/fighter-storage.ts");
+    const f = await loadFighter(id);
+    const sources = await loadFighterSources(id);
+    return { count: (await listFighters()).length, createdAt: f.createdAt, kick: Array.from(new Uint8Array(await f.poses.kick.imageBlob.arrayBuffer())).join(), kickAt: sources.captures.find((c) => c.key === "kick").capturedAt };
+  }, saved.id);
+  await local.goto(BASE + "/?to=select");
+  await local.waitForFunction(() => window.photoDojo?.scene.isActive("character-select"), null, { timeout: 20000 });
+  await local.waitForTimeout(800); // past the intro
+  const tile = await local.evaluate((id) => {
+    const sc = window.photoDojo.scene.getScene("character-select");
+    return sc.tilePosition(sc.library.findIndex((e) => e.fighter.fighterId === id));
+  }, saved.id);
+  await clickGame(local, tile.x + TILE / 2, tile.y + TILE / 2);
+  await local.waitForTimeout(100);
+  await local.screenshot({ path: `${OUT}/22-select-edit-button.png` });
+  const editButton = await local.evaluate(() => {
+    const b = window.photoDojo.scene.getScene("character-select").tileButtons.find((o) => o.text === "✂ Edit");
+    return b && { x: b.x + b.width / 2, y: b.y + b.height / 2 };
+  });
+  check(editButton, "the selected captured fighter's tile has Edit");
+  await Promise.all([local.waitForURL((u) => u.pathname === "/studio" && u.searchParams.get("edit") === saved.id, { timeout: 10000 }), clickGame(local, editButton.x, editButton.y)]);
+  await local.waitForFunction(() => window.photoDojoStudio.flow.screen.name === "review", null, { timeout: 15000 });
+  check(await local.evaluate(() => window.photoDojoStudio.flow.edit?.hasSources === true && document.querySelectorAll(".strip button:not(:disabled)").length === 16), "the studio's fighter opens with its sources: every pose can be retaken");
+  step("fighter select → ✂ Edit → /studio?edit=<id> on the review");
+  await local.click('.strip [data-key="kick"]');
+  await local.waitForFunction(() => window.photoDojoStudio.flow.screen.name === "camera", null, { timeout: 5000 });
+  await local.click("[data-camera=local]");
+  await local.waitForFunction(() => { const s = window.photoDojoStudio.flow.screen; return s.name === "pose" && s.retake && window.photoDojoStudio.source?.status.kind === "ready"; }, null, { timeout: 15000 });
+  await local.evaluate(async () => {
+    const { loadPlaceholderFighter } = await import("/src/game/fighter-library.ts");
+    const pose = (await loadPlaceholderFighter("placeholder-red", "/")).poses.kick;
+    const app = window.photoDojoStudio;
+    const bmp = await createImageBitmap(pose.imageBlob);
+    const image = new OffscreenCanvas(512, 512);
+    image.getContext("2d").drawImage(bmp, 0, 0);
+    app.stopLive();
+    app.captures.set("kick", {
+      cut: { image, offsetX: 0, offsetY: 0 },
+      geometry: { poseId: "kick", landmarks: pose.landmarks.map((l) => ({ x: l.x / 512, y: l.y / 512, visibility: l.visibility })), frameWidth: 512, frameHeight: 512 },
+      capturedAt: Date.now(),
+      ...(pose.attackSide ? { attackSide: pose.attackSide } : {}),
+    });
+    await app.renderSprites();
+    app.dispatch({ type: "poseCaptured" });
+    app.dispatch({ type: "graceElapsed" });
+  });
+  await local.waitForFunction(() => window.photoDojoStudio.flow.screen.name === "review", null, { timeout: 5000 });
+  await local.getByText("Next: sounds").click();
+  await local.getByText("Skip all sounds").click();
+  await local.getByPlaceholder("Fighter name").fill("Studio Green II");
+  await local.getByText("Save changes").click();
+  await local.getByRole("heading", { name: "Saved" }).waitFor({ timeout: 15000 });
+  await local.screenshot({ path: `${OUT}/23-studio-edit-saved.png` });
+  const afterEdit = await local.evaluate(async (id) => {
+    const { getSetting, listFighters, loadFighter, loadFighterSources, loadDraft } = await import("/src/shared/fighter-storage.ts");
+    const f = await loadFighter(id);
+    const sources = await loadFighterSources(id);
+    return {
+      count: (await listFighters()).length, name: f.name, createdAt: f.createdAt,
+      kick: Array.from(new Uint8Array(await f.poses.kick.imageBlob.arrayBuffer())).join(),
+      sources: sources.captures.length, kickAt: sources.captures.find((c) => c.key === "kick").capturedAt,
+      record: (await getSetting("fighterRecords"))?.[id], draft: (await loadDraft()) ?? null,
+    };
+  }, saved.id);
+  check(afterEdit.count === beforeEdit.count && afterEdit.name === "Studio Green II" && afterEdit.createdAt === beforeEdit.createdAt,
+    `the edit saved over the same fighter (${afterEdit.count} fighters, was ${beforeEdit.count}; ${afterEdit.name}; createdAt kept: ${afterEdit.createdAt === beforeEdit.createdAt})`);
+  check(afterEdit.kick !== beforeEdit.kick && afterEdit.sources === 16 && afterEdit.kickAt > beforeEdit.kickAt, `the retaken kick is in the fighter and its sources (sources ${afterEdit.sources})`);
+  check(afterEdit.record?.matches === 2 && afterEdit.draft === null, `its career record is kept, and no draft was written (${JSON.stringify({ record: afterEdit.record, draft: afterEdit.draft })})`);
+  step("edited: retook the kick, renamed, saved over the same id with its sources; career record kept");
+  await local.getByRole("link", { name: "Back to the game" }).last().click();
+  await local.waitForFunction(() => window.photoDojo?.scene.isActive("character-select"), null, { timeout: 20000 });
+  check(await local.evaluate((id) => window.photoDojo.registry.get("library").filter((e) => e.fighter.fighterId === id).map((e) => e.fighter.name).join() === "Studio Green II", saved.id), "back in the game, the edited fighter is in the library once, renamed");
+  step("studio → Back to the game → the edited fighter in the library");
+  await local.close();
 
   const realErrors = errors.filter((e) => !/favicon/.test(e));
   if (realErrors.length) {

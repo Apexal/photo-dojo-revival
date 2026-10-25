@@ -1,4 +1,4 @@
-import type { Rect } from "./matting";
+import type { Rect } from "../shared/canvas";
 
 /**
  * Picking the sharpest frame of a short burst: motion blur at the moment of

@@ -51,7 +51,7 @@ export interface Fighter {
 
 export const MAX_SOUND_TAKES = 3;
 
-/** Longest name a player can type: the phone's name field, and renaming on the laptop. */
+/** Longest name a player can type: the studio's name field, and renaming on fighter select. */
 export const MAX_TYPED_NAME_LENGTH = 24;
 
 /** A typed name, tidied: trimmed, runs of spaces made one, cut to the limit. Empty if nothing's left. */

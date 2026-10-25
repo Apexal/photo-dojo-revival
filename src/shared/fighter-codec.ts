@@ -16,16 +16,19 @@ import {
   type SoundId,
 } from "./fighter-model";
 
-/** Payload bytes per binary chunk; each chunk message also carries an 8-byte header. */
-export const CHUNK_SIZE = 16 * 1024;
-export const CHUNK_HEADER_BYTES = 8;
+/**
+ * fighter.json's `chunkSize`: left over from when fighters were sent over a
+ * data channel in chunks. Still written and checked, so files stay readable
+ * by older versions of the game and the other way round.
+ */
+const MANIFEST_CHUNK_SIZE = 16 * 1024;
 /**
  * Generous caps on what a manifest may claim, checked before anything is
- * allocated: the receiver takes it from whoever has the room code.
+ * allocated: a fighter file can come from anywhere.
  */
 export const MAX_PART_BYTES = 8 * 1024 * 1024;
 export const MAX_FIGHTER_BYTES = 48 * 1024 * 1024;
-/** The fighter's name as typed on the phone (the field's maxLength), with room to spare. */
+/** The fighter's name as typed in the studio (the field's maxLength), with room to spare. */
 export const MAX_NAME_LENGTH = 64;
 /** Poses and the thumbnail are PNGs; sounds whatever MediaRecorder makes. */
 const MIME_TYPES: Record<PartKind, RegExp> = {
@@ -73,12 +76,6 @@ export interface VariantPoseMeta {
   attackSide?: LimbSide;
 }
 
-export type TransferMessage =
-  | FighterManifest
-  | { type: "done" }
-  | { type: "ack"; fighterId: string }
-  | { type: "error"; message: string };
-
 export class FighterCodecError extends Error {
   override name = "FighterCodecError";
 }
@@ -91,7 +88,7 @@ export interface EncodedFighter {
 
 const bytesOf = async (blob: Blob) => new Uint8Array(await blob.arrayBuffer());
 
-export async function encodeFighter(fighter: Fighter, chunkSize = CHUNK_SIZE): Promise<EncodedFighter> {
+export async function encodeFighter(fighter: Fighter): Promise<EncodedFighter> {
   const parts: ManifestPart[] = [];
   const data: Uint8Array[] = [];
   const push = async (part: Omit<ManifestPart, "byteLength" | "mimeType">, blob: Blob, fallbackType: string) => {
@@ -135,7 +132,7 @@ export async function encodeFighter(fighter: Fighter, chunkSize = CHUNK_SIZE): P
       schemaVersion: 2,
       archetype: fighter.archetype,
       createdAt: fighter.createdAt,
-      chunkSize,
+      chunkSize: MANIFEST_CHUNK_SIZE,
       parts,
       landmarks: pick((p) => p.landmarks),
       anchors: pick((p) => p.anchorPoint),
@@ -144,33 +141,6 @@ export async function encodeFighter(fighter: Fighter, chunkSize = CHUNK_SIZE): P
     },
     parts: data,
   };
-}
-
-export function chunkCount(byteLength: number, chunkSize: number): number {
-  return Math.ceil(byteLength / chunkSize);
-}
-
-/** Binary chunk messages for all parts: [u32 part index][u32 chunk index][payload]. */
-export function* chunkParts(parts: Uint8Array[], chunkSize = CHUNK_SIZE): Generator<Uint8Array> {
-  for (let p = 0; p < parts.length; p++) {
-    const bytes = parts[p];
-    const count = chunkCount(bytes.byteLength, chunkSize);
-    for (let c = 0; c < count; c++) {
-      const payload = bytes.subarray(c * chunkSize, Math.min(bytes.byteLength, (c + 1) * chunkSize));
-      const message = new Uint8Array(CHUNK_HEADER_BYTES + payload.byteLength);
-      const view = new DataView(message.buffer);
-      view.setUint32(0, p);
-      view.setUint32(4, c);
-      message.set(payload, CHUNK_HEADER_BYTES);
-      yield message;
-    }
-  }
-}
-
-export function parseChunkHeader(message: Uint8Array): { partIndex: number; chunkIndex: number; payload: Uint8Array } {
-  if (message.byteLength < CHUNK_HEADER_BYTES) throw new FighterCodecError("Chunk shorter than its header");
-  const view = new DataView(message.buffer, message.byteOffset, message.byteLength);
-  return { partIndex: view.getUint32(0), chunkIndex: view.getUint32(4), payload: message.subarray(CHUNK_HEADER_BYTES) };
 }
 
 const isFiniteNumber = (n: unknown): n is number => typeof n === "number" && Number.isFinite(n);
@@ -302,88 +272,6 @@ export function decodeFighter(manifest: FighterManifest, parts: Uint8Array[]): F
     sounds,
     thumbnailBlob: blobOf(indexOf((p) => p.kind === "thumbnail")),
   };
-}
-
-/**
- * Reassembles a fighter from data-channel messages: manifest (JSON string),
- * binary chunks in any order, then {type:"done"}.
- */
-export class FighterAssembler {
-  private manifest: FighterManifest | null = null;
-  private buffers: Uint8Array[] = [];
-  private received: Set<number>[] = [];
-  private done = false;
-  bytesReceived = 0;
-
-  get totalBytes(): number {
-    return this.manifest?.parts.reduce((sum, p) => sum + p.byteLength, 0) ?? 0;
-  }
-
-  get isDone(): boolean {
-    return this.done;
-  }
-
-  /** Returns the parsed control message for strings, or null for binary chunks. */
-  accept(message: string | ArrayBuffer | Uint8Array): TransferMessage | null {
-    if (typeof message === "string") {
-      let parsed: TransferMessage;
-      try {
-        parsed = JSON.parse(message);
-      } catch {
-        throw new FighterCodecError("Control message is not JSON");
-      }
-      if (parsed.type === "manifest") this.start(validateManifest(parsed));
-      else if (parsed.type === "done") {
-        if (!this.manifest) throw new FighterCodecError("Got done before the manifest");
-        this.done = true;
-      }
-      return parsed;
-    }
-    this.acceptChunk(message instanceof Uint8Array ? message : new Uint8Array(message));
-    return null;
-  }
-
-  private start(manifest: FighterManifest): void {
-    this.manifest = manifest;
-    this.buffers = manifest.parts.map((p) => new Uint8Array(p.byteLength));
-    this.received = manifest.parts.map(() => new Set());
-    this.done = false;
-    this.bytesReceived = 0;
-  }
-
-  private acceptChunk(message: Uint8Array): void {
-    const manifest = this.manifest;
-    if (!manifest) throw new FighterCodecError("Got a chunk before the manifest");
-    const { partIndex, chunkIndex, payload } = parseChunkHeader(message);
-    const part = manifest.parts[partIndex];
-    if (!part) throw new FighterCodecError(`Chunk for unknown part ${partIndex}`);
-    const count = chunkCount(part.byteLength, manifest.chunkSize);
-    if (chunkIndex >= count) throw new FighterCodecError(`Chunk ${chunkIndex} out of range for ${part.partId}`);
-    const offset = chunkIndex * manifest.chunkSize;
-    const expected = Math.min(manifest.chunkSize, part.byteLength - offset);
-    if (payload.byteLength !== expected) {
-      throw new FighterCodecError(`Chunk ${chunkIndex} of ${part.partId} is ${payload.byteLength} bytes, expected ${expected}`);
-    }
-    if (this.received[partIndex].has(chunkIndex)) return;
-    this.buffers[partIndex].set(payload, offset);
-    this.received[partIndex].add(chunkIndex);
-    this.bytesReceived += payload.byteLength;
-  }
-
-  missingParts(): string[] {
-    if (!this.manifest) return ["manifest"];
-    const chunkSize = this.manifest.chunkSize;
-    return this.manifest.parts
-      .filter((p, i) => this.received[i].size !== chunkCount(p.byteLength, chunkSize))
-      .map((p) => p.partId);
-  }
-
-  build(): Fighter {
-    if (!this.manifest) throw new FighterCodecError("No manifest received");
-    const missing = this.missingParts();
-    if (missing.length) throw new FighterCodecError(`Missing parts: ${missing.join(", ")}`);
-    return decodeFighter(this.manifest, this.buffers);
-  }
 }
 
 // ---------------------------------------------------------------------------

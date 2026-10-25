@@ -1,6 +1,7 @@
 import { POSE_IDS, type CapturedPose, type Fighter, type PoseId } from "../src/shared/fighter-model";
 import { anchorTargetFor } from "../src/shared/pose-geometry";
 import { buildStickFigureLandmarks } from "../src/shared/stick-figure";
+import type { DataChannelLike } from "../src/transfer/data-channel";
 
 /** Deterministic pseudo-random bytes so blob contents differ per part. */
 export function bytes(length: number, seed = 1): Uint8Array<ArrayBuffer> {
@@ -77,4 +78,74 @@ export async function fighterSnapshot(f: Fighter) {
     poseVariants,
     soundVariants: f.soundVariants ? soundVariants : undefined,
   };
+}
+
+type Listener = (ev: any) => void;
+
+/**
+ * In-memory data channel pair. Sent messages queue in `bufferedAmount` and are
+ * delivered when the test calls `flush` (or automatically, with `autoFlush`).
+ */
+export class FakeChannel implements DataChannelLike {
+  readyState = "open";
+  bufferedAmount = 0;
+  bufferedAmountLowThreshold = 0;
+  peer!: FakeChannel;
+  queue: unknown[] = [];
+  maxBufferedSeen = 0;
+  private listeners = new Map<string, Set<Listener>>();
+
+  constructor(private readonly autoFlush: boolean) {}
+
+  static pair(autoFlush = true): [FakeChannel, FakeChannel] {
+    const a = new FakeChannel(autoFlush);
+    const b = new FakeChannel(autoFlush);
+    a.peer = b;
+    b.peer = a;
+    return [a, b];
+  }
+
+  send(data: string | ArrayBuffer | ArrayBufferView): void {
+    if (this.readyState !== "open") throw new Error("closed");
+    const copy = typeof data === "string" ? data : ArrayBuffer.isView(data)
+      ? data.buffer.slice(data.byteOffset, data.byteOffset + data.byteLength)
+      : data.slice(0);
+    this.queue.push(copy);
+    this.bufferedAmount += typeof copy === "string" ? copy.length : (copy as ArrayBuffer).byteLength;
+    this.maxBufferedSeen = Math.max(this.maxBufferedSeen, this.bufferedAmount);
+    if (this.autoFlush) queueMicrotask(() => this.flush());
+  }
+
+  /** Deliver queued messages to the peer. */
+  flush(max = Infinity): void {
+    let n = 0;
+    while (this.queue.length && n++ < max) {
+      const data = this.queue.shift();
+      const size = typeof data === "string" ? data.length : (data as ArrayBuffer).byteLength;
+      const before = this.bufferedAmount;
+      this.bufferedAmount -= size;
+      this.peer.emit("message", { data });
+      if (before > this.bufferedAmountLowThreshold && this.bufferedAmount <= this.bufferedAmountLowThreshold) this.emit("bufferedamountlow");
+    }
+  }
+
+  close(): void {
+    this.readyState = "closed";
+    this.peer.readyState = "closed";
+    this.emit("close");
+    this.peer.emit("close");
+  }
+
+  emit(type: string, ev?: { data: unknown }): void {
+    for (const l of [...(this.listeners.get(type) ?? [])]) l(ev);
+  }
+
+  addEventListener(type: string, listener: Listener): void {
+    if (!this.listeners.has(type)) this.listeners.set(type, new Set());
+    this.listeners.get(type)!.add(listener);
+  }
+
+  removeEventListener(type: string, listener: Listener): void {
+    this.listeners.get(type)?.delete(listener);
+  }
 }

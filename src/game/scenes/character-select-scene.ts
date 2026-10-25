@@ -1,16 +1,14 @@
 import Phaser from "phaser";
-import QRCode from "qrcode";
 import { exportFighterFile, fighterFileName, importFighterFile } from "../../shared/fighter-codec";
-import { formatCountdown } from "../../shared/room-code";
 import { ARCHETYPES } from "../../shared/archetypes";
 import { SPRITE_CANVAS_SIZE, type Fighter, type SoundId } from "../../shared/fighter-model";
 import { frameGeometry, groundAnchorFor } from "../../shared/frame-data";
-import { deleteFighter, getSetting, isStoragePersisted, saveFighter, setSetting } from "../../shared/fighter-storage";
+import { CAPTURE_TARGET_COUNT } from "../../shared/pose-definitions";
+import { deleteFighter, getSetting, isStoragePersisted, saveImportedFighter, setSetting } from "../../shared/fighter-storage";
 import type { InputFrame } from "../../simulation/input-frame";
 import { geometryOf, type LibraryEntry } from "../fighter-library";
 import { playGameSound } from "../game-sounds";
 import { announce } from "../announcer";
-import { HostSession, type HostStatus } from "../host-session";
 import { PAD_BUTTON } from "../input/gamepad-input-source";
 import { createInputSource, describeInput, sameInput, type PlayerInputDescriptor } from "../input/input-descriptor";
 import type { InputSource } from "../input/input-source";
@@ -42,8 +40,8 @@ const ROW_H = TILE + 28;
 const GRID_X = 40;
 const GRID_Y = 116;
 /** "Add a fighter" column, while the panel is full size. */
-const HOST_X = 880;
-const HOST_W = 360;
+const ADD_X = 880;
+const ADD_W = 360;
 const PLAYER_CSS = ["#e8483b", "#3f86f0"];
 /** Each player's preview panel under the grid: their fighter large, plus their status. */
 const PANEL_Y = 436;
@@ -65,12 +63,14 @@ const INTRO_MS = 450;
 const INTRO_TILE_STAGGER_MS = 45;
 const INTRO_TILES_MS = 120;
 const INTRO_PANELS_MS = 300;
-const INTRO_HOST_MS = 220;
+const INTRO_ADD_MS = 220;
 /** Cursors and fighters arrive last, once there's something to stand on. */
 const INTRO_SETTLED_MS = 750;
 let introPlayed = false;
 /** The last CPU level picked for a match (this session). */
 let cpuLevel: CpuLevel = "easy";
+/** Times each fighter was replaced (imported again, or edited) since the page loaded: part of its image keys. */
+const imageRevisions = new Map<string, number>();
 
 type IntroTarget = Phaser.GameObjects.GameObject & {
   x: number;
@@ -149,7 +149,8 @@ interface SlotView {
  * Grid of fighters from IndexedDB plus the bundled placeholders. "Press any
  * button" assigns each pad/keyboard half to the next free player slot; each
  * player moves a cursor and confirms with punch. The "Add a fighter" panel
- * shows a QR code for the phone and receives fighters live.
+ * opens the Character Studio (its own page: /studio, which comes back to
+ * /?to=select) or imports a fighter file.
  */
 export class CharacterSelectScene extends Phaser.Scene {
   private library: LibraryEntry[] = [];
@@ -171,24 +172,23 @@ export class CharacterSelectScene extends Phaser.Scene {
   private voices = new Map<string, Promise<Record<SoundId, string[]>>>();
   private voiceLines: (Phaser.Sound.BaseSound | null)[] = [null, null];
   private lastVoice = new Map<string, string>();
-  private hostText!: Phaser.GameObjects.Text;
-  private codeText!: Phaser.GameObjects.Text;
-  private expiryText!: Phaser.GameObjects.Text;
-  private expiresAt: number | undefined;
-  private qrImage: Phaser.GameObjects.Image | null = null;
-  private hostStatus: HostStatus | null = null;
-  private hostObjects: Phaser.GameObjects.GameObject[] = [];
+  private addObjects: Phaser.GameObjects.GameObject[] = [];
   /**
    * Compact "Add a fighter": a small panel beside the previews, and the grid
-   * takes the whole width. Automatic once there are captured fighters or a phone
-   * is linked (it has scanned already); clicking the panel overrides that until
-   * the automatic choice changes.
+   * takes the whole width. Automatic once there are captured fighters; clicking
+   * the panel overrides that until the automatic choice changes.
    */
   private compact = false;
+  /** The panel and grid have been laid out since the scene started. */
+  private laidOut = false;
+  /**
+   * A tournament / king of the hill is running: no studio (leaving the page
+   * would end it), so no panel, and the grid takes the whole width.
+   */
+  private seriesRunning = false;
   private autoCompact: boolean | null = null;
   private compactOverride: boolean | null = null;
   private noticeText!: Phaser.GameObjects.Text;
-  private unsubscribeHost: (() => void) | null = null;
   private thumbUrls: string[] = [];
   private thumbs = new Map<number, Phaser.GameObjects.Image>();
   private cursorPoses: (Phaser.GameObjects.Image | null)[] = [null, null];
@@ -231,9 +231,9 @@ export class CharacterSelectScene extends Phaser.Scene {
     this.loadingPoses.clear();
     this.page = 0;
     this.vs = null;
-    this.hostStatus = null;
-    this.hostObjects = [];
-    this.qrImage = null;
+    this.addObjects = [];
+    this.laidOut = false;
+    this.seriesRunning = this.registry.has(REGISTRY.series);
     this.autoCompact = null;
     this.compactOverride = null;
     this.voiceLines = [null, null];
@@ -254,7 +254,7 @@ export class CharacterSelectScene extends Phaser.Scene {
     this.buildRivalry();
     this.noticeText = this.add.text(0, 0, "", { fontSize: "13px", color: "#a8a196" });
     this.introduce([this.noticeText], INTRO_SETTLED_MS);
-    this.updateHostLayout();
+    this.updateAddLayout();
     this.refreshGrid();
     this.updatePreviews();
 
@@ -286,17 +286,12 @@ export class CharacterSelectScene extends Phaser.Scene {
     this.setupToolbar();
     void this.showStorageNotices();
 
-    const host: HostSession | undefined = this.registry.get(REGISTRY.host);
-    this.unsubscribeHost = host?.subscribe((s) => this.showHostStatus(s), (f) => this.onFighterReceived(f)) ?? null;
-
     this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => this.cleanup());
     if (this.pendingJoin) this.join(this.pendingJoin);
   }
 
   private cleanup(): void {
     this.alive = false;
-    this.unsubscribeHost?.();
-    this.unsubscribeHost = null;
     this.events.off(Phaser.Scenes.Events.RESUME, this.onResume, this);
     this.toolbarCleanup?.();
     this.input.keyboard?.removeAllListeners("keydown");
@@ -307,8 +302,8 @@ export class CharacterSelectScene extends Phaser.Scene {
 
   /**
    * First show only: `objects` slide in from `from` (an offset) and fade up,
-   * `delay` ms into the intro. Objects made mid-intro (a redrawn grid, the QR
-   * arriving) join at the point the intro has reached, not from the start.
+   * `delay` ms into the intro. Objects made mid-intro (a redrawn grid, a
+   * rebuilt panel) join at the point the intro has reached, not from the start.
    */
   private introduce(objects: IntroTarget[], delay: number, from: { x?: number; y?: number } = {}): void {
     if (this.introAt === null) return;
@@ -342,10 +337,12 @@ export class CharacterSelectScene extends Phaser.Scene {
   // --- library grid ---------------------------------------------------------
 
   /**
-   * Image keys carry the fighter's createdAt as well as its id: the same fighter
-   * sent or imported again with new photos gets new textures, an identical copy reuses them.
+   * Image keys carry the fighter's id, its createdAt and how often it was
+   * replaced while the game is open: an edited fighter keeps its id and
+   * createdAt, so only the revision tells its new photos from the old ones.
+   * Textures outlive the scene, and so do the revisions.
    */
-  private imageId = (f: Fighter) => `${f.fighterId}@${f.createdAt}`;
+  private imageId = (f: Fighter) => `${f.fighterId}@${f.createdAt}#${imageRevisions.get(f.fighterId) ?? 0}`;
   private thumbKey = (f: Fighter) => `thumb:${this.imageId(f)}`;
 
   private refreshGrid(): void {
@@ -458,11 +455,15 @@ export class CharacterSelectScene extends Phaser.Scene {
     this.drawCursors();
   }
 
-  /** Clickable buttons on the selected tile: export, rename (captured fighters, at the top), and delete with an inline confirm. */
+  /**
+   * Clickable buttons on the selected tile: export, rename and edit (captured
+   * fighters, at the top), and delete with an inline confirm.
+   */
   private tileActions(entry: LibraryEntry, x: number, y: number): Phaser.GameObjects.Text[] {
-    const button = (bx: number, label: string, color: string, onClick: () => void, top = false) => {
-      const t = this.add.text(bx, top ? y + 6 : y + TILE - 6, label, { fontSize: "13px", fontStyle: "bold", color, backgroundColor: "#121018dd", padding: { x: 6, y: 4 } })
-        .setOrigin(0, top ? 0 : 1).setInteractive({ useHandCursor: true });
+    /** `row`: 0 along the bottom edge, 1 and 2 down from the top. */
+    const button = (bx: number, label: string, color: string, onClick: () => void, row = 0) => {
+      const t = this.add.text(bx, row ? y + 6 + (row - 1) * 28 : y + TILE - 6, label, { fontSize: "13px", fontStyle: "bold", color, backgroundColor: "#121018dd", padding: { x: 6, y: 4 } })
+        .setOrigin(0, row ? 0 : 1).setInteractive({ useHandCursor: true });
       t.on("pointerdown", (_p: unknown, _x: number, _y: number, ev: Phaser.Types.Input.EventData) => {
         ev.stopPropagation();
         this.buttonPressedAt = performance.now();
@@ -484,7 +485,8 @@ export class CharacterSelectScene extends Phaser.Scene {
           this.pendingDelete = { fighterId: entry.fighter.fighterId, until: performance.now() + 5000 };
           this.drawGrid();
         }),
-        button(x + 6, "✎ Rename", "#f3efe6", () => this.openRename(entry), true),
+        button(x + 6, "✎ Rename", "#f3efe6", () => this.openRename(entry), 1),
+        ...(this.seriesRunning ? [] : [button(x + 6, "✂ Edit", "#f3efe6", () => this.openEditor(entry), 2)]),
       ]),
     ];
   }
@@ -593,14 +595,6 @@ export class CharacterSelectScene extends Phaser.Scene {
     if (queued) this.load.start();
   }
 
-  /** The boot scene already added it to the registry library. */
-  private onFighterReceived(fighter: Fighter): void {
-    const replacing = this.library.some((e) => e.fighter.fighterId === fighter.fighterId);
-    this.library = this.registry.get(REGISTRY.library) ?? this.library;
-    if (replacing) this.afterFighterReplaced(fighter);
-    else this.afterLibraryGrew(fighter);
-  }
-
   private addFighter(fighter: Fighter): void {
     const replacing = this.library.some((e) => e.fighter.fighterId === fighter.fighterId);
     this.library = [{ fighter, builtIn: false }, ...this.library.filter((e) => e.fighter.fighterId !== fighter.fighterId)];
@@ -610,11 +604,12 @@ export class CharacterSelectScene extends Phaser.Scene {
   }
 
   /**
-   * The same fighter again (sent or imported a second time): the cursors stay
-   * where they were (the library didn't grow), and its voice is reloaded (images
-   * are keyed by createdAt, so new photos get new textures).
+   * The same fighter again (imported a second time, perhaps edited): the
+   * cursors stay where they were (the library didn't grow), and its voice and
+   * images are reloaded (a new revision, so new textures).
    */
   private afterFighterReplaced(fighter: Fighter): void {
+    imageRevisions.set(fighter.fighterId, (imageRevisions.get(fighter.fighterId) ?? 0) + 1);
     this.voices.delete(fighter.fighterId);
     this.refreshGrid();
     this.updatePreviews();
@@ -626,7 +621,7 @@ export class CharacterSelectScene extends Phaser.Scene {
     // Keep cursors on the same fighters.
     for (const p of [...this.players, this.cpu]) if (p) p.cursor = Math.min(this.library.length - 1, p.cursor + 1);
     if (this.selected !== null) this.selected = Math.min(this.library.length - 1, this.selected + 1);
-    this.updateHostLayout();
+    this.updateAddLayout();
     this.refreshGrid();
     this.setToolbarStatus(`Added ${fighter.name}`);
   }
@@ -642,6 +637,7 @@ export class CharacterSelectScene extends Phaser.Scene {
     const layout = KeyboardInputSource.layoutForKey(ev.keyCode);
     if (layout) this.join({ kind: "keyboard", layout });
     else if (ev.keyCode === KEY.T) this.openSeries();
+    else if (ev.keyCode === KEY.N) this.openStudio();
     else if (ev.keyCode === KEY.F) void toggleFullscreen().catch(() => {});
   }
 
@@ -934,7 +930,6 @@ export class CharacterSelectScene extends Phaser.Scene {
   }
 
   update(): void {
-    this.updateExpiry();
     for (const v of this.previews) {
       v.fighter?.update(this.time.now);
       if (v.tipPulses) v.tip.setAlpha(0.55 + 0.45 * Math.cos(this.time.now / 220));
@@ -1124,20 +1119,20 @@ export class CharacterSelectScene extends Phaser.Scene {
     v.device.setText("");
   }
 
-  // --- add a fighter (QR + room code) ----------------------------------------
+  // --- add a fighter (the studio, or a file) ----------------------------------
 
   /** Switch the panel (and the grid width) between full and compact when the choice changes. */
-  private updateHostLayout(): void {
-    const auto = this.library.some((e) => !e.builtIn) || (this.hostStatus?.phones ?? 0) > 0;
+  private updateAddLayout(): void {
+    const auto = this.library.some((e) => !e.builtIn);
     if (auto !== this.autoCompact) {
       this.autoCompact = auto;
       this.compactOverride = null;
     }
-    const compact = this.compactOverride ?? auto;
-    if (compact === this.compact && this.hostObjects.length) return;
+    const compact = this.seriesRunning || (this.compactOverride ?? auto);
+    if (compact === this.compact && this.laidOut) return;
     this.compact = compact;
-    this.buildHostPanel();
-    if (this.hostStatus) this.fillHostStatus(this.hostStatus);
+    this.laidOut = true;
+    this.buildAddPanel();
     // The page size changed: show the page of the first joined player's cursor.
     const anchor = this.players.find(Boolean)?.cursor ?? 0;
     this.page = Math.floor(anchor / this.pageSize);
@@ -1146,100 +1141,67 @@ export class CharacterSelectScene extends Phaser.Scene {
     this.drawGrid();
   }
 
-  private buildHostPanel(): void {
-    this.hostObjects.forEach((o) => o.destroy());
-    this.qrImage?.destroy();
-    this.qrImage = null;
-    const add = <T extends Phaser.GameObjects.GameObject>(o: T): T => (this.hostObjects.push(o), o);
+  private buildAddPanel(): void {
+    this.addObjects.forEach((o) => o.destroy());
+    this.addObjects = [];
+    // Storage notices: under the panel, or along the top when the panel is down by the previews (or not there).
+    const noticeUnder = !this.compact;
+    if (this.seriesRunning) {
+      this.noticeText.setPosition(GRID_X, 100).setWordWrapWidth(1180);
+      return;
+    }
+    const add = <T extends Phaser.GameObjects.GameObject>(o: T): T => (this.addObjects.push(o), o);
     const text = (x: number, y: number, size: number, color: string, extra: Phaser.Types.GameObjects.Text.TextStyle = {}) =>
       add(this.add.text(x, y, "", { fontSize: `${size}px`, color, align: "center", ...extra }).setOrigin(0.5, 0));
-    const [x, y, h] = this.compact ? [HOST_X, PANEL_Y, PANEL_H] : [HOST_X, GRID_Y, 480];
-    const bg = add(this.add.rectangle(x, y, HOST_W, h, 0x1c1824).setOrigin(0).setStrokeStyle(2, 0xf2c14e));
+    const button = (x: number, y: number, label: string, size: number, primary: boolean, onClick: () => void) => {
+      const [color, hover, background] = primary ? ["#121018", "#121018", "#f2c14e"] : ["#c9c3b8", "#f2c14e", "#2a2433"];
+      const b = add(this.add.text(x, y, label, { fontSize: `${size}px`, fontStyle: primary ? "bold" : "normal", color, backgroundColor: background, padding: { x: 16, y: 10 } })
+        .setOrigin(0.5, 0).setInteractive({ useHandCursor: true }));
+      b.on("pointerover", () => (primary ? b.setBackgroundColor("#ffd970") : b.setColor(hover)));
+      b.on("pointerout", () => (primary ? b.setBackgroundColor(background) : b.setColor(color)));
+      b.on("pointerdown", onClick);
+      return b;
+    };
+    const [x, y, h] = this.compact ? [ADD_X, PANEL_Y, PANEL_H] : [ADD_X, GRID_Y, 480];
+    const cx = x + ADD_W / 2;
+    const bg = add(this.add.rectangle(x, y, ADD_W, h, 0x1c1824).setOrigin(0).setStrokeStyle(2, 0xf2c14e));
     bg.setInteractive({ useHandCursor: true }).on("pointerdown", () => {
       this.compactOverride = !this.compact;
-      this.updateHostLayout();
+      this.updateAddLayout();
     });
     const hint = this.compact ? "click to enlarge" : this.autoCompact || this.compactOverride !== null ? "click to shrink" : "";
+    const importFile = () => (document.getElementById("import-file") as HTMLInputElement | null)?.click();
     if (this.compact) {
-      // QR on the left, code and status on the right.
-      const cx = x + 265;
-      text(x + HOST_W / 2, y + 12, 20, "#f2c14e", { fontStyle: "bold" }).setText("ADD A FIGHTER");
-      this.codeText = text(cx, y + 62, 28, "#f3efe6", { fontStyle: "bold", fontFamily: "monospace" });
-      this.expiryText = text(cx, y + 100, 12, "#8a8478");
-      this.hostText = text(cx, y + 124, 14, "#c9c3b8", { wordWrap: { width: 160 } });
-      text(x + HOST_W / 2, y + h - 26, 12, "#8a8478").setText(hint);
+      text(cx, y + 12, 20, "#f2c14e", { fontStyle: "bold" }).setText("ADD A FIGHTER");
+      button(cx, y + 58, "Open the studio (N)", 24, true, () => this.openStudio());
+      text(cx, y + 120, 14, "#c9c3b8", { wordWrap: { width: 320 } }).setText("use a phone or this computer's camera");
+      button(cx, y + 162, "Import a fighter file", 15, false, importFile);
+      text(cx, y + h - 26, 12, "#8a8478").setText(hint);
     } else {
-      const cx = x + HOST_W / 2;
       text(cx, y + 14, 26, "#f2c14e", { fontStyle: "bold" }).setText("ADD A FIGHTER");
-      text(cx, y + 48, 15, "#c9c3b8").setText("Scan with a phone to capture yourself");
-      this.codeText = text(cx, y + 300, 40, "#f3efe6", { fontStyle: "bold", fontFamily: "monospace" });
-      this.expiryText = text(cx, y + 344, 14, "#8a8478");
-      this.hostText = text(cx, y + 366, 15, "#c9c3b8", { wordWrap: { width: 330 } });
+      text(cx, y + 60, 16, "#c9c3b8", { wordWrap: { width: 320 } })
+        .setText(`Turn yourself into a fighter in the Character Studio: strike ${CAPTURE_TARGET_COUNT} poses, record your battle cries.`);
+      button(cx, y + 150, "Open the studio (N)", 32, true, () => this.openStudio());
+      text(cx, y + 222, 15, "#c9c3b8", { wordWrap: { width: 320 } }).setText("use a phone or this computer's camera");
+      text(cx, y + 270, 13, "#8a8478", { wordWrap: { width: 320 } })
+        .setText("The studio opens on this computer; your photos stay on your devices. Come back here when your fighter is saved.");
+      button(cx, y + 350, "Import a fighter file", 16, false, importFile);
       text(cx, y + h - 20, 12, "#8a8478").setText(hint);
     }
-    this.introduce(this.hostObjects as IntroTarget[], INTRO_HOST_MS, { x: 80 });
-    // Storage notices: under the panel, or under the previews' row when the panel is down there.
-    this.noticeText.setPosition(this.compact ? GRID_X : HOST_X, this.compact ? 100 : GRID_Y + h + 16).setWordWrapWidth(this.compact ? 1180 : HOST_W);
-    this.expiresAt = undefined;
+    this.introduce(this.addObjects as IntroTarget[], INTRO_ADD_MS, { x: 80 });
+    this.noticeText.setPosition(noticeUnder ? ADD_X : GRID_X, noticeUnder ? GRID_Y + h + 16 : 100).setWordWrapWidth(noticeUnder ? ADD_W : 1180);
   }
 
-  private captureUrl(roomCode: string): string {
-    return `${location.origin}${import.meta.env.BASE_URL}capture?room=${roomCode}`;
+  /** The studio is its own page; its "Back to the game" comes back to fighter select. */
+  private openStudio(): void {
+    if (this.seriesRunning) return;
+    location.assign(`${import.meta.env.BASE_URL}studio`);
   }
 
-  private async showQr(roomCode: string): Promise<void> {
-    const key = `qr:${roomCode}`;
-    if (!this.textures.exists(key)) {
-      const dataUrl = await QRCode.toDataURL(this.captureUrl(roomCode), { margin: 1, width: 240, color: { dark: "#121018", light: "#f3efe6" } });
-      await new Promise<void>((resolve) => {
-        // This texture's own event: thumbnails and poses may be loading at the same time.
-        this.textures.once(Phaser.Textures.Events.ADD_KEY + key, () => resolve());
-        this.textures.addBase64(key, dataUrl);
-      });
-    }
-    // The room may have changed (or the panel been rebuilt) while the QR was rendering.
-    if (!this.alive || this.codeText.text !== roomCode) return;
-    this.qrImage?.destroy();
-    this.qrImage = this.compact
-      ? this.add.image(HOST_X + 20 + 75, PANEL_Y + 48 + 75, key).setDisplaySize(150, 150)
-      : this.add.image(HOST_X + HOST_W / 2, GRID_Y + 186, key).setDisplaySize(220, 220);
-    this.introduce([this.qrImage], INTRO_HOST_MS, { x: 80 });
-  }
-
-  /** "code refreshes in 3:12" under the room code; urgent in the last 30 s. */
-  private updateExpiry(): void {
-    const left = this.expiresAt === undefined ? null : this.expiresAt - Date.now();
-    const text = left === null ? "" : left > 0 ? `code refreshes in ${formatCountdown(left)}` : "getting a new code…";
-    if (this.expiryText.text !== text) this.expiryText.setText(text).setColor(left !== null && left < 30_000 ? "#f2c14e" : "#8a8478");
-  }
-
-  private showHostStatus(s: HostStatus): void {
-    if (!this.alive) return;
-    this.hostStatus = s;
-    this.updateHostLayout();
-    this.fillHostStatus(s);
-  }
-
-  private fillHostStatus(s: HostStatus): void {
-    this.expiresAt = s.expiresAt;
-    this.updateExpiry();
-    if (s.roomCode && this.codeText.text !== s.roomCode) {
-      this.codeText.setText(s.roomCode);
-      void this.showQr(s.roomCode);
-    }
-    const local = ["localhost", "127.0.0.1"].includes(location.hostname)
-      ? "\nTip: open this page via your network address so the phone can reach it."
-      : "";
-    const text =
-      s.kind === "connecting" ? "Opening a room…"
-      : s.kind === "waiting" ? (
-        s.phones ? `📱 ${s.phones} phone${s.phones > 1 ? "s" : ""} connected — capture away!`
-        : this.compact ? "Scan with a phone to add yourself"
-        : `Or open ${location.host}/capture and enter the code.${local}`)
-      : s.kind === "receiving" ? `Receiving ${s.name}… ${Math.round(s.progress * 100)}%`
-      : s.kind === "received" ? `${s.name} joined the dojo!`
-      : s.message;
-    this.hostText.setText(text);
+  /** Retake poses, redo sounds, rename: the studio, on this fighter (docs/character-studio.md §6). */
+  private openEditor(entry: LibraryEntry): void {
+    if (this.seriesRunning || entry.builtIn || this.vs) return;
+    location.assign(`${import.meta.env.BASE_URL}studio?edit=${encodeURIComponent(entry.fighter.fighterId)}`);
   }
 
   // --- storage notices + toolbar ---------------------------------------------
@@ -1290,7 +1252,7 @@ export class CharacterSelectScene extends Phaser.Scene {
       if (!file) return;
       try {
         const fighter = await importFighterFile(file);
-        await saveFighter(fighter);
+        await saveImportedFighter(fighter);
         this.addFighter(fighter);
         this.setToolbarStatus(`Imported ${fighter.name}`);
       } catch (err) {
@@ -1341,7 +1303,7 @@ export class CharacterSelectScene extends Phaser.Scene {
     this.registry.set(REGISTRY.library, this.library);
     this.selected = null;
     this.cpu = null;
-    this.updateHostLayout();
+    this.updateAddLayout();
     this.players.forEach((p, i) => {
       if (!p) return;
       p.cursor = Math.min(p.cursor, Math.max(0, this.library.length - 1));

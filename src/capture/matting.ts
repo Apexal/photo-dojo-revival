@@ -1,6 +1,7 @@
 import { LANDMARK, type NormalizedLandmark } from "../shared/fighter-model";
 import { torsoLength } from "../shared/pose-geometry";
 import { STICK_SEGMENTS, headCenter } from "../shared/stick-figure";
+import type { Rect } from "../shared/canvas";
 
 /**
  * Person matting for full-body captures. The matting model (ISNet, see
@@ -12,7 +13,7 @@ import { STICK_SEGMENTS, headCenter } from "../shared/stick-figure";
  *   → keep only what's connected to the skeleton (drops furniture, other people).
  */
 
-export interface Rect { x: number; y: number; width: number; height: number }
+export type { Rect };
 
 const VISIBLE = 0.3;
 

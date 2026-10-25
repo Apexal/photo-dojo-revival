@@ -1,0 +1,27 @@
+/* The phone camera page: one column, phone-sized, same palette as the studio. */
+:root { color-scheme: dark; --bg: #121018; --panel: #1c1824; --fg: #f3efe6; --muted: #a8a196; --accent: #f2c14e; --ok: #5ae68c; --bad: #e8483b; }
+* { box-sizing: border-box; }
+html, body { margin: 0; height: 100%; background: var(--bg); color: var(--fg); font: 17px/1.4 system-ui, sans-serif; }
+#app { min-height: 100%; display: flex; flex-direction: column; }
+.screen { flex: 1; display: flex; flex-direction: column; gap: 16px; padding: max(16px, env(safe-area-inset-top)) 16px max(16px, env(safe-area-inset-bottom)); max-width: 560px; width: 100%; margin: 0 auto; }
+h1 { margin: 8px 0 0; font-size: 34px; color: var(--accent); letter-spacing: 0.02em; }
+h1 .kicker { display: block; margin-top: 2px; font-size: 15px; letter-spacing: 0.3em; text-transform: uppercase; color: var(--bad); }
+p { margin: 0; }
+.muted { color: var(--muted); font-size: 15px; }
+.error { color: var(--bad); }
+a { color: var(--accent); }
+button { font: inherit; font-weight: 600; padding: 14px 18px; border-radius: 12px; border: 2px solid #3a3346; background: var(--panel); color: var(--fg); cursor: pointer; }
+button.primary { background: var(--accent); border-color: var(--accent); color: #1a1410; }
+
+.code-entry { display: grid; gap: 10px; }
+.code-entry label { font-weight: 600; }
+.code-entry input { font: 600 28px/1.2 ui-monospace, monospace; letter-spacing: 0.25em; text-transform: uppercase; text-align: center; padding: 12px 14px; border-radius: 10px; border: 2px solid #3a3346; background: #0d0b12; color: var(--accent); width: 100%; }
+.studio-link { font-size: 15px; padding-top: 8px; border-top: 1px solid #3a3346; }
+
+.headline { font-size: 24px; font-weight: 700; }
+.headline[data-state="streaming"] { color: var(--ok); }
+.headline[data-state="connecting"], .headline[data-state="reconnecting"] { color: var(--accent); }
+.studio-status { min-height: 1.4em; font-size: 20px; font-weight: 600; }
+.preview-box { align-self: center; width: min(100%, 320px); border-radius: 14px; overflow: hidden; background: #000; }
+video.preview { display: block; width: 100%; max-height: 45vh; object-fit: contain; }
+video.preview.mirrored { transform: scaleX(-1); }

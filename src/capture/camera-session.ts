@@ -1,6 +1,5 @@
-import type { Rect } from "./matting";
+import { createCanvas, context2d, denormalizeRect, type NormalizedRect } from "../shared/canvas";
 import { laplacianVariance, sharpnessSampleSize } from "./sharpness";
-import { createCanvas, context2d } from "./sprite-normalizer";
 
 export type CameraFacing = "environment" | "user";
 
@@ -9,6 +8,7 @@ type CameraChoice = { facingMode: CameraFacing; exact?: boolean } | { deviceId: 
 
 export class CameraSession {
   private stream: MediaStream | null = null;
+  private streamListeners = new Set<(track: MediaStreamTrack) => void>();
   /** The camera last opened, so a restart after stop() comes back to the same one. */
   private choice: CameraChoice = { facingMode: "environment" };
   readonly video: HTMLVideoElement;
@@ -32,9 +32,28 @@ export class CameraSession {
     return this.stream !== null;
   }
 
+  /** The live video track, while the camera runs. */
+  get track(): MediaStreamTrack | null {
+    return this.stream?.getVideoTracks()[0] ?? null;
+  }
+
+  /**
+   * Called with the new track whenever a camera opens (start, restart, switch),
+   * e.g. to `replaceTrack` it into a WebRTC sender. Returns an unsubscribe.
+   */
+  onStreamChange(callback: (track: MediaStreamTrack) => void): () => void {
+    this.streamListeners.add(callback);
+    return () => { this.streamListeners.delete(callback); };
+  }
+
   /** Prefer the rear camera; fall back to any camera (e.g. a laptop webcam). */
   async start(facingMode: CameraFacing = "environment"): Promise<void> {
     await this.open({ facingMode });
+  }
+
+  /** A specific camera, by its enumerateDevices id (falls back to any camera if it's gone). */
+  async startDevice(deviceId: string): Promise<void> {
+    await this.open({ deviceId });
   }
 
   /** Reopen the camera that was in use before stop() (the front one, if they switched). */
@@ -44,26 +63,37 @@ export class CameraSession {
   }
 
   private lastDeviceId: string | undefined;
+  /** Bumped by every open() and stop(), so an open() that was overtaken drops its stream instead of leaking it. */
+  private openGeneration = 0;
 
   private async open(choice: CameraChoice): Promise<void> {
     this.stop();
     this.choice = choice;
+    const generation = ++this.openGeneration;
     // 1080p: stills get more pixels per limb for the matting; live detection downsizes anyway.
     const size = { width: { ideal: 1920 }, height: { ideal: 1080 } };
     const video: MediaTrackConstraints = "deviceId" in choice
       ? { deviceId: { exact: choice.deviceId }, ...size }
       : { facingMode: choice.exact ? { exact: choice.facingMode } : choice.facingMode, ...size };
+    let stream: MediaStream;
     try {
-      this.stream = await navigator.mediaDevices.getUserMedia({ video, audio: false });
+      stream = await navigator.mediaDevices.getUserMedia({ video, audio: false });
     } catch (err) {
-      if ((err as DOMException).name === "NotAllowedError") throw err;
-      this.stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
+      if ((err as DOMException).name === "NotAllowedError" || generation !== this.openGeneration) throw err;
+      stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
     }
+    if (generation !== this.openGeneration) {
+      stream.getTracks().forEach((t) => t.stop());
+      throw new DOMException("A newer camera request replaced this one", "AbortError");
+    }
+    this.stream = stream;
     this.video.srcObject = this.stream;
     await this.video.play();
     if (!this.video.videoWidth) {
       await new Promise<void>((resolve) => this.video.addEventListener("loadedmetadata", () => resolve(), { once: true }));
     }
+    const track = this.track;
+    if (track) for (const listener of this.streamListeners) listener(track);
   }
 
   /** Whether there's another camera to switch to (labels/ids are only listed after permission is granted). */
@@ -82,7 +112,8 @@ export class CameraSession {
     try {
       await this.open({ facingMode: want, exact: true });
     } catch (err) {
-      if ((err as DOMException).name === "NotAllowedError") throw err;
+      const name = (err as DOMException).name;
+      if (name === "NotAllowedError" || name === "AbortError") throw err;
     }
     if (this.isRunning && this.deviceId !== before) return;
     const cameras = (await navigator.mediaDevices.enumerateDevices()).filter((d) => d.kind === "videoinput");
@@ -113,11 +144,12 @@ export class CameraSession {
   }
 
   /**
-   * The sharpest of the next `count` video frames, judged in `region` (frame
-   * pixels; the person). Only the winner is copied at full resolution.
+   * The sharpest of the next `count` video frames, judged in `region` (the
+   * person, normalized 0..1 to the frame, so a region found on a smaller live
+   * picture works here too). Only the winner is copied at full resolution.
    */
-  async grabSharpest(count: number, region: Rect | null): Promise<{ frame: HTMLCanvasElement | OffscreenCanvas; sharpness: number[] }> {
-    const area = region ?? { x: 0, y: 0, width: this.width, height: this.height };
+  async grabSharpest(count: number, region: NormalizedRect | null): Promise<{ frame: HTMLCanvasElement | OffscreenCanvas; sharpness: number[] }> {
+    const area = region ? denormalizeRect(region, this.width, this.height) : { x: 0, y: 0, width: this.width, height: this.height };
     const sample = sharpnessSampleSize(area);
     const probe = createCanvas(sample.width, sample.height);
     const probeCtx = context2d(probe);
@@ -169,6 +201,8 @@ export class CameraSession {
   }
 
   stop(): void {
+    // An open() still waiting on getUserMedia drops its stream when it arrives.
+    this.openGeneration++;
     this.lastDeviceId = this.deviceId ?? this.lastDeviceId;
     this.stream?.getTracks().forEach((t) => t.stop());
     this.stream = null;

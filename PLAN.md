@@ -1,6 +1,8 @@
 # Photo Dojo Revival — Technical Plan
 
-A browser-only 2D fighting game. Players pose for a handful of photos on a phone, the phone turns them into a sprite fighter locally, pushes it to a laptop over WebRTC, and two people fight with controllers. No accounts, no backend storage. All data lives in each browser's IndexedDB.
+A browser-only 2D fighting game. Players pose for sixteen photos in front of a camera (a phone streaming to the computer, or the computer's own), the computer turns them into a sprite fighter locally, and two people fight with controllers. No accounts, no backend storage. All data lives in each browser's IndexedDB.
+
+> **Note.** The capture pipeline was first built to run on the phone, which then sent finished fighters to the laptop. It now runs on the computer in the Character Studio, with the phone as a plain camera: see [docs/character-studio.md](docs/character-studio.md), which supersedes §4 and §5 below. §1–§2 still show the original layout; CLAUDE.md and the README have the current one.
 
 Decisions already made:
 
@@ -154,135 +156,36 @@ Constants (in `fighter-model.ts`):
 
 ### Storage
 
-IndexedDB via the `idb` package. Database `photo-dojo`, version 1.
+IndexedDB via the `idb` package. Database `photo-dojo`, version 3.
 
 - Object store `fighters`, key `fighterId`, value is the `Fighter` object. Blobs are stored directly; IndexedDB handles them.
 - Object store `settings`, key/value (last used controller mapping, debug flags).
+- Object store `drafts`: the studio's unfinished capture, so a reload can resume it.
+- Object store `fighterSources`, key `fighterId`: each studio-built fighter's cut-outs and geometry, for retakes when editing (docs/character-studio.md §6).
 
 On first write, call `navigator.storage.persist()` so the browser is less likely to evict the data. Show a one-line warning on the character select screen if it returns `false`.
 
-Provide **Export** (one `.photodojo` file: a zip built with `fflate` containing `fighter.json` + PNGs + webms) and **Import** so fighters survive a cleared browser. This is also the fallback transfer path if WebRTC fails.
+Provide **Export** (one `.photodojo` file: a zip built with `fflate` containing `fighter.json` + PNGs + webms) and **Import** so fighters survive a cleared browser. This is also how fighters move between computers.
 
 ---
 
-## 4. Capture pipeline (phone)
+## 4. Capture pipeline (now in the studio)
 
-### 4.1 Session setup
+Superseded by [docs/character-studio.md](docs/character-studio.md): the pipeline runs in the Character Studio (`/studio`, `src/studio/`) on the computer, with a `CameraSource` that is either a camera of the computer's own or a phone streaming over WebRTC (`/capture`, `src/phone/`). The pipeline modules themselves are still in `src/capture/`. What stays from the original plan:
 
-- Page opens at `/capture?room=ABC123` from the laptop's QR code, or at `/capture` standalone (saves locally only, laptop webcam use case).
-- Request `getUserMedia({ video: { facingMode: "environment", width: 1280, height: 720 } })`. Prefer the rear camera; it is better and the subject isn't the one holding the phone in friend mode.
-- Two modes selectable on the first screen: **Friend holds the phone** (default) and **Solo, phone propped up**. Both use the same flow; solo mode adds a 3-second grace after each capture and bigger overlay text.
-- One-screen tips: plain wall, full body in frame, face sideways to your right. Then get out of the way.
-
-### 4.2 Pose detection
-
-`@mediapipe/tasks-vision` `PoseLandmarker`, `pose_landmarker_lite` model, `runningMode: "VIDEO"`, GPU delegate with CPU fallback. Run on each `requestVideoFrameCallback` tick, throttled to ~15 Hz on slower phones.
-
-### 4.3 Target poses
-
-Defined in `pose-definitions.ts` as joint-angle targets, not silhouettes. Each pose specifies 3–5 angles with tolerances. Example:
-
-```ts
-{
-  poseId: "punch",
-  angleTargets: [
-    { joint: "rightElbow", degrees: 175, tolerance: 25 },   // arm extended
-    { joint: "rightShoulderElevation", degrees: 90, tolerance: 25 }, // arm forward at shoulder height
-    { joint: "leftElbow", degrees: 60, tolerance: 40 },     // guard hand bent
-  ],
-  requiredVisibleLandmarks: ["rightWrist", "rightShoulder", "leftHip", "rightAnkle"],
-  ghostSvgPath: "...",
-  voicePrompt: "Punch. Arm straight out.",
-}
-```
-
-Side-view capture means the camera sees mostly one side. Angles are computed from the 2D landmarks projected on the image plane; that is fine because the game is also side-view.
-
-`pose-geometry.ts` exposes `computeJointAngles(landmarks)` and `scorePoseMatch(angles, target)` returning the worst normalized error (0 = perfect, 1 = at tolerance edge, >1 = out).
-
-### 4.4 Auto-capture
-
-`pose-matcher.ts` keeps a hold timer:
-
-- Score ≤ 1.0 continuously for **500 ms** → capture.
-- After 5 s without a match, tolerances widen by 1.5×.
-- After 10 s, a "Tap to capture anyway" button appears.
-- A pose can always be retaken from the review strip.
-
-Progress ring fills during the hold. `speechSynthesis` says the prompt on entry, "hold it" when the hold starts, "got it" on capture. Short vibration on capture where supported.
-
-### 4.5 Segmentation and normalization
-
-On capture:
-
-1. Grab the current video frame at full resolution to an offscreen canvas.
-2. Run ISNet on a crop around the skeleton → alpha; keep only regions connected to the skeleton. (Originally the MediaPipe selfie segmenter; replaced because its 256² masks needed a pile of fix-up heuristics that made results worse.)
-3. Run `PoseLandmarker` once more on the still frame for clean keypoints.
-4. `sprite-normalizer.ts`:
-   - Compute torso length = distance(mid-shoulder, mid-hip).
-   - Scale factor = `CANONICAL_TORSO_LENGTH_PX / torsoLength`.
-   - Anchor = midpoint of ankles for grounded poses; pelvis for `jump`.
-   - Draw the masked figure into a 512×512 canvas, scaled, so the anchor lands at `(256, GROUND_LINE_Y)` (or at a fixed jump height for `jump`).
-   - Transform landmarks into the same canvas space.
-   - If the figure doesn't fit, scale down uniformly and record it; frame data uses landmarks, not canvas size, so this is safe.
-   - Export PNG blob.
-5. Show the cutout bouncing in the corner immediately.
-
-All poses face right. The ghost overlay enforces this. If the detected shoulder order indicates the person faces left, flip the frame and landmarks horizontally before normalizing, and tell the user.
-
-### 4.6 Pose order and count
-
-Eight poses, in this order (easy ones first so the user learns the mechanic):
-
-1. idle (fighting stance)
-2. walk (one step, weight forward)
-3. block (arms up, crouched slightly)
-4. punch
-5. kick
-6. jump (arms up, knees bent — captured standing; the game moves it vertically)
-7. hurt (head back, off balance)
-8. win (anything, hands up)
-
-### 4.7 Sounds
-
-`MediaRecorder` with `audio/webm;codecs=opus`, 2-second cap, one tap to start, auto-stop. Three clips: attack, hurt, win. Normalize peak gain with Web Audio before storing. Skippable.
-
-### 4.8 Finish
-
-Preview screen plays a scripted showcase (idle → walk → punch → kick → win) with hard cuts and sounds. Name field. "Send to game" if a room code is present, "Save" otherwise. Both save to the phone's IndexedDB first.
+- **Pose detection**: MediaPipe `PoseLandmarker` on the live video (the heavy model, ~15 Hz), and again in IMAGE mode on each full-resolution still (`pose-tracker.ts`).
+- **Target poses** are joint-angle targets with tolerances, not silhouettes (`src/shared/pose-definitions.ts`; sixteen captures, `CAPTURE_TARGET_COUNT`, the signature pose depending on the archetype). `pose-geometry.ts` scores the live angles: 0 = perfect, 1 = at the tolerance edge, >1 = out. Either arm or leg may strike; the capture records which.
+- **Auto-capture** (`pose-matcher.ts`): a match held for 500 ms captures; tolerances widen after 5 s; after 10 s a manual capture button appears; any pose can be retaken from the review.
+- **Segmentation and normalization**: ISNet on a crop around the skeleton, keeping only what's connected to it (`background-remover.ts`, `matting.ts`); then `sprite-normalizer.ts` scales every pose to `CANONICAL_TORSO_LENGTH_PX`, anchors the feet on `GROUND_LINE_Y` (pelvis for `jump`), flips left-facing captures so all face right, and exports the PNG.
+- **Sounds**: three clips (attack, hurt, win) recorded with `MediaRecorder`, now on the computer's mic, peak-normalized, skippable.
 
 ---
 
-## 5. Transfer (phone → laptop)
+## 5. Transfer (retired)
 
-### 5.1 Signaling
+Finished fighters no longer travel between devices: the studio saves them into the IndexedDB the game reads, on the same computer. The phone ↔ studio link (signaling as below, then a video track plus a `camera` data channel for stills) is specified in [docs/character-studio.md](docs/character-studio.md) §4. `.photodojo` export/import (§3) moves fighters between computers.
 
-Cloudflare Worker + one Durable Object class `SignalingRoom`, keyed by room code.
-
-- Laptop: `GET /room/:code` upgraded to WebSocket, role `host`.
-- Phone: same URL, role `guest`.
-- The DO holds at most two sockets, relays any message from one to the other verbatim, and self-destructs after 10 minutes or when both sides close. It never parses or stores payloads.
-- Room codes: 6 chars from an unambiguous alphabet (no 0/O/1/I), generated by the laptop.
-
-### 5.2 Peer connection
-
-- ICE servers: a STUN server at minimum. Same-Wi-Fi is the common case and works with STUN alone.
-- Optional TURN for phone-on-cellular: a Worker route that mints short-lived Cloudflare TURN credentials. Add in M4 only if testing shows it is needed.
-- Ordered, reliable `RTCDataChannel` named `fighter`.
-
-### 5.3 Wire format
-
-`fighter-codec.ts` produces:
-
-1. One JSON manifest: `{ fighterId, name, schemaVersion, parts: [{ partId, kind: "pose"|"sound"|"thumbnail", poseId?, soundId?, byteLength, mimeType }], landmarks, anchors }`
-2. Binary parts streamed in **16 KB** chunks with a 4-byte part index + 4-byte chunk index header. Sender honors `bufferedAmountLowThreshold` for backpressure.
-3. A final `{ type: "done" }` message.
-
-Receiver validates part sizes, rebuilds blobs, constructs the `Fighter`, saves to IndexedDB, and the character select grid updates live. Typical fighter is ~2–4 MB; on local Wi-Fi this is a second or two.
-
-### 5.4 Failure path
-
-If no data channel opens within 20 s, the phone offers "Download fighter file" and the laptop screen shows "Import file." Same codec, written to a `.photodojo` zip.
+Signaling is unchanged: a Cloudflare Worker with one `SignalingRoom` Durable Object per room code relays SDP/ICE verbatim between at most two sockets (the studio as host, the phone as guest) and expires after 10 minutes or when both close. Room codes are 6 characters from an unambiguous alphabet. An optional Worker route mints short-lived Cloudflare TURN credentials for networks where a direct connection fails.
 
 ---
 
@@ -291,7 +194,7 @@ If no data channel opens within 20 s, the phone offers "Download fighter file" a
 ### 6.1 Scenes
 
 - `BootScene`: opens IndexedDB, loads settings.
-- `CharacterSelectScene`: grid of fighter thumbnails. Big "Add a fighter" tile shows a QR code (`qrcode` package) for `https://<host>/capture?room=XXXXXX` and opens the signaling socket. Each player picks with their own pad; "press any button" assigns pads to players by who pressed first.
+- `CharacterSelectScene`: grid of fighter thumbnails. The "Add a fighter" panel opens the Character Studio (`/studio`) or imports a `.photodojo` file; a captured fighter's tile can open the studio on it (Edit). Each player picks with their own pad; "press any button" assigns pads to players by who pressed first.
 - `FightScene`: owns a `FightSimulation`, steps it at a fixed 60 Hz using an accumulator on Phaser's `update(delta)`, and renders the latest state. Never mutates simulation state from render code.
 - `RoundResultScene`: round / match result, rematch, back to select.
 
@@ -374,12 +277,12 @@ Vitest, Node environment, no DOM for simulation tests.
 - `pose-geometry.test.ts`: angle computation on hand-built landmark sets; scoring returns 0 for exact, 1 at tolerance edge.
 - `pose-matcher.test.ts`: hold timer triggers at 500 ms of continuous match, resets on a miss, widens after 5 s.
 - `sprite-normalizer.test.ts`: canonical torso length achieved; anchor lands on the ground line; left-facing input is flipped. Use `OffscreenCanvas` under `happy-dom` or test the pure transform math separately.
-- `fighter-codec.test.ts`: round-trips a Fighter through chunks, including a 16 KB boundary and a missing part.
+- `fighter-codec.test.ts`: round-trips a Fighter (and through a `.photodojo` file); rejects missing poses, bad manifests and non-zip files.
 - `fight-simulation.test.ts`: scripted input sequences produce expected states (punch connects on frame 5, block takes 25 %, hitstop freezes both).
 - `collision.test.ts`: hitbox/hurtbox overlap with facing flips.
 - `round-rules.test.ts`: timer expiry, KO, best-of-3.
 
-Capture page and WebRTC are tested manually with a checklist in `docs/manual-test.md` (two phones, two laptops, same Wi-Fi and cross-network).
+The studio's flow, drafts, sources, the phone's protocol side and the camera link are unit-tested with fakes; `npm run test:e2e` drives the studio with Chrome's fake camera and a `/capture` tab streaming to it over real WebRTC. Real cameras, real phones and other networks are tested manually with the checklist in `docs/manual-test.md`.
 
 ---
 

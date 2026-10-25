@@ -1,6 +1,6 @@
 # Manual test checklist
 
-Automated coverage: `npm test` (simulation, collision, round rules, pose geometry/matching, sprite normalization math, codec, storage, transfer over a fake data channel), `npm run test:signaling` (the Worker), and `npm run test:e2e` (headless Chrome: real WebRTC transfer, capture UI → send, fight, export/import). What they can't cover: real people in front of real cameras, real phones, real gamepads, and other networks. That's this list.
+Automated coverage: `npm test` (simulation, collision, round rules, pose geometry/matching, sprite normalization math, codec, storage incl. fighter sources, the studio flow, drafts and edit sessions, the phone camera protocol and still transfer over a fake data channel, the studio's phone room), `npm run test:signaling` (the Worker), and `npm run test:e2e` (headless Chrome: the studio with Chrome's fake camera through to a saved fighter, a `/capture?room=` tab streaming to `/studio` over real WebRTC with a still request and a reconnect, editing, the fight, export/import). What they can't cover: real people in front of real cameras, real phones, real gamepads, and other networks. That's this list.
 
 ## Setup
 
@@ -10,70 +10,67 @@ npm run worker:dev          # signaling Worker on :8787
 npm run dev:https           # Vite with a self-signed cert, proxies /room to the Worker
 ```
 
-Open the **Network** URL Vite prints (e.g. `https://192.168.1.20:5173/`) on the laptop. Phones must be on the same Wi-Fi and accept the self-signed certificate once. For the deployed build, use the Pages URL instead.
+Open the **Network** URL Vite prints (e.g. `https://192.168.1.20:5173/`) on the laptop. Phones must be on the same Wi-Fi and accept the self-signed certificate once (open the Network URL on the phone first if the QR page won't load). For the deployed build, use the Pages URL instead.
 
-Devices: two phones (one iOS Safari, one Android Chrome), two laptops (Chrome + Safari or Firefox), two gamepads (one Xbox-style, one PlayStation-style).
+Devices: two phones (one iOS Safari, one Android Chrome), two laptops (Chrome + Safari or Firefox; one a Mac with an iPhone for Continuity Camera, ideally one without WebGPU), two gamepads (one Xbox-style, one PlayStation-style).
 
-## 1. Capture (phone, same Wi-Fi)
+## 1. Studio (laptop)
 
-- [ ] Scan the QR on the laptop's character select. The capture page opens with the room code shown.
-- [ ] Mode screen: "Friend holds the phone" is the default; "Solo" shows bigger text.
-- [ ] First visit: "Warming up…" shows a progress bar through the ~60 MB model download, then a short "Starting the camera…" pause. Reload and start again: it's ready within a couple of seconds (models come from the Cache API). Check the download on mobile data too.
-- [ ] Heavy pose model on the phone: the live skeleton still follows smoothly enough to pose (it detects at most 15×/s; note the real rate on an older phone).
-- [ ] Rear camera is used (friend mode). Camera permission denied → clear error and "Start over".
+Open the studio from fighter select (**Open the studio**) or at `/studio`. Run the poses once with a phone camera and once with a camera on the laptop.
+
+- [ ] Fighter select's "Add a fighter" panel says "Open the studio" (use a phone or this computer's camera) and has "Import a fighter file". During a tournament / king of the hill it isn't shown.
+- [ ] Setup screen: "1. Camera" (Use a phone / This computer's camera) and "2. Get ready" (On my own is the default; Someone's helping; Spoken prompts; the privacy line). "Start" stays disabled until a camera is live, then shows its preview.
+- [ ] Models start downloading as soon as the studio opens. First visit: "Warming up…" shows a progress bar through the ~250 MB download if Start comes before it's done. Reload: ready within a couple of seconds (Cache API). The console logs `[matting] ISNet on webgpu` (or `wasm`, much slower: note the time per pose on a laptop without WebGPU, ~6 s on an M-series Mac).
+- [ ] This computer's camera: with several cameras (built-in, USB, Continuity Camera) a list appears and switching between them works; the built-in webcam is shown mirrored, captures are not. Camera permission denied or the camera unplugged → "The camera stopped", Retry works and capture carries on from the same pose.
+- [ ] Continuity Camera (Mac + iPhone): the iPhone appears in the list as an ordinary camera; poses capture with it; the still size in the console is the iPhone's full resolution.
 - [ ] The ghost appears; the live skeleton tracks the person. Once someone is detected the ghost shrinks/grows to their height and stands where they stand (smoothly, no jitter); on the jump pose it stays on the floor.
 - [ ] Framing hints: standing far away shows (and after a moment says) "Come a bit closer"; filling the frame or cutting off head/feet shows "A bit further back". Hints aren't repeated more than every ~5 s.
-- [ ] Holding a matching pose for ~0.5 s captures it: ring fills, "hold it" / "got it" spoken, phone vibrates (Android), cutout bounces in the corner.
-- [ ] Without looking at the screen: a rising, pulsing tone plays for the whole hold, stops the moment the pose breaks, and ends in a ding when the snapshot is taken. Check it's audible over the spoken "hold it" and not annoying.
-- [ ] After ~5 s without a match, a close-enough pose now captures (tolerances widen).
-- [ ] After ~10 s, "Tap to capture anyway" appears and works.
+- [ ] Holding a matching pose for ~0.5 s captures it: ring fills, "hold it" / "got it" spoken from the laptop, cutout bounces in the corner, the side strip fills in.
+- [ ] Without looking at the screen: a rising, pulsing tone plays for the whole hold, stops the moment the pose breaks, and ends in a ding when the snapshot is taken (with a phone camera, only once the still has arrived). Check it's audible from 3–4 m over the spoken "hold it".
+- [ ] After ~5 s without a match, a close-enough pose now captures (tolerances widen). After ~10 s, "Capture anyway" appears and works.
 - [ ] Facing left instead of right still works: the cutout faces right and "Flipped so you face right" shows.
 - [ ] Punching with the left arm is accepted; in game the punch hitbox follows the left wrist (F1).
-- [ ] Solo mode: there's a ~3 s pause after each capture.
-- [ ] Background removal: a dark outfit against a dark wall, furniture next to you, and a hand on the hip all come out clean; your shadow isn't cut out with you. The console logs `[matting] ISNet on webgpu` (or `wasm`, much slower) and each capture's matting time.
-- [ ] Kicks and punches captured mid-motion look sharp (the sharpest of a short burst is used; `info.json` lists each frame's sharpness).
-- [ ] Solo mode uses the same hold-to-capture as friend mode: the rising, pulsing tone tells you you're matching without looking at the screen.
-- [ ] Buffer between poses: for ~1.5 s after a new pose starts, matching does nothing (the ghost stays white, no tone). If you're still frozen in the previous pose when that ends, it says "Relax for a second, then strike the pose" and only captures after you move out of and back into the pose. Two similar poses in a row (punch → uppercut, win → flex) can't be captured back to back by accident.
-- [ ] Rough cut-out check: capture against a cluttered wall / with a hand out of frame / in dark clothes in a dim room. Friend mode stops on "That one came out rough — retake? (reason)" with Retake / Keep it; solo mode says "let's go again" and retakes once, then keeps the second try with a toast. A clean capture never triggers it (if it does, the `?debug=1` export's `info.json` has the `quality` numbers for tuning `QUALITY_THRESHOLDS` in `src/capture/cutout-quality.ts`).
-- [ ] Camera switch: on a phone, "⇄ Camera" flips between rear and front; front is shown mirrored, captures are not. A laptop webcam is mirrored. With only one camera the button is hidden.
-- [ ] Round intro (fights and practice): both fighters walk in from their corners, pause, player 1 holds out a hand, player 2 takes it a moment later, the hands overlap and pump up and down together, then both walk back to where they started before "FIGHT!". Try two very different people (heights, left- and right-handed handshakes).
-- [ ] All 16 poses are required (second stance after the stance, crouch block after block, uppercut after punch, low kick after kick, hit-in-the-face after hurt, flex after win, then the signature pose, the handshake last). The second stance asks to relax first if you're still frozen in the stance. Review strip shows all 16; tapping one retakes it and returns to review. Sizes match across poses.
-- [ ] Fighting style: after the flex, "Pick your fighting style" (spoken too) shows four cards with stick figures; picking one goes straight to its signature pose (shoulder charge, bear hug, parry palm, flying knee), and each can be matched by a real person. The review shows "Style: … · change"; changing it retakes only the signature pose and comes back to the review. Changing it, then reloading mid-retake and resuming, asks for the new signature pose, not the old one. The fighter select panel shows the style and move under the name.
-- [ ] Lock the phone or reload mid-capture: reopening offers "Pick up where you left off?" with the right count, and Resume continues at the next missing pose (or review). "Start fresh" discards it. A finished fighter clears the draft.
-- [ ] With a game code, the "Connected to game" chip appears right after Start camera (before any poses). Stop the Worker/laptop: the chip turns red; tapping it retries. Leave the laptop on select > 10 min (room code refreshes): the phone stays connected and can still send.
-- [ ] Send failure screen: entering the laptop's new code and "Try again" works.
-- [ ] Sounds: record (auto-stops at 2 s; the victory line at 5 s), play back, remove a take, record up to 3 takes per sound, skip one, skip all. Quiet recordings come out louder (peak normalization).
-- [ ] Level meter while recording: it moves with your voice, turns green past the tick mark; whispering shows "● Recording — louder!" after about half a second.
-- [ ] Wait a second before shouting: playback (phone preview and in game) starts right at the shout, not after the pause. A soft first syllable isn't clipped.
-- [ ] Preview plays the showcase with hard cuts and the recorded sounds. Name field works.
-- [ ] "Send to game": progress, then "Sent!". The fighter appears in the laptop grid without a reload.
-- [ ] Standalone (`/capture` without a code): the button says "Save"; "Download fighter file" produces a `.photodojo`.
-- [ ] Spoken prompts toggle off → silence.
-- [ ] Rough edges with a busy background / baggy clothes are acceptable; capture is never blocked on quality.
-- [ ] Normal indoor lighting: no chunks of wall/furniture attached to the cutout, no missing limbs, dark clothing kept.
-- [ ] Hands on hips (and the flex pose): the wall visible through the loop of the arm is transparent in the sprite, not filled in. A dark patch on a shirt is still filled.
-- [ ] Sprites on the dark fight background have no light or wall-coloured fringe; hair and fingers look soft, not jagged. Compare friend mode with solo mode (room photo): solo should be noticeably cleaner at the edges.
-- [ ] Thin forearms and wrists don't carry a strip of wall along them.
-- [ ] If background removal looks bad, open `/capture?debug=1`, capture, and tap "Download matting debug (zip)" on the review screen. Each pose folder has the raw frame, the model's alpha, the final alpha (after keeping only what touches the skeleton) and the sprite, plus `info.json` with the backend and timing.
+- [ ] On my own: bigger prompts and a ~3 s pause after each capture. Someone's helping: a shorter pause.
+- [ ] Buffer between poses: for ~1.5 s after a new pose starts, matching does nothing (the ghost stays white, no tone). If you're still frozen in the previous pose, it says "Relax for a second, then strike the pose" and only captures after you move out of and back into the pose. Two similar poses in a row (punch → uppercut, win → flex) can't be captured back to back by accident.
+- [ ] Rough cut-out check: capture against a cluttered wall / with a hand out of frame / in dark clothes in a dim room. Someone's helping stops on "That one came out rough — retake?" with Retake / Keep it; on my own it says "let's go again" and retakes once, then keeps the second try with a toast. A clean capture never triggers it (if it does, the `/studio?debug=1` export's `info.json` has the `quality` numbers for tuning `QUALITY_THRESHOLDS` in `src/capture/cutout-quality.ts`).
+- [ ] All 16 poses are required (second stance after the stance, crouch block after block, uppercut after punch, low kick after kick, hit-in-the-face after hurt, flex after win, then the signature pose, the handshake last). The review strip shows all 16; clicking one retakes it and returns to review. Sizes match across poses, also after a retake.
+- [ ] Fighting style: after the flex, "Pick your fighting style" (spoken too) shows four cards with stick figures; picking one goes straight to its signature pose, and each can be matched by a real person. The review's "Style: … · change" retakes only the signature pose and comes back to the review. Changing it, then reloading mid-retake and resuming, asks for the new signature pose.
+- [ ] Reload the studio mid-capture: setup offers "Pick up where you left off?" with the right count; Resume continues at the next missing pose (or review) once a camera is live; "Start fresh" discards it. A saved fighter clears the draft.
+- [ ] Sounds on the laptop mic: record (auto-stops at 2 s; the victory line at 5 s), play back, remove a take, up to 3 takes per sound, skip one, skip all. Quiet recordings come out louder. The level meter moves with your voice and turns green past the tick; whispering shows "● Recording — louder!". Wait a second before shouting: playback starts right at the shout. Check from where the fighter stands, not just next to the laptop.
+- [ ] Preview plays the showcase with hard cuts and the recorded sounds. Name field works. "Save fighter" → "Saved"; "Back to the game" opens fighter select (not the title) with the new fighter in the grid; "Build another" starts over; "Download fighter file" produces a `.photodojo` that imports on another computer.
+- [ ] Background removal: a dark outfit against a dark wall, furniture next to you, and a hand on the hip all come out clean; your shadow isn't cut out with you. Hands on hips: the wall seen through the arm loop is transparent. Sprites on the dark fight background have no light or wall-coloured fringe; thin forearms don't carry a strip of wall. Kicks and punches captured mid-motion look sharp (sharpest of a burst).
+- [ ] If background removal looks bad, open `/studio?debug=1`, capture, and click "Download matting debug (zip)" on the review: each pose folder has the raw frame, the model's alpha, the final alpha and the sprite, plus `info.json` with the backend, timing and sharpness.
+- [ ] Spoken prompts toggled off → silence.
+- [ ] Two game tabs, one from before the update: opening the studio (database v3) either upgrades at once or says to close the other Photo Dojo tabs; it never hangs silently.
+- [ ] Editing: select a studio-built fighter's tile, ✂ Edit → the studio opens on "Editing <name>". Retake one pose (the new sprite matches the others' size), change the style, rename, redo a sound, "Save changes": the tile updates (after "Back to the game"), the career record is kept, and an export has the new photos. A fighter imported from a file: "Capture all poses again", rename and sounds work; single retakes are refused with the reason. `/studio?edit=nonsense` says "That fighter isn't on this computer". Built-in fighters have no Edit.
+- [ ] Open `/studio` on a phone: "The studio runs on a computer" with "Use this phone as the camera". On an iPad: the studio opens with the tip that a computer works better; a full capture doesn't crash the tab (note the device).
 
-## 2. Transfer
+## 2. Phone camera (same Wi-Fi unless noted)
 
-- [ ] Same Wi-Fi: a 2–4 MB fighter arrives in a second or two.
-- [ ] Phone on cellular, laptop on Wi-Fi: if it fails, after 20 s the phone shows "Couldn't reach the game" with "Download fighter file". If cross-network matters, configure TURN (see README) and retest — `/turn-credentials` should return ICE servers.
-- [ ] Laptop's Import fighter file accepts the downloaded `.photodojo`.
-- [ ] Sending while the laptop is mid-fight works; the fighter shows up in the grid afterwards.
-- [ ] Leave the laptop on character select > 10 min: "code refreshes in m:ss" counts down under the code (gold in the last 30 s), then a new room code + QR appears (room expired and reopened) and the countdown restarts from 10:00.
-- [ ] Refresh the laptop mid-transfer: the phone reports a failure instead of hanging; retry works.
+In the studio, pick **Use a phone**.
+
+- [ ] The studio shows a QR, the address and a 6-character code. Scan the QR: the phone opens `/capture?room=…`, asks for the camera, then shows "Streaming to the studio", a small preview and the studio's status line ("Pose 4/16 — Punch", "Got it!"). The studio's status says "● Phone connected" and its live view shows the phone's picture.
+- [ ] `/capture` typed by hand: "Enter the code the studio shows"; a wrong code is refused, the right one connects. On a laptop the page also links to `/studio`.
+- [ ] Rear camera by default. "⇄ Camera" in the studio flips the phone to its front camera (shown mirrored in the studio, captures not mirrored) and back, without the link dropping. A phone with one camera has no ⇄.
+- [ ] Live preview latency on Wi-Fi is low enough to pose (~0.2 s); the hold doesn't feel late.
+- [ ] Still resolution: each capture logs `[studio] phone still W×H (… MB), live video w×h`. iOS Safari and Android Chrome: the still is the camera's full resolution (≥ 1920×1080 or the portrait equivalent), not the video's, and has the same orientation as the live picture. Hold the phone in portrait and in landscape (rotate between poses): captures keep working, or fail with "Didn't work (…). Try again." and the pose stays up for another try (never a sideways sprite).
+- [ ] A still takes under a second on Wi-Fi (2–4 MB PNG). Phone on cellular, laptop on Wi-Fi: it connects (with TURN configured; `/turn-credentials` should return ICE servers) and stills take a few seconds; without TURN the phone keeps saying "Connecting to the studio…" and nothing crashes.
+- [ ] Lock the phone mid-capture: the studio pauses on "Phone disconnected" within a few seconds. Unlock: the camera restarts, the phone reconnects by itself (same code, no rescan) and capture carries on from the same pose.
+- [ ] Turn the phone's Wi-Fi off for 10 s, then on: "Reconnecting to the studio…" on the phone, "Phone disconnected" in the studio, then both pick up again. Leave the studio waiting > 10 min with no phone: the code stays the same and a phone can still join.
+- [ ] A second phone scans while the first is streaming: it waits ("Connecting to the studio…") and the first keeps streaming. Close the first phone's page: the studio shows "Phone disconnected", and the second phone joins on the same code.
+- [ ] Close the studio tab (or pick "This computer's camera"): the phone shows "The studio closed" and stops retrying; "Connect again" reconnects to a studio that's open again.
+- [ ] The phone's screen stays on while streaming (Wake Lock). The phone stays cool and responsive through a full 16-pose session (it runs no models).
+- [ ] Open `/` on a phone: "The fight happens on a big screen" with "Use this phone as the camera" (→ /capture) and "Show the game anyway".
 
 ## 3. Game (laptop)
 
-- [ ] Open `/` on a phone: a "the fight happens on a big screen" page with "Become a fighter" (→ /capture) and "Show the game anyway" (loads the game; remembered for the visit). A tablet goes straight to the game.
+- [ ] Open `/` on a phone: the big-screen page (see §2); "Show the game anyway" loads the game and is remembered for the visit. A tablet goes straight to the game.
 - [ ] Title footer: "About · FAQ · Credits ↗" opens /about in a new tab without starting the game; the fan-project disclaimer shows under it. Fighter select's toolbar has the same link.
-- [ ] /about on a phone and a laptop: readable, no sideways scroll, FAQ entries expand, links work (GitHub, Play, Become a fighter); the footer shows the version.
+- [ ] /about on a phone and a laptop: readable, no sideways scroll, FAQ entries expand, links work (GitHub, Play, Build a fighter); the footer shows the version.
 - [ ] Paste the deployed URL into Slack / Discord / iMessage: the preview shows the title, description and the fight image (needs `SITE_URL` set for the deploy). The browser tab shows the camera icon.
 
-- [ ] Page load: a white flash, "PHOTO DOJO" develops from a dark print to gold, then the "REVIVAL" stamp, the tagline, the About link + disclaimer and "Press any button" (pulsing). Behind it two fighters from the library fight each other (captured ones when there are at least two); a new pair fades in after each KO or ~40 s. With nothing captured yet, a "Scan → Strike 14 poses → Fight" strip shows.
-- [ ] Title: a player key (J / `,` / a pad button) goes to fighter select joined as P1 (not picked); Enter, any other key or a click goes there with nobody joined. The press plays a random captured fighter's victory line (the stand-in if nobody has one). A phone linking up while the title is showing jumps to fighter select. Quitting a fight goes back to fighter select, not the title.
+- [ ] Page load: a white flash, "PHOTO DOJO" develops from a dark print to gold, then the "REVIVAL" stamp, the tagline, the About link + disclaimer and "Press any button" (pulsing). Behind it two fighters from the library fight each other (captured ones when there are at least two); a new pair fades in after each KO or ~40 s. With nothing captured yet, an "Open the studio → Strike 16 poses → Fight as yourself" strip shows.
+- [ ] Title: a player key (J / `,` / a pad button) goes to fighter select joined as P1 (not picked); Enter, any other key or a click goes there with nobody joined. The press plays a random captured fighter's victory line (the stand-in if nobody has one). Quitting a fight goes back to fighter select, not the title.
 - [ ] Character select lists captured fighters (newest first) and the two stick figures.
 - [ ] "Press any button": first pad/keyboard half to press gets P1, the next gets P2. Pads only appear after a button press.
 - [ ] Keyboard without a numpad: P1 = WASD + J (punch) / K (kick); P2 = arrows + `,` (punch) / `.` (kick). Numpad 1/2 also work if present.
@@ -91,7 +88,7 @@ Devices: two phones (one iOS Safari, one Android Chrome), two laptops (Chrome + 
 - [ ] Lunar Dojo: stars twinkle, a shooting star crosses now and then, Earth and the ringed planet are shaded only inside their discs. Its soundtrack ("Space-Time" by TomboFry, credited under the name) previews on the stage select (marked ♪, fading between stages), then loops through the fight (listen at the ~3:08 loop point, in Chrome and Safari), pauses with the pause menu, restarts with "Restart round", and stops on quitting. Settings → Music volume changes it when the fight resumes; 0% silences it.
 - [ ] On a window too short for the game plus the fighter-select toolbar, the game shrinks to fit while the toolbar shows and fills the window again after fighter select.
 - [ ] More than 12 fighters (18 with the compact "Add a fighter" panel): the grid pages ("page 1 / 2", ◀ ▶ clickable); moving a cursor past the last row shows the next page.
-- [ ] "Add a fighter" is full size with only the built-in fighters. Once a captured fighter exists, or while a phone is linked, it shrinks to a small panel beside the P1/P2 panels and the grid widens to 9 columns. Clicking the panel enlarges / shrinks it; the QR still scans when small.
+- [ ] "Add a fighter" is full size with only the built-in fighters. Once a captured fighter exists, it shrinks to a small panel beside the P1/P2 panels and the grid widens to 9 columns. Clicking the panel enlarges / shrinks it; "Open the studio" works from both sizes.
 - [ ] Mouse/touch: clicking a tile selects it (gold border) with Export and 🗑 on it; 🗑 asks "Delete? / Keep"; built-ins have no 🗑. A joined, not-ready player's cursor follows clicks; clicking the selected tile again picks it. "Export all fighters" downloads one file per captured fighter.
 - [ ] Vs CPU: one player joins, picks, presses punch again ("Choose your opponent"): a CPU cursor and panel take the empty slot, moved by the same controller; punch picks; the panel offers Match (◀ ▶ easy/normal/hard, remembered for the session) and Practice; kick steps back each step. Match → stage → controls screen (the CPU's half shows its moves and READY) → a full best-of-three; the CPU's name has "· CPU"; the K.O. replay isn't skipped by the CPU; the stats page says "You win" / "You lose"; career records don't change. A second player joining while the CPU slot is open replaces it ("Here comes a new challenger").
 - [ ] Practice: one player joins, picks, presses punch, picks the opponent, chooses Practice, picks a stage → practice vs. that fighter, starting as CPU easy. 1–8 / Tab / pad Select change the dummy (incl. "jump in with a kick" to practice anti-airs); 9 cycles CPU easy/normal/hard, and hard is noticeably tougher than easy; hitboxes off (F1 toggles); no timer; health refills; Esc → "Quit to fighter select" quits.
@@ -139,10 +136,10 @@ Devices: two phones (one iOS Safari, one Android Chrome), two laptops (Chrome + 
 
 ## 4. Browsers
 
-| | Capture | Game | Transfer |
+| | Studio | Phone camera | Game |
 |---|---|---|---|
-| iOS Safari | | | |
-| Android Chrome | | | |
+| iOS Safari | n/a (gated) | | n/a (gated) |
+| Android Chrome | n/a (gated) | | n/a (gated) |
 | Desktop Chrome | | | |
 | Desktop Safari | | | |
 | Desktop Firefox | | | |

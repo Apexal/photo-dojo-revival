@@ -23,7 +23,3 @@ export class VoicePrompts {
     this.synth.speak(u);
   }
 }
-
-export function vibrate(pattern: number | number[] = 60): void {
-  if (typeof navigator !== "undefined" && "vibrate" in navigator) navigator.vibrate(pattern);
-}
