@@ -1,8 +1,10 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
-  <!-- A camera (photo) whose lens is a red fist-impact burst (dojo). -->
-  <rect width="64" height="64" rx="14" fill="#121018"/>
-  <path d="M22 16h20l4 6H18z" fill="#f2c14e"/>
-  <rect x="8" y="21" width="48" height="31" rx="7" fill="#f2c14e"/>
-  <circle cx="32" cy="36.5" r="12" fill="#121018"/>
-  <path d="M32 27l2.6 5.4 5.9-1.2-3.4 5 3.9 4.6-6-.2-3 5.2-1.9-5.7-5.8-1.5 4.8-3.6-.8-6z" fill="#e8483b"/>
+  <!-- A camera (photo) whose lens is a red fist-impact burst (dojo), ink-outlined on the grape night. -->
+  <rect width="64" height="64" rx="14" fill="#1d1240"/>
+  <g stroke="#0d0820" stroke-width="2.5" stroke-linejoin="round">
+    <path d="M22 15h20l4.5 7h-29z" fill="#ffc83d"/>
+    <rect x="7.5" y="20.5" width="49" height="32" rx="7.5" fill="#ffc83d"/>
+    <circle cx="32" cy="36.5" r="12" fill="#0d0820"/>
+    <path d="M32 27l2.6 5.4 5.9-1.2-3.4 5 3.9 4.6-6-.2-3 5.2-1.9-5.7-5.8-1.5 4.8-3.6-.8-6z" fill="#ff5a47" stroke-width="1.5"/>
+  </g>
 </svg>

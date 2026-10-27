@@ -5,6 +5,7 @@ import type { LibraryEntry } from "../fighter-library";
 import { playGameSound } from "../game-sounds";
 import { KEY } from "../input/key-bindings";
 import { GAME_HEIGHT, GAME_WIDTH } from "../render/stage";
+import { bodyText, COLOR, displayText, drawBackdrop, drawPopBox, HEX, RADIUS, SHADOW } from "../render/theme";
 import { REGISTRY } from "./boot-scene";
 
 export interface RenameSceneData {
@@ -50,16 +51,18 @@ export class RenameScene extends Phaser.Scene {
     this.name = this.entry.fighter.name.slice(0, MAX_TYPED_NAME_LENGTH);
 
     const cx = GAME_WIDTH / 2;
-    this.add.rectangle(0, 0, GAME_WIDTH, GAME_HEIGHT, 0x121018, 0.94).setOrigin(0).setInteractive(); // swallow clicks
-    this.add.text(cx, 200, "RENAME FIGHTER", { fontSize: "48px", fontStyle: "bold", color: "#f2c14e" }).setOrigin(0.5);
-    this.add.rectangle(cx, 300, BOX_W, 72, 0x1c1824).setStrokeStyle(3, 0xf2c14e);
-    this.nameText = this.add.text(cx, 300, "", { fontSize: "36px", fontStyle: "bold", color: "#f3efe6" }).setOrigin(0.5);
-    this.caret = this.add.rectangle(0, 300, 3, 40, 0xf2c14e);
+    drawBackdrop(this);
+    this.add.rectangle(0, 0, GAME_WIDTH, GAME_HEIGHT, 0x000000, 0.001).setOrigin(0).setInteractive(); // swallow clicks
+    this.add.text(cx, 200, "RENAME FIGHTER", displayText(52, COLOR.accent)).setOrigin(0.5);
+    // The name field: a sunken well, outlined in accent while it has the keyboard (always, here).
+    drawPopBox(this.add.graphics(), cx - BOX_W / 2, 300 - 36, BOX_W, 72, { fill: HEX.well, border: HEX.accent, radius: RADIUS.md, shadow: 0 });
+    this.nameText = this.add.text(cx, 300, "", displayText(36, COLOR.fg, { outline: false })).setOrigin(0.5);
+    this.caret = this.add.rectangle(0, 300, 3, 40, HEX.accent);
     this.tweens.add({ targets: this.caret, alpha: 0, duration: 500, yoyo: true, repeat: -1, ease: "Stepped" });
-    this.counter = this.add.text(cx + BOX_W / 2, 346, "", { fontSize: "15px", color: "#8a8478" }).setOrigin(1, 0);
-    this.add.text(cx, 400, "Type a new name  ·  Enter: save  ·  Esc: cancel", { fontSize: "18px", color: "#a8a196" }).setOrigin(0.5);
-    this.button(cx - 90, "Save", "#121018", "#f2c14e", () => void this.save());
-    this.button(cx + 90, "Cancel", "#f3efe6", "#1c1824", () => this.close(null));
+    this.counter = this.add.text(cx + BOX_W / 2, 346, "", bodyText(15, COLOR.faint, 600)).setOrigin(1, 0);
+    this.add.text(cx, 400, "Type a new name  ·  Enter: save  ·  Esc: cancel", bodyText(18, COLOR.muted, 600)).setOrigin(0.5);
+    this.button(cx - 90, "Save", true, () => void this.save());
+    this.button(cx + 90, "Cancel", false, () => this.close(null));
     // The browser's own events: Phaser's replays a frame's earlier keys when several land in one frame (fast typing).
     const onKey = (ev: KeyboardEvent) => this.onKey(ev);
     window.addEventListener("keydown", onKey);
@@ -67,9 +70,20 @@ export class RenameScene extends Phaser.Scene {
     this.refresh();
   }
 
-  private button(x: number, label: string, color: string, background: string, onClick: () => void): void {
-    this.add.text(x, 470, label, { fontSize: "24px", fontStyle: "bold", color, backgroundColor: background, padding: { x: 20, y: 8 } })
+  /** A popped button: the primary one gold, the other a panel that turns gold on hover. */
+  private button(x: number, label: string, primary: boolean, onClick: () => void): void {
+    const box = this.add.graphics();
+    const text = this.add.text(x, 470, label, displayText(24, primary ? COLOR.ink : COLOR.fg, { outline: false, padding: { x: 22, y: 10 } }))
       .setOrigin(0.5).setInteractive({ useHandCursor: true }).on("pointerdown", onClick);
+    const draw = (hover: boolean) => {
+      const gold = primary || hover;
+      text.setColor(gold ? COLOR.ink : COLOR.fg);
+      drawPopBox(box.clear(), text.x - text.width / 2, text.y - text.height / 2, text.width, text.height, {
+        fill: gold ? HEX.accent : HEX.panel, border: hover ? HEX.fg : HEX.ink, radius: RADIUS.md, shadow: SHADOW.md,
+      });
+    };
+    text.on("pointerover", () => draw(true)).on("pointerout", () => draw(false));
+    draw(false);
   }
 
   private onKey(ev: KeyboardEvent): void {
@@ -102,7 +116,7 @@ export class RenameScene extends Phaser.Scene {
     } catch (err) {
       console.error("[rename] couldn't save", err);
       this.saving = false;
-      return void this.counter.setColor("#e8483b").setText("Couldn't save: storage unavailable");
+      return void this.counter.setColor(COLOR.bad).setText("Couldn't save: storage unavailable");
     }
     const library: LibraryEntry[] = this.registry.get(REGISTRY.library) ?? [];
     this.registry.set(REGISTRY.library, library.map((e) => (e.fighter.fighterId === fighter.fighterId ? { ...e, fighter } : e)));

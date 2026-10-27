@@ -19,6 +19,7 @@ import { REGISTRY } from "./boot-scene";
 import type { CharacterSelectData } from "./character-select-scene";
 import { MIRROR_TINT } from "./controls-scene";
 import { playMenuMusic } from "../menu-music";
+import { bodyText, COLOR, displayText, HEX, popBox, SHADOW, stamp } from "../render/theme";
 
 export interface TitleSceneData {
   /** A later bout of the demo: the logo is already up, no flash. */
@@ -148,27 +149,21 @@ export class TitleScene extends Phaser.Scene {
     const cx = GAME_WIDTH / 2;
     // A darker sky behind the words, fading out above the fighters' heads.
     this.add.graphics().setDepth(OVERLAY_DEPTH - 1)
-      .fillGradientStyle(0x0b0910, 0x0b0910, 0x0b0910, 0x0b0910, 0.75, 0.75, 0, 0).fillRect(0, 0, GAME_WIDTH, 350);
-    const logo = this.add.text(cx, 86, "PHOTO DOJO", {
-      fontSize: "112px", fontStyle: "bold", color: "#f2c14e", stroke: "#121018", strokeThickness: 12,
-    }).setOrigin(0.5).setDepth(OVERLAY_DEPTH);
+      .fillGradientStyle(HEX.ink, HEX.ink, HEX.ink, HEX.ink, 0.75, 0.75, 0, 0).fillRect(0, 0, GAME_WIDTH, 350);
+    const logo = this.add.text(cx, 86, "PHOTO DOJO", displayText(112, COLOR.accent)).setOrigin(0.5).setDepth(OVERLAY_DEPTH);
     // Stamped across the logo's corner once it has developed.
-    const stamp = this.add.text(cx + 262, 150, "REVIVAL", {
-      fontSize: "34px", fontStyle: "bold", color: "#e8483b", stroke: "#121018", strokeThickness: 7, letterSpacing: 6,
-    }).setOrigin(0.5).setAngle(-5).setDepth(OVERLAY_DEPTH + 1);
-    const tagline = this.add.text(cx, 200, "Snap yourself. Fight your friends.", { fontSize: "24px", color: "#f3efe6" })
+    const revival = stamp(this, cx + 250, 152, "Revival", HEX.bad, 30).setDepth(OVERLAY_DEPTH + 1);
+    const tagline = this.add.text(cx, 204, "Snap yourself. Fight your friends.", bodyText(24, COLOR.fg, 800, { stroke: COLOR.ink, strokeThickness: 5 }))
       .setOrigin(0.5).setDepth(OVERLAY_DEPTH);
-    const late: Phaser.GameObjects.GameObject[] = [stamp, tagline, ...this.buildFooter()];
+    const late: Phaser.GameObjects.GameObject[] = [revival, tagline, ...this.buildFooter()];
     const library: LibraryEntry[] = this.registry.get(REGISTRY.library) ?? [];
     if (!library.some((e) => !e.builtIn)) late.push(...this.buildHowTo(cx, 256));
-    const prompt = this.add.text(cx, library.some((e) => !e.builtIn) ? 256 : 318, "Press any button", {
-      fontSize: "30px", fontStyle: "bold", color: "#f3efe6", stroke: "#121018", strokeThickness: 6,
-    }).setOrigin(0.5).setDepth(OVERLAY_DEPTH);
+    const prompt = this.add.text(cx, library.some((e) => !e.builtIn) ? 256 : 318, "Press any button", displayText(34, COLOR.fg)).setOrigin(0.5).setDepth(OVERLAY_DEPTH);
     // Starts pulsing once the logo has developed.
     this.tweens.add({ targets: prompt, alpha: { from: 1, to: 0.35 }, delay: this.setup.revealed ? 0 : DEVELOP_MS, duration: 800, yoyo: true, repeat: -1, ease: "Sine.easeInOut" });
     if (!this.setup.revealed) prompt.setAlpha(0);
     const [a, b] = this.pair.map((e) => e.fighter.name);
-    late.push(this.add.text(16, GAME_HEIGHT - 12, `${a}  vs  ${b}`, { fontSize: "15px", color: "#f3efe6", stroke: "#121018", strokeThickness: 4 })
+    late.push(this.add.text(16, GAME_HEIGHT - 12, `${a}  vs  ${b}`, displayText(18, COLOR.fg))
       .setOrigin(0, 1).setDepth(OVERLAY_DEPTH));
     if (!this.setup.revealed) this.reveal(logo, late);
   }
@@ -176,16 +171,16 @@ export class TitleScene extends Phaser.Scene {
   /** Bottom right: the About page (new tab, so the room stays open), and the fan-project disclaimer. */
   private buildFooter(): Phaser.GameObjects.GameObject[] {
     const x = GAME_WIDTH - 16;
-    const style = { fontSize: "15px", color: "#f3efe6", stroke: "#121018", strokeThickness: 4 };
+    const style = bodyText(15, COLOR.fg, 800, { stroke: COLOR.ink, strokeThickness: 4 });
     const about = this.add.text(x, GAME_HEIGHT - 34, "About · FAQ · Credits ↗", style).setOrigin(1, 1).setDepth(OVERLAY_DEPTH)
       .setInteractive({ useHandCursor: true });
-    about.on("pointerover", () => about.setColor("#f2c14e"));
-    about.on("pointerout", () => about.setColor("#f3efe6"));
+    about.on("pointerover", () => about.setColor(COLOR.accent));
+    about.on("pointerout", () => about.setColor(COLOR.fg));
     about.on("pointerdown", (_p: unknown, _x: number, _y: number, ev: Phaser.Types.Input.EventData) => {
       ev.stopPropagation(); // not a "press any button"
       window.open(`${import.meta.env.BASE_URL}about`, "_blank", "noopener");
     });
-    const disclaimer = this.add.text(x, GAME_HEIGHT - 12, "Unofficial fan project · not affiliated with Nintendo", { ...style, fontSize: "13px", color: "#c9c3b8" })
+    const disclaimer = this.add.text(x, GAME_HEIGHT - 12, "Unofficial fan project · not affiliated with Nintendo", { ...style, fontSize: "13px", fontStyle: "600", color: COLOR.muted })
       .setOrigin(1, 1).setDepth(OVERLAY_DEPTH);
     return [about, disclaimer];
   }
@@ -194,12 +189,13 @@ export class TitleScene extends Phaser.Scene {
   private buildHowTo(cx: number, y: number): Phaser.GameObjects.GameObject[] {
     const steps = ["📷 Open the studio", `🥋 Strike ${CAPTURE_TARGET_COUNT} poses`, "🥊 Fight as yourself"];
     const gap = 330;
-    const band = this.add.rectangle(cx, y, gap * steps.length + 40, 46, 0x121018, 0.7).setDepth(OVERLAY_DEPTH);
+    const bandW = gap * steps.length + 40;
+    const band = popBox(this, cx - bandW / 2, y - 26, bandW, 52, { fill: HEX.panel, fillAlpha: 0.92, radius: 26, shadow: SHADOW.sm }).setDepth(OVERLAY_DEPTH);
     const items: Phaser.GameObjects.GameObject[] = [band];
     steps.forEach((step, i) => {
       const x = cx + (i - 1) * gap;
-      items.push(this.add.text(x, y, step, { fontSize: "21px", color: "#f3efe6" }).setOrigin(0.5).setDepth(OVERLAY_DEPTH));
-      if (i > 0) items.push(this.add.text(x - gap / 2, y, "→", { fontSize: "21px", color: "#f2c14e" }).setOrigin(0.5).setDepth(OVERLAY_DEPTH));
+      items.push(this.add.text(x, y, step, displayText(22, COLOR.fg, { outline: false })).setOrigin(0.5).setDepth(OVERLAY_DEPTH));
+      if (i > 0) items.push(this.add.text(x - gap / 2, y, "→", displayText(24, COLOR.accent, { outline: false })).setOrigin(0.5).setDepth(OVERLAY_DEPTH));
     });
     return items;
   }

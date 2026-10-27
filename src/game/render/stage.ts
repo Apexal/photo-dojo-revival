@@ -10,6 +10,6 @@ export const GAME_WIDTH = 1280;
 export const GAME_HEIGHT = 720;
 
 /** Each player's colour: P1 red, P2 blue (fighter select cursors, hit sparks). */
-export const PLAYER_COLORS = [0xe8483b, 0x3f86f0] as const;
+export const PLAYER_COLORS = [0xff5a47, 0x4aa8ff] as const;
 
 export const worldToScreen = (p: { x: number; y: number }) => ({ x: p.x, y: FLOOR_SCREEN_Y + p.y });

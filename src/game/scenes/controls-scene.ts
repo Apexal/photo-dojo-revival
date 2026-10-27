@@ -9,16 +9,23 @@ import { GRAB_TIPS, GUARD_TIPS, controlLabels, deviceName, moveGuide } from "../
 import { createInputSource, describeInput, isPlayerInput, type PlayerInputDescriptor } from "../input/input-descriptor";
 import type { InputSource } from "../input/input-source";
 import { fighterTextureKeys, preloadFighterTextures, textureKey } from "../render/fighter-sprite-view";
-import { GAME_HEIGHT, GAME_WIDTH } from "../render/stage";
+import { GAME_HEIGHT, GAME_WIDTH, PLAYER_COLORS } from "../render/stage";
+import { bodyText, COLOR, displayText, drawBackdrop, drawPopBox, HEX, popBox, RADIUS, SHADOW, stamp } from "../render/theme";
 import { menuSceneFor, type FightSceneData } from "./fight-scene";
 import { stopMenuMusic } from "../menu-music";
 import { announce } from "../announcer";
 
 const PREFIXES = ["ctl0", "ctl1"] as const;
 export const MIRROR_TINT = 0x9fc4ff;
-const PLAYER_CSS = ["#e8483b", "#3f86f0"];
+const PLAYER_CSS = [COLOR.bad, COLOR.p2];
 const COLS = 5;
 const CARD_W = 116;
+const CARD_GAP = 4;
+/** Each player's half is a panel; the cards sit inside it with this much room. */
+const PANEL_PAD = 12;
+const PANEL_W = COLS * CARD_W + (COLS - 1) * CARD_GAP + 2 * PANEL_PAD;
+const PANEL_TOP = 74;
+const PANEL_BOTTOM = 640;
 const CARD_H = 190;
 const SPRITE_SCALE = 0.24;
 const PAUSE_FRAMES = 30;
@@ -66,6 +73,8 @@ export class ControlsScene extends Phaser.Scene {
   private previous: InputFrame[] = [];
   private ready: [boolean, boolean] = [false, false];
   private readyTexts: Phaser.GameObjects.Text[] = [];
+  private readyStamps: Phaser.GameObjects.Container[] = [];
+  private panels: Phaser.GameObjects.Graphics[] = [];
   private objectUrls: string[] = [];
   private frame = 0;
   private openedAt = 0;
@@ -93,11 +102,11 @@ export class ControlsScene extends Phaser.Scene {
     this.seats = ([0, 1] as const).filter((i) => isPlayerInput(this.setup.inputs[i]));
     this.sources = this.seats.map((i) => createInputSource(this, this.setup.inputs[i] as PlayerInputDescriptor));
     this.previous = this.sources.map((s) => s.read());
-    this.add.text(GAME_WIDTH / 2, 22, "HOW TO FIGHT", { fontSize: "40px", fontStyle: "bold", color: "#f2c14e" }).setOrigin(0.5, 0);
-    this.add.rectangle(GAME_WIDTH / 2, 90, 2, GAME_HEIGHT - 150, 0x3a3346).setOrigin(0.5, 0);
+    drawBackdrop(this);
+    this.add.text(GAME_WIDTH / 2, 14, "HOW TO FIGHT", displayText(44, COLOR.accent)).setOrigin(0.5, 0);
     [0, 1].forEach((p) => this.buildHalf(p));
-    this.add.text(GAME_WIDTH / 2, GAME_HEIGHT - 58, `${GUARD_TIPS}  Pause: Esc / Start`, { fontSize: "16px", color: "#c9c3b8" }).setOrigin(0.5);
-    this.add.text(GAME_WIDTH / 2, GAME_HEIGHT - 32, `Previews in slow motion.  ${GRAB_TIPS}`, { fontSize: "16px", color: "#a8a196" }).setOrigin(0.5);
+    this.add.text(GAME_WIDTH / 2, GAME_HEIGHT - 58, `${GUARD_TIPS}  Pause: Esc / Start`, bodyText(16, COLOR.muted, 600)).setOrigin(0.5);
+    this.add.text(GAME_WIDTH / 2, GAME_HEIGHT - 32, `Previews in slow motion.  ${GRAB_TIPS}`, bodyText(16, COLOR.muted, 600)).setOrigin(0.5);
     this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => {
       this.setup.entries.forEach((e, i) => fighterTextureKeys(e.fighter, PREFIXES[i]).forEach((k) => this.textures.exists(k) && this.textures.remove(k)));
       this.objectUrls.forEach((u) => URL.revokeObjectURL(u));
@@ -107,18 +116,21 @@ export class ControlsScene extends Phaser.Scene {
 
   private buildHalf(player: number): void {
     const left = player === 0;
-    const x0 = left ? 30 : GAME_WIDTH / 2 + 30;
+    // Two panels, centred on each half of the screen with a gap between them.
+    const panelX = left ? GAME_WIDTH / 2 - 8 - PANEL_W : GAME_WIDTH / 2 + 8;
+    const x0 = panelX + PANEL_PAD;
+    this.panels[player] = this.add.graphics({ x: panelX, y: PANEL_TOP });
     const input = this.setup.inputs[player];
     // The CPU's half shows its moves, without buttons.
     const labels = isPlayerInput(input) ? controlLabels(input, left ? "left" : "right") : null;
     const name = this.setup.entries[player].fighter.name;
-    this.add.text(x0, 84, `P${player + 1} · ${name}`, { fontSize: "26px", fontStyle: "bold", color: PLAYER_CSS[player] });
-    this.add.text(x0, 116, isPlayerInput(input) ? deviceName(input) : describeInput(input), { fontSize: "16px", color: "#c9c3b8" });
+    this.add.text(x0, 84, `P${player + 1} · ${name}`, displayText(30, PLAYER_CSS[player]));
+    this.add.text(x0, 118, isPlayerInput(input) ? deviceName(input) : describeInput(input), bodyText(16, COLOR.muted, 600));
 
     moveGuide(this.setup.entries[player].fighter.archetype).forEach((move, i) => {
-      const cx = x0 + (i % COLS) * (CARD_W + 6);
+      const cx = x0 + (i % COLS) * (CARD_W + CARD_GAP);
       const cy = 146 + Math.floor(i / COLS) * (CARD_H + 10);
-      this.add.rectangle(cx, cy, CARD_W, CARD_H, 0x1c1824).setOrigin(0).setStrokeStyle(1, 0x3a3346);
+      popBox(this, cx, cy, CARD_W, CARD_H, { fill: HEX.tile, radius: RADIUS.md, shadow: SHADOW.sm });
       const baseY = cy + CARD_H - 44;
       const sprite = this.add.image(cx + CARD_W / 2, baseY, textureKey(PREFIXES[player], "idle")).setScale(SPRITE_SCALE);
       // Captures face right; the right-hand player fights facing left.
@@ -126,21 +138,26 @@ export class ControlsScene extends Phaser.Scene {
       // Same tint the fight uses to tell a mirror match apart.
       if (!left && this.setup.entries[0].fighter.fighterId === this.setup.entries[1].fighter.fighterId) sprite.setTint(MIRROR_TINT);
       this.cards.push({ sprite, action: move.action, player, baseY, frames: loopFrames(move.action), offset: i * STAGGER_FRAMES });
-      fitWidth(this.add.text(cx + 6, cy + 4, move.name, { fontSize: "15px", fontStyle: "bold", color: "#f3efe6" }), CARD_W - 12);
-      fitWidth(this.add.text(cx + CARD_W / 2, cy + CARD_H - 22, labels ? move.how(labels) : "", {
-        fontSize: "17px", fontStyle: "bold", color: "#f2c14e", align: "center",
-      }).setOrigin(0.5), CARD_W - 8);
+      fitWidth(this.add.text(cx + 6, cy + 4, move.name, bodyText(15, COLOR.fg, 800)), CARD_W - 12);
+      fitWidth(this.add.text(cx + CARD_W / 2, cy + CARD_H - 22, labels ? move.how(labels) : "", displayText(19, COLOR.accent, { outline: false, align: "center" })).setOrigin(0.5), CARD_W - 8);
     });
 
-    this.readyTexts[player] = this.add.text(x0 + 290, GAME_HEIGHT - 100, "", { fontSize: "22px", fontStyle: "bold", color: PLAYER_CSS[player] }).setOrigin(0.5);
+    const readyX = panelX + PANEL_W / 2;
+    this.readyTexts[player] = this.add.text(readyX, GAME_HEIGHT - 100, "", displayText(24, PLAYER_CSS[player])).setOrigin(0.5);
+    this.readyStamps[player] = stamp(this, readyX, GAME_HEIGHT - 100, "Ready!", PLAYER_COLORS[player], 26);
     this.updateReadyText(player);
   }
 
   private updateReadyText(player: number): void {
     const input = this.setup.inputs[player];
-    if (!isPlayerInput(input)) return void this.readyTexts[player].setText("READY!");
-    const punch = controlLabels(input, "left").punch;
-    this.readyTexts[player].setText(this.ready[player] ? "READY!" : `Press ${punch} when ready`);
+    const ready = !isPlayerInput(input) || this.ready[player];
+    this.readyTexts[player].setText(isPlayerInput(input) ? `Press ${controlLabels(input, "left").punch} when ready` : "").setVisible(!ready);
+    this.readyStamps[player].setVisible(ready);
+    // A ready player's panel is framed in their colour.
+    drawPopBox(this.panels[player].clear(), 0, 0, PANEL_W, PANEL_BOTTOM - PANEL_TOP, {
+      fill: HEX.panel, radius: RADIUS.lg, shadow: SHADOW.lg,
+      ...(ready ? { border: PLAYER_COLORS[player], borderWidth: 5 } : {}),
+    });
   }
 
   update(): void {

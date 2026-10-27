@@ -1,0 +1,87 @@
+/* Arcade night: the one look shared by every page (and mirrored for Phaser in theme.ts).
+   Chunky outlined display type, warm fills on a grape night, ink outlines, hard drop shadows. */
+@import "@fontsource/lilita-one/400.css";
+@import "@fontsource/nunito/500.css";
+@import "@fontsource/nunito/600.css";
+@import "@fontsource/nunito/800.css";
+
+:root {
+  color-scheme: dark;
+  --bg: #1d1240;
+  --dot: #271852;
+  --well: #120a2a;
+  --panel: #2b1d5c;
+  --tile: #38287a;
+  --showcase-glow: #4a3399;
+  --checker-a: #2f2163;
+  --checker-b: #251952;
+  --line: #4d3b8c;
+  --edge: #8f7ddb;
+  --ink: #0d0820;
+  --fg: #fff4dc;
+  --muted: #c9bde8;
+  --faint: #a596d4;
+  --disabled: #6e5fa3;
+  --accent: #ffc83d;
+  --accent-deep: #e59a00;
+  --bad: #ff5a47;
+  --ok: #5be08a;
+  --party: #ff7ac0;
+  --p1: var(--bad);
+  --p2: #4aa8ff;
+
+  --font-display: "Lilita One", "Arial Rounded MT Bold", system-ui, sans-serif;
+  --font-body: Nunito, "Arial Rounded MT Bold", system-ui, sans-serif;
+
+  --radius-sm: 8px;
+  --radius-md: 14px;
+  --radius-lg: 22px;
+  --radius-pill: 999px;
+  --shadow-pop-sm: 0 3px 0 var(--ink);
+  --shadow-pop: 0 5px 0 var(--ink);
+  --shadow-pop-lg: 0 8px 0 var(--ink);
+  --shadow-text: 0 4px 0 var(--ink);
+  --stroke-sm: 4px;
+  --stroke-md: 7px;
+  --stroke-lg: 12px;
+  --bounce: cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+* { box-sizing: border-box; }
+html, body { margin: 0; background-color: var(--bg); color: var(--fg); font: 500 18px/1.5 var(--font-body); }
+/* The printed halftone ground. */
+body { background-image: radial-gradient(var(--dot) 2px, transparent 2.5px); background-size: 14px 14px; }
+a { color: var(--accent); font-weight: 800; text-underline-offset: 3px; }
+strong { font-weight: 800; }
+h1, h2, h3 { font-family: var(--font-display); font-weight: 400; }
+:focus-visible { outline: 3px solid var(--fg); outline-offset: 3px; }
+.muted { color: var(--muted); font-size: 15px; font-weight: 600; }
+.error { color: var(--bad); font-weight: 800; }
+
+/* Outlined display text with a hard drop (titles, logos). */
+.outlined { -webkit-text-stroke: var(--stroke-md) var(--ink); paint-order: stroke fill; text-shadow: var(--shadow-text); }
+
+/* A tilted label slapped across a corner: REVIVAL, STUDIO, CAMERA, NEW!. */
+.stamp { display: inline-block; font: 400 22px/1 var(--font-display); letter-spacing: 0.12em; text-transform: uppercase; padding: 6px 12px 5px; border: 3px solid var(--ink); border-radius: var(--radius-sm); box-shadow: var(--shadow-pop-sm); background: var(--bad); color: var(--ink); transform: rotate(-5deg); -webkit-text-stroke: 0; text-shadow: none; }
+
+/* Buttons: sit on a hard shadow, lift on hover, press down onto it. */
+button, .button { font: 400 20px/1.1 var(--font-display); letter-spacing: 0.02em; padding: 14px 22px; border-radius: var(--radius-md); border: 3px solid var(--edge); background: var(--tile); color: var(--fg); box-shadow: var(--shadow-pop); cursor: pointer; text-align: center; text-decoration: none; display: inline-block; transition: transform 80ms, box-shadow 80ms, background-color 80ms; }
+button:hover:not(:disabled), .button:hover { transform: translateY(-2px); box-shadow: var(--shadow-pop-lg); }
+button:active:not(:disabled), .button:active { transform: translateY(3px); box-shadow: var(--shadow-pop-sm); }
+button.primary, .button.primary { background: var(--accent); border-color: var(--ink); color: var(--ink); }
+button.primary:hover:not(:disabled), .button.primary:hover { background: var(--accent-deep); }
+button.danger { background: var(--bad); border-color: var(--ink); color: var(--ink); }
+button.big, .button.big { font-size: 24px; padding: 18px 28px; }
+button:disabled { opacity: 0.5; box-shadow: none; cursor: default; }
+button.link { background: none; border: none; box-shadow: none; padding: 4px 0; color: var(--accent); text-decoration: underline; text-underline-offset: 4px; font-size: 18px; }
+button.link:hover, button.link:active { transform: none; box-shadow: none; }
+
+/* Fields sunk into the page. */
+input[type="text"], select { font: inherit; font-weight: 800; padding: 12px 16px; border-radius: var(--radius-md); border: 3px solid var(--edge); background: var(--well); color: var(--fg); width: 100%; }
+input::placeholder { color: var(--disabled); opacity: 1; }
+input[type="checkbox"] { width: 22px; height: 22px; accent-color: var(--accent); }
+
+@media (prefers-reduced-motion: reduce) {
+  button, .button { transition: none; }
+  button:hover:not(:disabled), .button:hover, button:active:not(:disabled), .button:active { transform: none; }
+}

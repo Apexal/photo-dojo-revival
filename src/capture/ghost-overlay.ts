@@ -4,13 +4,13 @@ import { STICK_SEGMENTS } from "../shared/stick-figure";
 import { defaultGhostFit, ghostTransform, type GhostFit } from "./framing";
 import { segmentBands, type CorrectionArrow, type JointBand } from "./pose-coaching";
 
-const MATCH_COLOUR = "#5ae68c";
+const MATCH_COLOUR = "#5be08a";
 const ARROW_COLOUR = "#ffffff";
 /** Live skeleton bones: by how their joint is doing; bones the pose doesn't check stay neutral. */
 const BAND_COLOURS: Record<JointBand | "unchecked", string> = {
   good: MATCH_COLOUR,
-  close: "#f2c14e",
-  off: "#ff5a5a",
+  close: "#ffc83d",
+  off: "#ff5a47",
   unchecked: "rgba(255, 255, 255, 0.7)",
 };
 
@@ -77,7 +77,7 @@ export class GhostOverlay {
     ctx.scale(scale, scale);
     ctx.lineCap = "round";
     ctx.lineJoin = "round";
-    ctx.strokeStyle = state.matching ? "rgba(90, 230, 140, 0.55)" : "rgba(255, 255, 255, 0.45)";
+    ctx.strokeStyle = state.matching ? "rgba(91, 224, 138, 0.55)" : "rgba(255, 255, 255, 0.45)";
     ctx.lineWidth = 26;
     ctx.stroke(this.ghost(state.ghostPath));
     ctx.restore();

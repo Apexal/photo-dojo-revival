@@ -9,6 +9,7 @@ import { loadFighterRecords } from "../fighter-records";
 import { loadPlayedFighters } from "../played-fighters";
 import { fallbackSoundKey } from "../render/fighter-sprite-view";
 import { GAME_HEIGHT, GAME_WIDTH } from "../render/stage";
+import { COLOR, displayText } from "../render/theme";
 
 export const REGISTRY = { library: "library", debugHitboxes: "debugHitboxes", lastStage: "lastStage", series: "series" } as const;
 
@@ -39,7 +40,7 @@ export class BootScene extends Phaser.Scene {
   }
 
   create(): void {
-    const text = this.add.text(GAME_WIDTH / 2, GAME_HEIGHT / 2, "Loading…", { fontSize: "32px", color: "#f3efe6" }).setOrigin(0.5);
+    const text = this.add.text(GAME_WIDTH / 2, GAME_HEIGHT / 2, "Loading…", displayText(32, COLOR.fg)).setOrigin(0.5);
     // An older Photo Dojo tab holding the database open stalls the upgrade until it closes.
     const offBlocked = onDbBlocked(() => text.setText("Close other Photo Dojo tabs\nto finish loading.").setAlign("center"));
     void (async () => {

@@ -32,6 +32,7 @@ import type { SeriesSetupData } from "./series-setup-scene";
 import { MIN_ENTRANTS } from "../series";
 import { playMenuMusic, updateMenuMusicVolume } from "../menu-music";
 import { canFullscreen, toggleFullscreen, watchFullscreen } from "../fullscreen";
+import { bodyText, COLOR, displayText, drawBackdrop, drawPopBox, HEX, popBox, RADIUS, SHADOW, stamp, type PopBoxOptions } from "../render/theme";
 
 const ROWS = 2;
 const TILE = 120;
@@ -42,7 +43,7 @@ const GRID_Y = 116;
 /** "Add a fighter" column, while the panel is full size. */
 const ADD_X = 880;
 const ADD_W = 360;
-const PLAYER_CSS = ["#e8483b", "#3f86f0"];
+const PLAYER_CSS = [COLOR.bad, COLOR.p2];
 /** Each player's preview panel under the grid: their fighter large, plus their status. */
 const PANEL_Y = 436;
 const PANEL_W = 400;
@@ -81,7 +82,10 @@ type IntroTarget = Phaser.GameObjects.GameObject & {
 };
 
 interface Preview {
-  frame: Phaser.GameObjects.Rectangle;
+  /** The panel box (a Graphics at the panel's top-left), redrawn when its border changes. */
+  frame: Phaser.GameObjects.Graphics;
+  /** The READY! stamp, at the top of the status lines once picked. */
+  readyStamp: Phaser.GameObjects.Container;
   /** Where the fighter stands: feet anchor, and which way they face. */
   feet: { x: number; y: number };
   facing: 1 | -1;
@@ -99,6 +103,11 @@ interface Preview {
   device: Phaser.GameObjects.Text;
   /** "Press any button", centred in an empty panel. */
   join: Phaser.GameObjects.Text;
+}
+
+/** The width of a `stamp(…, size)` container's box (it's centred on its position). */
+function stampWidth(s: Phaser.GameObjects.Container, size: number): number {
+  return (s.list[1] as Phaser.GameObjects.Text).width + size * 1.1;
 }
 
 /** Re-measure the game's parent box (refresh() alone reuses the last measurement) and rescale the canvas to it. */
@@ -160,9 +169,11 @@ export class CharacterSelectScene extends Phaser.Scene {
   private cursors!: Phaser.GameObjects.Graphics;
   /** "P1" / "P2" on the corner of each player's cursor. */
   private cursorTags: Phaser.GameObjects.Text[] = [];
+  /** The cursor tags' player-colour chips, under the tags but over the cursor poses. */
+  private tagChips!: Phaser.GameObjects.Graphics;
   private previews: Preview[] = [];
   /** The two picks' head-to-head, between the panels. */
-  private rivalry!: { container: Phaser.GameObjects.Container; bg: Phaser.GameObjects.Rectangle; label: Phaser.GameObjects.Text; left: Phaser.GameObjects.Text; right: Phaser.GameObjects.Text };
+  private rivalry!: { container: Phaser.GameObjects.Container; bg: Phaser.GameObjects.Graphics; label: Phaser.GameObjects.Text; left: Phaser.GameObjects.Text; right: Phaser.GameObjects.Text };
   /** Grid page on screen: the one the last moved cursor is on. */
   private page = 0;
   private pageText!: Phaser.GameObjects.Text;
@@ -199,7 +210,7 @@ export class CharacterSelectScene extends Phaser.Scene {
   /** Tile chosen with the mouse / touch (shows its export / delete buttons). */
   private selected: number | null = null;
   private buttonPressedAt = 0;
-  private tileButtons: Phaser.GameObjects.Text[] = [];
+  private tileButtons: (Phaser.GameObjects.Text | Phaser.GameObjects.Graphics)[] = [];
   private toolbarCleanup: (() => void) | null = null;
   /** False after shutdown, for async work that finishes late. */
   private alive = false;
@@ -240,19 +251,23 @@ export class CharacterSelectScene extends Phaser.Scene {
     this.alive = true;
     this.introAt = introPlayed ? null : this.game.loop.time;
     introPlayed = true;
-    const logo = this.add.text(GRID_X, 36, "PHOTO DOJO", { fontSize: "52px", fontStyle: "bold", color: "#f2c14e" });
-    const stamp = this.add.text(logo.x + logo.width + 12, 50, "REVIVAL", { fontSize: "18px", fontStyle: "bold", color: "#e8483b", letterSpacing: 4 }).setAngle(-5);
-    const subtitle = this.add.text(stamp.x + stamp.width + 28, 60, "Pick your fighters", { fontSize: "22px", color: "#c9c3b8" });
+    drawBackdrop(this);
+    const logo = this.add.text(GRID_X, 36, "PHOTO DOJO", displayText(52, COLOR.accent));
+    const revival = stamp(this, 0, 66, "Revival", HEX.bad, 18);
+    const revivalW = stampWidth(revival, 18);
+    revival.setX(logo.x + logo.width + 12 + revivalW / 2);
+    const subtitle = this.add.text(revival.x + revivalW / 2 + 28, 58, "Pick your fighters", bodyText(22, COLOR.muted, 600));
     this.tiles = this.add.container(0, 0);
     this.cursors = this.add.graphics().setDepth(10);
+    this.tagChips = this.add.graphics().setDepth(12);
     this.cursorTags = [0, 1].map((i) =>
-      this.add.text(0, 0, `P${i + 1}`, { fontSize: "13px", fontStyle: "bold", color: "#121018", backgroundColor: PLAYER_CSS[i], padding: { x: 5, y: 1 } })
-        .setOrigin(i, 0).setDepth(12).setVisible(false));
-    this.introduce([this.cursors, ...this.cursorTags], INTRO_SETTLED_MS);
+      this.add.text(0, 0, `P${i + 1}`, displayText(14, COLOR.ink, { outline: false, padding: { left: 6, right: 6, top: 2, bottom: 2 } }))
+        .setOrigin(i, 0).setDepth(13).setVisible(false));
+    this.introduce([this.cursors, this.tagChips, ...this.cursorTags], INTRO_SETTLED_MS);
     this.buildPager();
     this.previews = [0, 1].map((i) => this.buildPreview(i));
     this.buildRivalry();
-    this.noticeText = this.add.text(0, 0, "", { fontSize: "13px", color: "#a8a196" });
+    this.noticeText = this.add.text(0, 0, "", bodyText(13, COLOR.muted, 600));
     this.introduce([this.noticeText], INTRO_SETTLED_MS);
     this.updateAddLayout();
     this.refreshGrid();
@@ -264,18 +279,10 @@ export class CharacterSelectScene extends Phaser.Scene {
       else if (button.index === PAD_BUTTON.START && this.players.some((p) => p?.input.kind === "pad" && p.input.index === pad.index)) this.openSeries();
       else this.join({ kind: "pad", index: pad.index });
     });
-    const settings = this.add.text(1240, 60, "⚙ Settings (Tab)", { fontSize: "20px", color: "#c9c3b8", backgroundColor: "#1c1824", padding: { x: 10, y: 6 } })
-      .setOrigin(1, 0).setInteractive({ useHandCursor: true });
-    settings.on("pointerover", () => settings.setColor("#f2c14e"));
-    settings.on("pointerout", () => settings.setColor("#c9c3b8"));
-    settings.on("pointerdown", () => this.openSettings());
-    const modes = this.add.text(settings.x - settings.width - 12, 60, "🏆 Party modes (T)", { fontSize: "18px", color: "#c9c3b8", backgroundColor: "#1c1824", padding: { x: 10, y: 6 } })
-      .setOrigin(1, 0).setInteractive({ useHandCursor: true });
-    modes.on("pointerover", () => modes.setColor("#f2c14e"));
-    modes.on("pointerout", () => modes.setColor("#c9c3b8"));
-    modes.on("pointerdown", () => this.openSeries());
-    this.seriesHint = this.add.text(modes.x - modes.width / 2, 100, "", { fontSize: "14px", color: "#f2c14e" }).setOrigin(0.5, 0).setDepth(30);
-    this.introduce([logo, stamp, subtitle, settings, modes], 0, { y: -60 });
+    const [settings, settingsBox] = this.headerButton(1240, 56, "⚙ Settings (Tab)", 20, () => this.openSettings());
+    const [modes, modesBox] = this.headerButton(settings.x - settings.width - 12, 56, "🏆 Party modes (T)", 18, () => this.openSeries());
+    this.seriesHint = this.add.text(modes.x - modes.width / 2, 100, "", bodyText(14, COLOR.accent, 800)).setOrigin(0.5, 0).setDepth(30);
+    this.introduce([logo, revival, subtitle, settingsBox, settings, modesBox, modes], 0, { y: -60 });
     // The preview fighters step in once their panels have landed.
     this.previewsHeld = this.introAt !== null;
     if (this.previewsHeld) this.time.delayedCall(INTRO_SETTLED_MS, () => {
@@ -288,6 +295,23 @@ export class CharacterSelectScene extends Phaser.Scene {
 
     this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => this.cleanup());
     if (this.pendingJoin) this.join(this.pendingJoin);
+  }
+
+  /** A header button (right-aligned at x): display text on a panel box whose border and text go gold on hover. */
+  private headerButton(x: number, y: number, label: string, size: number, onClick: () => void): [Phaser.GameObjects.Text, Phaser.GameObjects.Graphics] {
+    const box = this.add.graphics();
+    const t = this.add.text(x, y, label, displayText(size, COLOR.muted, { outline: false, padding: { left: 12, right: 12, top: 7, bottom: 7 } }))
+      .setOrigin(1, 0).setInteractive({ useHandCursor: true });
+    box.setPosition(x - t.width, y);
+    const draw = (hover: boolean) => {
+      drawPopBox(box.clear(), 0, 0, t.width, t.height, { fill: HEX.panel, border: hover ? HEX.accent : HEX.edge, shadow: SHADOW.sm });
+      t.setColor(hover ? COLOR.accent : COLOR.muted);
+    };
+    draw(false);
+    t.on("pointerover", () => draw(true));
+    t.on("pointerout", () => draw(false));
+    t.on("pointerdown", onClick);
+    return [t, box];
   }
 
   private cleanup(): void {
@@ -386,12 +410,12 @@ export class CharacterSelectScene extends Phaser.Scene {
 
   private buildPager(): void {
     const y = GRID_Y + ROWS * ROW_H - 4;
-    this.pageText = this.add.text(0, y, "", { fontSize: "15px", color: "#c9c3b8" }).setOrigin(0.5, 0);
+    this.pageText = this.add.text(0, y, "", bodyText(15, COLOR.muted, 600)).setOrigin(0.5, 0);
     this.pageArrows = [-1, 1].map((dir) => {
-      const arrow = this.add.text(dir * 80, y - 4, dir < 0 ? "◀" : "▶", { fontSize: "20px", color: "#c9c3b8", padding: { x: 8, y: 2 } })
+      const arrow = this.add.text(dir * 80, y - 4, dir < 0 ? "◀" : "▶", displayText(20, COLOR.muted, { padding: { left: 8, right: 8, top: 2, bottom: 5 } }))
         .setOrigin(0.5, 0).setInteractive({ useHandCursor: true });
-      arrow.on("pointerover", () => arrow.setColor("#f2c14e"));
-      arrow.on("pointerout", () => arrow.setColor("#c9c3b8"));
+      arrow.on("pointerover", () => arrow.setColor(COLOR.accent));
+      arrow.on("pointerout", () => arrow.setColor(COLOR.muted));
       arrow.on("pointerdown", () => {
         playGameSound(this, "tick", 0.3);
         this.showPage((this.page + dir + this.pageCount) % this.pageCount);
@@ -428,27 +452,33 @@ export class CharacterSelectScene extends Phaser.Scene {
       if (!this.onPage(i)) return;
       const { x, y } = this.tilePosition(i);
       const selected = this.selected === i;
-      const bg = this.add.rectangle(x, y, TILE, TILE, 0x241f2e).setOrigin(0).setStrokeStyle(selected ? 3 : 2, selected ? 0xf2c14e : 0x3a3346);
+      const box = this.add.graphics({ x, y });
+      const drawTile = (border: number) => drawPopBox(box.clear(), 0, 0, TILE, TILE, { fill: HEX.tile, border });
+      drawTile(selected ? HEX.accent : HEX.edge);
+      // An invisible hit area over the box.
+      const bg = this.add.rectangle(x, y, TILE, TILE, 0x000000, 0.001).setOrigin(0);
       bg.setInteractive({ useHandCursor: true });
       // Select on pointer-up so a tap on one of the tile's buttons (handled on pointer-down) doesn't also select.
       bg.on("pointerup", () => { if (performance.now() - this.buttonPressedAt > 300) this.clickTile(i); });
-      bg.on("pointerover", () => { if (this.selected !== i) bg.setStrokeStyle(2, 0x8a8478); });
-      bg.on("pointerout", () => { if (this.selected !== i) bg.setStrokeStyle(2, 0x3a3346); });
-      const items: Phaser.GameObjects.GameObject[] = [bg];
+      bg.on("pointerover", () => { if (this.selected !== i) drawTile(HEX.faint); });
+      bg.on("pointerout", () => { if (this.selected !== i) drawTile(HEX.edge); });
+      const items: Phaser.GameObjects.GameObject[] = [box, bg];
       const key = this.thumbKey(entry.fighter);
       if (this.textures.exists(key)) {
         const thumb = this.add.image(x + TILE / 2, y + TILE / 2, key).setDisplaySize(TILE - 10, TILE - 10);
         this.thumbs.set(i, thumb);
         items.push(thumb);
       }
-      items.push(this.add.text(x + TILE / 2, y + TILE + 4, entry.fighter.name, { fontSize: "14px", color: "#f3efe6", fixedWidth: TILE + GAP, align: "center" }).setOrigin(0.5, 0));
-      if (entry.builtIn) items.push(this.add.text(x + 6, y + TILE - 4, "built-in", { fontSize: "11px", color: "#8a8478" }).setOrigin(0, 1));
+      items.push(this.add.text(x + TILE / 2, y + TILE + 6, entry.fighter.name, displayText(15, COLOR.fg, { fixedWidth: TILE + GAP, align: "center" })).setOrigin(0.5, 0));
+      if (entry.builtIn) items.push(this.add.text(x + 7, y + TILE - 5, "built-in", bodyText(11, COLOR.faint, 600)).setOrigin(0, 1));
       // Never fought yet: the tutorial is suggested when it's picked.
       if (!hasPlayed(this.registry, entry.fighter.fighterId)) {
-        items.push(this.add.text(x + TILE - 4, y + 4, "NEW", { fontSize: "11px", fontStyle: "bold", color: "#121018", backgroundColor: "#f2c14e", padding: { x: 4, y: 2 } }).setOrigin(1, 0));
+        // Bottom-right: the top corners are where the P1 / P2 cursor tags sit.
+        const tag = stamp(this, 0, y + TILE - 14, "New", HEX.accent, 11);
+        items.push(tag.setX(x + TILE - 4 - stampWidth(tag, 11) / 2));
       }
       // Buttons live outside the container: Phaser's hit-testing doesn't reliably put container siblings above the tile.
-      if (selected) this.tileButtons = this.tileActions(entry, x, y).map((b) => b.setDepth(20));
+      if (selected) this.tileButtons = this.tileActions(entry, x, y);
       this.introduce(items as IntroTarget[], this.introTileDelay(i), { y: 30 });
       this.tiles.add(items);
     });
@@ -459,11 +489,14 @@ export class CharacterSelectScene extends Phaser.Scene {
    * Clickable buttons on the selected tile: export, rename and edit (captured
    * fighters, at the top), and delete with an inline confirm.
    */
-  private tileActions(entry: LibraryEntry, x: number, y: number): Phaser.GameObjects.Text[] {
+  private tileActions(entry: LibraryEntry, x: number, y: number): (Phaser.GameObjects.Text | Phaser.GameObjects.Graphics)[] {
+    const objects: (Phaser.GameObjects.Text | Phaser.GameObjects.Graphics)[] = [];
     /** `row`: 0 along the bottom edge, 1 and 2 down from the top. */
     const button = (bx: number, label: string, color: string, onClick: () => void, row = 0) => {
-      const t = this.add.text(bx, row ? y + 6 + (row - 1) * 28 : y + TILE - 6, label, { fontSize: "13px", fontStyle: "bold", color, backgroundColor: "#121018dd", padding: { x: 6, y: 4 } })
-        .setOrigin(0, row ? 0 : 1).setInteractive({ useHandCursor: true });
+      const t = this.add.text(bx, row ? y + 6 + (row - 1) * 28 : y + TILE - 6, label, bodyText(13, color, 800, { padding: { x: 6, y: 4 } }))
+        .setOrigin(0, row ? 0 : 1).setInteractive({ useHandCursor: true }).setDepth(20);
+      const b = t.getBounds();
+      objects.push(popBox(this, b.x, b.y, b.width, b.height, { fill: HEX.ink, fillAlpha: 0.87, border: HEX.edge, borderWidth: 2, radius: RADIUS.sm, shadow: SHADOW.sm }).setDepth(19), t);
       t.on("pointerdown", (_p: unknown, _x: number, _y: number, ev: Phaser.Types.Input.EventData) => {
         ev.stopPropagation();
         this.buttonPressedAt = performance.now();
@@ -473,22 +506,20 @@ export class CharacterSelectScene extends Phaser.Scene {
     };
     const confirming = this.pendingDelete?.fighterId === entry.fighter.fighterId;
     if (confirming) {
-      return [
-        button(x + 6, "Delete?", "#e8483b", () => void this.deleteEntry(entry)),
-        button(x + 72, "Keep", "#f3efe6", () => { this.pendingDelete = null; this.drawGrid(); }),
-      ];
+      button(x + 6, "Delete?", COLOR.bad, () => void this.deleteEntry(entry));
+      button(x + 72, "Keep", COLOR.fg, () => { this.pendingDelete = null; this.drawGrid(); });
+      return objects;
     }
-    return [
-      button(x + 6, "⬇ Export", "#f3efe6", () => void this.exportEntry(entry)),
-      ...(entry.builtIn ? [] : [
-        button(x + 86, "🗑", "#e8483b", () => {
-          this.pendingDelete = { fighterId: entry.fighter.fighterId, until: performance.now() + 5000 };
-          this.drawGrid();
-        }),
-        button(x + 6, "✎ Rename", "#f3efe6", () => this.openRename(entry), 1),
-        ...(this.seriesRunning ? [] : [button(x + 6, "✂ Edit", "#f3efe6", () => this.openEditor(entry), 2)]),
-      ]),
-    ];
+    button(x + 6, "⬇ Export", COLOR.fg, () => void this.exportEntry(entry));
+    if (!entry.builtIn) {
+      button(x + 86, "🗑", COLOR.bad, () => {
+        this.pendingDelete = { fighterId: entry.fighter.fighterId, until: performance.now() + 5000 };
+        this.drawGrid();
+      });
+      button(x + 6, "✎ Rename", COLOR.fg, () => this.openRename(entry), 1);
+      if (!this.seriesRunning) button(x + 6, "✂ Edit", COLOR.fg, () => this.openEditor(entry), 2);
+    }
+    return objects;
   }
 
   /**
@@ -518,15 +549,19 @@ export class CharacterSelectScene extends Phaser.Scene {
 
   private drawCursors(): void {
     this.cursors.clear();
+    this.tagChips.clear();
     [0, 1].forEach((i) => {
       const p = this.shown(i);
       const tag = this.cursorTags[i];
       if (!p || !this.library.length || !this.onPage(p.cursor)) return tag.setVisible(false);
       const { x, y } = this.tilePosition(p.cursor);
       const inset = i * 6;
-      this.cursors.lineStyle(p.ready ? 7 : 4, PLAYER_COLORS[i], 1).strokeRect(x - 4 + inset, y - 4 + inset, TILE + 8 - 2 * inset, TILE + 8 - 2 * inset);
+      this.cursors.lineStyle(p.ready ? 7 : 4, PLAYER_COLORS[i], 1)
+        .strokeRoundedRect(x - 4 + inset, y - 4 + inset, TILE + 8 - 2 * inset, TILE + 8 - 2 * inset, RADIUS.md + 4 - inset);
       // P1's tag in the top-left corner of its outline, P2's in the top-right of its (inset) one.
       tag.setText(p.cpu ? "CPU" : `P${i + 1}`).setPosition(i ? x + TILE + 4 - inset : x - 4, y - 4 + inset).setVisible(true);
+      const b = tag.getBounds();
+      drawPopBox(this.tagChips, b.x, b.y, b.width, b.height, { fill: PLAYER_COLORS[i], borderWidth: 2, radius: RADIUS.sm, shadow: SHADOW.sm });
     });
     this.drawCursorPoses();
   }
@@ -725,26 +760,43 @@ export class CharacterSelectScene extends Phaser.Scene {
     const text = (y: number, style: Phaser.Types.GameObjects.Text.TextStyle) =>
       this.add.text(textX, y, "", { wordWrap: { width: PREVIEW_TEXT_W }, align: right ? "right" : "left", ...style }).setOrigin(right ? 1 : 0, 0);
     const preview: Preview = {
-      frame: this.add.rectangle(x, PANEL_Y, PANEL_W, PANEL_H, 0x1c1824).setOrigin(0),
+      frame: this.add.graphics({ x, y: PANEL_Y }),
+      readyStamp: stamp(this, 0, 0, "Ready!", PLAYER_COLORS[i], 16).setVisible(false),
       feet: { x: feetX, y: PANEL_Y + PANEL_H - 8 },
       facing: right ? -1 : 1,
       fighter: null,
-      title: text(PANEL_Y + 14, { fontSize: "34px", fontStyle: "bold", color: PLAYER_CSS[i] }).setText(`P${i + 1}`),
-      record: text(PANEL_Y + 16, { fontSize: "15px", color: "#a8a196", lineSpacing: 3 }),
-      name: text(PANEL_Y + 60, { fontSize: "26px", fontStyle: "bold", color: "#f3efe6" }),
-      style: text(PANEL_Y + 94, { fontSize: "16px", color: "#c9c3b8" }),
-      status: text(PANEL_Y + 136, { fontSize: "17px", color: PLAYER_CSS[i], lineSpacing: 4 }),
-      tip: text(PANEL_Y + 136, { fontSize: "17px", fontStyle: "bold", color: "#f2c14e", lineSpacing: 4 }),
+      title: text(PANEL_Y + 14, displayText(36, PLAYER_CSS[i])).setText(`P${i + 1}`),
+      record: text(PANEL_Y + 16, bodyText(15, COLOR.muted, 600, { lineSpacing: 3 })),
+      name: text(PANEL_Y + 60, displayText(26, COLOR.fg)),
+      style: text(PANEL_Y + 94, bodyText(16, COLOR.muted, 500)),
+      status: text(PANEL_Y + 136, bodyText(17, PLAYER_CSS[i], 600, { lineSpacing: 4 })),
+      tip: text(PANEL_Y + 136, bodyText(17, COLOR.accent, 800, { lineSpacing: 4 })),
       tipPulses: false,
-      device: text(PANEL_Y + PANEL_H - 40, { fontSize: "13px", color: "#8a8478" }),
-      join: this.add.text(x + PANEL_W / 2, PANEL_Y + PANEL_H / 2 + 20, "", { fontSize: "20px", color: PLAYER_CSS[i], align: "center", lineSpacing: 8 }).setOrigin(0.5),
+      device: text(PANEL_Y + PANEL_H - 40, bodyText(13, COLOR.faint, 600)),
+      join: this.add.text(x + PANEL_W / 2, PANEL_Y + PANEL_H / 2 + 20, "", bodyText(20, PLAYER_CSS[i], 800, { align: "center", lineSpacing: 8 })).setOrigin(0.5),
     };
+    this.drawFrame(preview, HEX.edge, 3);
     preview.title.setPosition(right ? x + PANEL_W - 20 : x + 20, PANEL_Y + 14).setOrigin(right ? 1 : 0, 0);
     preview.record.setInteractive({ useHandCursor: true }).on("pointerdown", () => this.openStats(i));
     // One container so the intro moves the panel as a whole; above the VS dimmer.
-    const panel = this.add.container(0, 0, [preview.frame, preview.title, preview.record, preview.name, preview.style, preview.status, preview.tip, preview.device, preview.join]).setDepth(PREVIEW_DEPTH);
+    const panel = this.add.container(0, 0, [preview.frame, preview.title, preview.record, preview.name, preview.style, preview.status, preview.tip, preview.device, preview.join, preview.readyStamp]).setDepth(PREVIEW_DEPTH);
     this.introduce([panel], INTRO_PANELS_MS + i * 80, { y: 120 });
     return preview;
+  }
+
+  /** The panel box: `border` at `width` (the player colour, 5px once they're ready). */
+  private drawFrame(v: Preview, border: number, width: number): void {
+    drawPopBox(v.frame.clear(), 0, 0, PANEL_W, PANEL_H, { fill: HEX.panel, border, borderWidth: width, radius: RADIUS.lg, shadow: SHADOW.lg });
+  }
+
+  /** The READY! stamp at the top of the status column (`y`); returns where the status lines go under it. */
+  private placeReadyStamp(v: Preview, ready: boolean, y: number): number {
+    v.readyStamp.setVisible(ready);
+    if (!ready) return y;
+    const w = stampWidth(v.readyStamp, 16);
+    const right = v.status.originX === 1;
+    v.readyStamp.setPosition(right ? v.status.x - w / 2 - 2 : v.status.x + w / 2 + 2, y + 12);
+    return y + 28;
   }
 
   private updatePreviews(): void {
@@ -753,7 +805,7 @@ export class CharacterSelectScene extends Phaser.Scene {
       if (this.cpu?.slot === i) return this.updateCpuPreview(v, this.cpu);
       const p = this.players[i];
       const entry = p && this.library[p.cursor];
-      v.frame.setStrokeStyle(p?.ready ? 4 : 2, p ? PLAYER_COLORS[i] : 0x3a3346, p ? 1 : 0.6);
+      this.drawFrame(v, p ? PLAYER_COLORS[i] : HEX.edge, p?.ready ? 5 : 3);
       v.title.setText(`P${i + 1}`).setAlpha(p ? 1 : 0.5);
       v.name.setText(entry ? entry.fighter.name : "");
       const record = entry && recordOf(this.registry, entry.fighter.fighterId);
@@ -771,13 +823,14 @@ export class CharacterSelectScene extends Phaser.Scene {
         : fresh ? "New? Try the\ntutorial solo" : "",
       ).setY(v.style.y + v.style.height + 12).setAlpha(1);
       v.tipPulses = fresh && alone;
+      // READY! is the stamp, the lines under it the status.
       v.status.setText(
         !p ? ""
         : !p.ready ? "punch: pick\nkick: leave"
-        : this.cpu ? "READY!"
-        : alone ? "READY!\npunch: vs CPU\nkick: change"
-        : "READY!\nkick: change",
-      ).setY(v.tip.y + (v.tip.text ? v.tip.height + 10 : 0));
+        : this.cpu ? ""
+        : alone ? "punch: vs CPU\nkick: change"
+        : "kick: change",
+      ).setY(this.placeReadyStamp(v, !!p?.ready, v.tip.y + (v.tip.text ? v.tip.height + 10 : 0)));
       v.device.setText(p ? describeInput(p.input) : "");
       
       // Have the victory line ready by the time they pick.
@@ -798,17 +851,17 @@ export class CharacterSelectScene extends Phaser.Scene {
     r.right.setText(tally ? String(tally.losses) : "");
     r.label.setText(!tally ? "FIRST MEETING" : tally.draws ? `RIVALRY · ${tally.draws} DRAW${tally.draws > 1 ? "S" : ""}` : "RIVALRY");
     const w = r.label.width + (tally ? 100 : 36);
-    r.bg.setSize(w, 36).setOrigin(0.5);
+    drawPopBox(r.bg.clear(), -w / 2, -18, w, 36, { fill: HEX.bg, border: HEX.edge, radius: 18, shadow: SHADOW.sm });
     r.left.setX(-w / 2 + 22);
     r.right.setX(w / 2 - 22);
   }
 
   private buildRivalry(): void {
     const x = GRID_X + PANEL_W + 10; // the gap between the two panels
-    const bg = this.add.rectangle(0, 0, 200, 36, 0x121018).setStrokeStyle(2, 0x3a3346);
-    const label = this.add.text(0, 0, "", { fontSize: "15px", fontStyle: "bold", color: "#c9c3b8" }).setOrigin(0.5);
-    const left = this.add.text(0, 0, "", { fontSize: "24px", fontStyle: "bold", color: PLAYER_CSS[0] }).setOrigin(0.5);
-    const right = this.add.text(0, 0, "", { fontSize: "24px", fontStyle: "bold", color: PLAYER_CSS[1] }).setOrigin(0.5);
+    const bg = this.add.graphics();
+    const label = this.add.text(0, 0, "", bodyText(15, COLOR.muted, 800)).setOrigin(0.5);
+    const left = this.add.text(0, 0, "", displayText(26, PLAYER_CSS[0], { outline: false })).setOrigin(0.5);
+    const right = this.add.text(0, 0, "", displayText(26, PLAYER_CSS[1], { outline: false })).setOrigin(0.5);
     // Straddles the panels' top edge; above the VS dimmer, so the stakes show during the countdown.
     const container = this.add.container(x, PANEL_Y, [bg, label, left, right]).setDepth(PREVIEW_DEPTH + 1).setVisible(false);
     this.rivalry = { container, bg, label, left, right };
@@ -863,9 +916,9 @@ export class CharacterSelectScene extends Phaser.Scene {
   private showVs(): void {
     const cx = GRID_X + this.gridWidth / 2;
     const objects = [
-      this.add.rectangle(0, 0, this.scale.width, this.scale.height, 0x0b0910, 0.7).setOrigin(0).setDepth(25),
-      this.add.text(cx, 270, "VS", { fontSize: "120px", fontStyle: "bold", color: "#f2c14e", stroke: "#121018", strokeThickness: 10 }).setOrigin(0.5).setDepth(30),
-      this.add.text(cx, 360, "kick to cancel", { fontSize: "16px", color: "#c9c3b8" }).setOrigin(0.5, 0).setDepth(30),
+      this.add.rectangle(0, 0, this.scale.width, this.scale.height, HEX.ink, 0.75).setOrigin(0).setDepth(25),
+      this.add.text(cx, 270, "VS", displayText(120, COLOR.accent)).setOrigin(0.5).setDepth(30),
+      this.add.text(cx, 360, "kick to cancel", bodyText(16, COLOR.muted, 600)).setOrigin(0.5, 0).setDepth(30),
     ];
     this.vs = { until: this.time.now + VS_MS, objects };
   }
@@ -1102,7 +1155,8 @@ export class CharacterSelectScene extends Phaser.Scene {
   /** The CPU's panel: its fighter, then the Match (level) / Practice choice. */
   private updateCpuPreview(v: Preview, cpu: CpuSlot): void {
     const entry = this.library[cpu.cursor];
-    v.frame.setStrokeStyle(cpu.picked ? 4 : 2, PLAYER_COLORS[cpu.slot], 1);
+    this.drawFrame(v, PLAYER_COLORS[cpu.slot], cpu.picked ? 5 : 3);
+    v.readyStamp.setVisible(false);
     v.title.setText("CPU").setAlpha(1);
     v.name.setText(entry ? entry.fighter.name : "");
     const record = entry && recordOf(this.registry, entry.fighter.fighterId);
@@ -1151,20 +1205,33 @@ export class CharacterSelectScene extends Phaser.Scene {
       return;
     }
     const add = <T extends Phaser.GameObjects.GameObject>(o: T): T => (this.addObjects.push(o), o);
-    const text = (x: number, y: number, size: number, color: string, extra: Phaser.Types.GameObjects.Text.TextStyle = {}) =>
-      add(this.add.text(x, y, "", { fontSize: `${size}px`, color, align: "center", ...extra }).setOrigin(0.5, 0));
+    const text = (x: number, y: number, style: Phaser.Types.GameObjects.Text.TextStyle) =>
+      add(this.add.text(x, y, "", { align: "center", ...style }).setOrigin(0.5, 0));
+    /** Primary: ink on gold, the border lightening on hover. Secondary: muted on a tile, border and text gold on hover. */
     const button = (x: number, y: number, label: string, size: number, primary: boolean, onClick: () => void) => {
-      const [color, hover, background] = primary ? ["#121018", "#121018", "#f2c14e"] : ["#c9c3b8", "#f2c14e", "#2a2433"];
-      const b = add(this.add.text(x, y, label, { fontSize: `${size}px`, fontStyle: primary ? "bold" : "normal", color, backgroundColor: background, padding: { x: 16, y: 10 } })
+      const color = primary ? COLOR.ink : COLOR.muted;
+      const box = add(this.add.graphics());
+      const b = add(this.add.text(x, y, label, displayText(size, color, { outline: false, padding: { left: 16, right: 16, top: 10, bottom: 10 } }))
         .setOrigin(0.5, 0).setInteractive({ useHandCursor: true }));
-      b.on("pointerover", () => (primary ? b.setBackgroundColor("#ffd970") : b.setColor(hover)));
-      b.on("pointerout", () => (primary ? b.setBackgroundColor(background) : b.setColor(color)));
+      box.setPosition(x - b.width / 2, y);
+      const draw = (hover: boolean) => {
+        const style: PopBoxOptions = primary
+          ? { fill: HEX.accent, border: hover ? HEX.fg : HEX.ink }
+          : { fill: HEX.tile, border: hover ? HEX.accent : HEX.edge };
+        drawPopBox(box.clear(), 0, 0, b.width, b.height, style);
+        if (!primary) b.setColor(hover ? COLOR.accent : color);
+      };
+      draw(false);
+      b.on("pointerover", () => draw(true));
+      b.on("pointerout", () => draw(false));
       b.on("pointerdown", onClick);
       return b;
     };
     const [x, y, h] = this.compact ? [ADD_X, PANEL_Y, PANEL_H] : [ADD_X, GRID_Y, 480];
     const cx = x + ADD_W / 2;
-    const bg = add(this.add.rectangle(x, y, ADD_W, h, 0x1c1824).setOrigin(0).setStrokeStyle(2, 0xf2c14e));
+    add(popBox(this, x, y, ADD_W, h, { fill: HEX.panel, border: HEX.accent, radius: RADIUS.lg, shadow: SHADOW.lg }));
+    // An invisible hit area over the box.
+    const bg = add(this.add.rectangle(x, y, ADD_W, h, 0x000000, 0.001).setOrigin(0));
     bg.setInteractive({ useHandCursor: true }).on("pointerdown", () => {
       this.compactOverride = !this.compact;
       this.updateAddLayout();
@@ -1172,21 +1239,21 @@ export class CharacterSelectScene extends Phaser.Scene {
     const hint = this.compact ? "click to enlarge" : this.autoCompact || this.compactOverride !== null ? "click to shrink" : "";
     const importFile = () => (document.getElementById("import-file") as HTMLInputElement | null)?.click();
     if (this.compact) {
-      text(cx, y + 12, 20, "#f2c14e", { fontStyle: "bold" }).setText("ADD A FIGHTER");
+      text(cx, y + 10, displayText(24, COLOR.accent)).setText("ADD A FIGHTER");
       button(cx, y + 58, "Open the studio (N)", 24, true, () => this.openStudio());
-      text(cx, y + 120, 14, "#c9c3b8", { wordWrap: { width: 320 } }).setText("use a phone or this computer's camera");
-      button(cx, y + 162, "Import a fighter file", 15, false, importFile);
-      text(cx, y + h - 26, 12, "#8a8478").setText(hint);
+      text(cx, y + 120, bodyText(14, COLOR.muted, 600, { wordWrap: { width: 320 } })).setText("use a phone or this computer's camera");
+      button(cx, y + 162, "Import a fighter file", 18, false, importFile);
+      text(cx, y + h - 26, bodyText(12, COLOR.faint, 600)).setText(hint);
     } else {
-      text(cx, y + 14, 26, "#f2c14e", { fontStyle: "bold" }).setText("ADD A FIGHTER");
-      text(cx, y + 60, 16, "#c9c3b8", { wordWrap: { width: 320 } })
+      text(cx, y + 12, displayText(32, COLOR.accent)).setText("ADD A FIGHTER");
+      text(cx, y + 64, bodyText(16, COLOR.muted, 500, { wordWrap: { width: 320 } }))
         .setText(`Turn yourself into a fighter in the Character Studio: strike ${CAPTURE_TARGET_COUNT} poses, record your battle cries.`);
       button(cx, y + 150, "Open the studio (N)", 32, true, () => this.openStudio());
-      text(cx, y + 222, 15, "#c9c3b8", { wordWrap: { width: 320 } }).setText("use a phone or this computer's camera");
-      text(cx, y + 270, 13, "#8a8478", { wordWrap: { width: 320 } })
+      text(cx, y + 226, bodyText(15, COLOR.muted, 600, { wordWrap: { width: 320 } })).setText("use a phone or this computer's camera");
+      text(cx, y + 270, bodyText(13, COLOR.faint, 600, { wordWrap: { width: 320 } }))
         .setText("The studio opens on this computer; your photos stay on your devices. Come back here when your fighter is saved.");
-      button(cx, y + 350, "Import a fighter file", 16, false, importFile);
-      text(cx, y + h - 20, 12, "#8a8478").setText(hint);
+      button(cx, y + 350, "Import a fighter file", 20, false, importFile);
+      text(cx, y + h - 20, bodyText(12, COLOR.faint, 600)).setText(hint);
     }
     this.introduce(this.addObjects as IntroTarget[], INTRO_ADD_MS, { x: 80 });
     this.noticeText.setPosition(noticeUnder ? ADD_X : GRID_X, noticeUnder ? GRID_Y + h + 16 : 100).setWordWrapWidth(noticeUnder ? ADD_W : 1180);

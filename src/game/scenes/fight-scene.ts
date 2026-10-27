@@ -39,6 +39,7 @@ import { recordMatch } from "../fighter-records";
 import { markPlayed } from "../played-fighters";
 import { NUDGES, Tutorial, type TutorialEvent } from "../tutorial";
 import type { SeriesKind, SeriesSession } from "../series";
+import { BORDER, bodyText, COLOR, displayText, drawPopBox, HEX, popBox, RADIUS, SHADOW, strokeFor } from "../render/theme";
 
 export interface FightSceneData {
   entries: [LibraryEntry, LibraryEntry];
@@ -63,6 +64,9 @@ const MAX_FRAME_MS = 100;
 const PREFIXES = ["p0", "p1"] as const;
 const BAR_W = 520;
 const BAR_H = 26;
+const PILL_R = BAR_H / 2;
+/** Emitted on a footer panel's text after setText, to refit its chip. */
+const PANEL_FIT = "panel-fit";
 /** Objects at this depth or above are HUD: drawn by the fixed HUD camera, not the zooming fight camera. */
 const HUD_DEPTH = 100;
 /** How far above a thrown fighter's feet (px) the throw spark goes: about mid-body. */
@@ -181,24 +185,19 @@ export class FightScene extends Phaser.Scene {
       const right = i === 1;
       const x = right ? GAME_WIDTH - 40 : 40;
       const input = this.setup.inputs[i];
-      const tag = this.add.text(x, 64, isPlayerInput(input) ? `P${i + 1}` : "CPU", {
-        fontSize: "16px", fontStyle: "bold", color: "#121018", backgroundColor: css, padding: { x: 6, y: 2 },
-      }).setOrigin(right ? 1 : 0, 0).setDepth(100);
-      this.add.text(x + (right ? -1 : 1) * (tag.width + 10), 62, entry.fighter.name, { fontSize: "22px", fontStyle: "bold", color: css })
+      const tag = this.add.text(x + (right ? -8 : 8), 65, isPlayerInput(input) ? `P${i + 1}` : "CPU", displayText(18, COLOR.ink, { outline: false }))
+        .setOrigin(right ? 1 : 0, 0).setDepth(101);
+      const chipW = tag.width + 16;
+      popBox(this, right ? x - chipW : x, 62, chipW, tag.height + 6, { fill: PLAYER_COLORS[i], radius: RADIUS.sm, shadow: SHADOW.sm }).setDepth(100);
+      this.add.text(x + (right ? -1 : 1) * (chipW + 10), 60, entry.fighter.name, displayText(24, css))
         .setOrigin(right ? 1 : 0, 0).setDepth(100);
     });
-    this.timerText = this.add.text(GAME_WIDTH / 2, 18, "60", { fontSize: "48px", color: "#f2c14e", fontStyle: "bold" }).setOrigin(0.5, 0).setDepth(100);
-    this.bannerText = this.add.text(GAME_WIDTH / 2, GAME_HEIGHT / 2 - 80, "", {
-      fontSize: "96px", color: "#f2c14e", fontStyle: "bold", stroke: "#121018", strokeThickness: 10,
-    }).setOrigin(0.5).setDepth(200);
-    const callout = { fontSize: "40px", fontStyle: "bold", stroke: "#121018", strokeThickness: 7 };
+    this.timerText = this.add.text(GAME_WIDTH / 2, 14, "60", displayText(52, COLOR.accent)).setOrigin(0.5, 0).setDepth(100);
+    this.bannerText = this.add.text(GAME_WIDTH / 2, GAME_HEIGHT / 2 - 80, "", displayText(96, COLOR.accent)).setOrigin(0.5).setDepth(200);
     this.calloutTexts = [0, 1].map((i) => {
-      const color = `#${PLAYER_COLORS[i].toString(16).padStart(6, "0")}`;
-      return this.add.text(i === 0 ? 40 : GAME_WIDTH - 40, 150, "", { ...callout, color }).setOrigin(i === 0 ? 0 : 1, 0.5).setDepth(200).setVisible(false);
+      return this.add.text(i === 0 ? 40 : GAME_WIDTH - 40, 150, "", displayText(40, COLOR.party)).setOrigin(i === 0 ? 0 : 1, 0.5).setDepth(200).setVisible(false);
     });
-    this.perfectText = this.add.text(GAME_WIDTH / 2, GAME_HEIGHT / 2 + 20, "", {
-      fontSize: "64px", color: "#f3efe6", fontStyle: "bold", stroke: "#121018", strokeThickness: 9,
-    }).setOrigin(0.5).setDepth(200).setVisible(false);
+    this.perfectText = this.add.text(GAME_WIDTH / 2, GAME_HEIGHT / 2 + 20, "", displayText(64, COLOR.accent)).setOrigin(0.5).setDepth(200).setVisible(false);
 
     // Pause-menu shortcut (also in Settings).
     this.input.keyboard!.on("keydown-R", () => {
@@ -263,14 +262,13 @@ export class FightScene extends Phaser.Scene {
 
   /** Practice: dummy behavior picker (1–8, 9 for the CPU levels, Tab, or a pad's Select button). */
   private buildPracticePanel(): void {
-    this.timerText.setText("PRACTICE").setFontSize(26).setY(30);
-    const panel = this.add.text(GAME_WIDTH / 2, GAME_HEIGHT - 26, "", {
-      fontSize: "17px", color: "#f3efe6", backgroundColor: "#121018cc", padding: { x: 12, y: 6 },
-    }).setOrigin(0.5).setDepth(150);
+    this.timerText.setText("PRACTICE").setFontSize(26).setStroke(COLOR.ink, strokeFor(26)).setY(30);
+    const panel = this.footerPanel("");
     const show = () => {
       const i = DUMMY_BEHAVIORS.findIndex((b) => b.behavior === this.dummy?.behavior);
       const n = Math.min(i + 1, 9);
       panel.setText(`Dummy: ${n}. ${DUMMY_BEHAVIORS[i].label}   ·   1–8 or Tab: change   ·   9: CPU level   ·   Esc: menu   ·   F1: hitboxes`);
+      panel.emit(PANEL_FIT);
     };
     const select = (i: number) => {
       this.dummy?.setBehavior(DUMMY_BEHAVIORS[(i + DUMMY_BEHAVIORS.length) % DUMMY_BEHAVIORS.length].behavior);
@@ -294,20 +292,30 @@ export class FightScene extends Phaser.Scene {
     show();
   }
 
+  /** Bottom-centre help line on a small dark chip (redrawn on PANEL_FIT; destroyed with the text). */
+  private footerPanel(text: string): Phaser.GameObjects.Text {
+    const label = this.add.text(GAME_WIDTH / 2, GAME_HEIGHT - 28, text, bodyText(17, COLOR.fg, 600)).setOrigin(0.5).setDepth(150);
+    const box = this.add.graphics().setDepth(149);
+    const fit = () => {
+      const w = label.width + 28, h = label.height + 12;
+      drawPopBox(box.clear(), label.x - w / 2, label.y - h / 2, w, h, { fill: HEX.panel, fillAlpha: 0.92, radius: RADIUS.sm, shadow: SHADOW.sm });
+    };
+    label.on(PANEL_FIT, fit).once(Phaser.GameObjects.Events.DESTROY, () => box.destroy());
+    fit();
+    return label;
+  }
+
   // --- tutorial ---------------------------------------------------------------
 
   /** The drill's instruction, the player's buttons for it, and a pip per repetition. */
   private buildTutorialPanel(): void {
-    this.timerText.setText("TUTORIAL").setFontSize(26).setY(30);
-    const shadow = { stroke: "#121018", strokeThickness: 8 };
+    this.timerText.setText("TUTORIAL").setFontSize(26).setStroke(COLOR.ink, strokeFor(26)).setY(30);
     this.tutorialUi = {
-      title: this.add.text(GAME_WIDTH / 2, 150, "", { fontSize: "52px", fontStyle: "bold", color: "#f3efe6", ...shadow }).setOrigin(0.5).setDepth(150),
-      how: this.add.text(GAME_WIDTH / 2, 206, "", { fontSize: "26px", fontStyle: "bold", color: "#f2c14e", ...shadow }).setOrigin(0.5).setDepth(150),
+      title: this.add.text(GAME_WIDTH / 2, 150, "", displayText(52, COLOR.fg)).setOrigin(0.5).setDepth(150),
+      how: this.add.text(GAME_WIDTH / 2, 206, "", displayText(28, COLOR.accent)).setOrigin(0.5).setDepth(150),
       pips: this.add.graphics().setDepth(150),
-      nudge: this.add.text(GAME_WIDTH / 2, 292, "", { fontSize: "24px", fontStyle: "bold", color: "#e8483b", ...shadow }).setOrigin(0.5).setDepth(150),
-      footer: this.add.text(GAME_WIDTH / 2, GAME_HEIGHT - 26, "Esc: menu", {
-        fontSize: "17px", color: "#f3efe6", backgroundColor: "#121018cc", padding: { x: 12, y: 6 },
-      }).setOrigin(0.5).setDepth(150),
+      nudge: this.add.text(GAME_WIDTH / 2, 292, "", displayText(26, COLOR.bad)).setOrigin(0.5).setDepth(150),
+      footer: this.footerPanel("Esc: menu"),
     };
   }
 
@@ -368,8 +376,9 @@ export class FightScene extends Phaser.Scene {
     const x0 = GAME_WIDTH / 2 - ((step.goal - 1) * gap) / 2;
     for (let i = 0; i < step.goal; i++) {
       const done = i < this.tutorial!.count;
-      ui.pips.fillStyle(done ? 0xf2c14e : 0x3a3346, 1).fillCircle(x0 + i * gap, 250, 11);
-      ui.pips.lineStyle(3, 0x121018, 1).strokeCircle(x0 + i * gap, 250, 11);
+      ui.pips.fillStyle(HEX.ink, 1).fillCircle(x0 + i * gap, 250 + SHADOW.sm, 11);
+      ui.pips.fillStyle(done ? HEX.accent : HEX.line, 1).fillCircle(x0 + i * gap, 250, 11);
+      ui.pips.lineStyle(3, HEX.ink, 1).strokeCircle(x0 + i * gap, 250, 11);
     }
   }
 
@@ -423,8 +432,8 @@ export class FightScene extends Phaser.Scene {
     this.replayUi = [
       bar(0),
       bar(GAME_HEIGHT - 56),
-      this.add.text(40, 14, "● REPLAY", { fontSize: "26px", fontStyle: "bold", color: "#e8483b" }).setDepth(401),
-      this.add.text(GAME_WIDTH - 40, GAME_HEIGHT - 42, "Press any button to skip", { fontSize: "18px", color: "#c9c3b8" }).setOrigin(1, 0).setDepth(401),
+      this.add.text(40, 12, "● REPLAY", displayText(28, COLOR.bad)).setDepth(401),
+      this.add.text(GAME_WIDTH - 40, GAME_HEIGHT - 40, "Press any button to skip", bodyText(18, COLOR.muted, 600)).setOrigin(1, 0).setDepth(401),
     ];
     this.bannerText.setVisible(false);
     [...this.calloutTexts, this.perfectText].forEach((t) => { this.tweens.killTweensOf(t); t.setVisible(false); });
@@ -661,6 +670,8 @@ export class FightScene extends Phaser.Scene {
   }
 
   private banner(text: string, ms: number): void {
+    const color = text === "K.O." ? COLOR.bad : COLOR.accent;
+    if (this.bannerText.style.color !== color) this.bannerText.setColor(color);
     this.bannerText.setText(text).setVisible(true);
     this.bannerUntil = performance.now() + ms;
   }
@@ -823,29 +834,36 @@ export class FightScene extends Phaser.Scene {
       const x = i === 0 ? 40 : GAME_WIDTH - 40 - BAR_W;
       const y = 28;
       const w = (v: number) => (BAR_W * Math.max(0, v)) / MAX_HEALTH;
-      g.fillStyle(0x121018, 1).fillRect(x - 3, y - 3, BAR_W + 6, BAR_H + 6);
-      g.fillStyle(0x5a1d1d, 1).fillRect(x, y, BAR_W, BAR_H);
+      // A pill: hard ink drop, dark track, fills (radius clamped to their width), ink outline on top.
+      const pill = (px: number, pw: number) => { if (pw > 0) g.fillRoundedRect(px, y, pw, BAR_H, Math.min(PILL_R, pw / 2)); };
+      g.fillStyle(HEX.ink, 1).fillRoundedRect(x, y + SHADOW.sm, BAR_W, BAR_H, PILL_R);
+      g.fillStyle(HEX.healthEmpty, 1).fillRoundedRect(x, y, BAR_W, BAR_H, PILL_R);
       // P1 drains toward the center from the left, P2 from the right.
       const trail = w(this.shownHealth[i]);
       const now = w(f.health);
-      g.fillStyle(0xf2f2f2, 1).fillRect(i === 0 ? x + BAR_W - trail : x, y, trail, BAR_H);
-      g.fillStyle(f.health > LOW_HEALTH ? 0xf2c14e : 0xe8483b, 1).fillRect(i === 0 ? x + BAR_W - now : x, y, now, BAR_H);
+      g.fillStyle(HEX.fg, 1);
+      pill(i === 0 ? x + BAR_W - trail : x, trail);
+      g.fillStyle(f.health > LOW_HEALTH ? HEX.accent : HEX.bad, 1);
+      pill(i === 0 ? x + BAR_W - now : x, now);
       // Low health: the bar pulses brighter and its frame glows.
       const pulse = lowHealthPulse(f.health, state.frame);
       if (pulse > 0) {
-        g.fillStyle(0xffd0c8, 0.45 * pulse).fillRect(i === 0 ? x + BAR_W - now : x, y, now, BAR_H);
-        g.lineStyle(3, 0xe8483b, 0.35 + 0.65 * pulse).strokeRect(x - 4, y - 4, BAR_W + 8, BAR_H + 8);
+        g.fillStyle(HEX.healthGlow, 0.45 * pulse);
+        pill(i === 0 ? x + BAR_W - now : x, now);
       }
+      g.lineStyle(BORDER, HEX.ink, 1).strokeRoundedRect(x, y, BAR_W, BAR_H, PILL_R);
+      if (pulse > 0) g.lineStyle(3, HEX.bad, 0.35 + 0.65 * pulse).strokeRoundedRect(x - 4, y - 4, BAR_W + 8, BAR_H + 8, PILL_R + 4);
       // Round wins (none in practice)
       for (let r = 0; r < (this.setup.practice ? 0 : 2); r++) {
         const cx = i === 0 ? x + BAR_W - 12 - r * 26 : x + 12 + r * 26;
-        g.fillStyle(r < state.round.wins[i] ? 0xf2c14e : 0x3a3346, 1).fillCircle(cx, y + BAR_H + 52, 9);
+        g.fillStyle(r < state.round.wins[i] ? HEX.accent : HEX.line, 1).fillCircle(cx, y + BAR_H + 52, 9);
+        g.lineStyle(3, HEX.ink, 1).strokeCircle(cx, y + BAR_H + 52, 9);
       }
     });
     if (!this.setup.practice) {
       const cue = clockCue(state.round);
       // setColor redraws the text even when it's unchanged; only call it when the colour flips.
-      const color = cue.red ? "#e8483b" : "#f2c14e";
+      const color = cue.red ? COLOR.bad : COLOR.accent;
       this.timerText.setText(String(secondsRemaining(state.round))).setScale(cue.scale);
       if (this.timerText.style.color !== color) this.timerText.setColor(color);
     }

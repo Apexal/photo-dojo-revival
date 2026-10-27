@@ -51,7 +51,7 @@ export function introSceneAt(elapsedMs: number): { index: number; t: number; don
 const W = 960;
 const H = 540;
 const RES = 2;
-const COLOURS = { bg: "#191522", frame: "#2a2433", fg: "#f3efe6", muted: "#a8a196", accent: "#f2c14e", ok: "#5ae68c", bad: "#ff5a5a" };
+const COLOURS = { bg: "#2b1d5c", frame: "#38287a", fg: "#fff4dc", muted: "#c9bde8", accent: "#ffc83d", ok: "#5be08a", bad: "#ff5a47" };
 
 const clamp01 = (x: number) => Math.min(1, Math.max(0, x));
 const ease = (x: number) => { const c = clamp01(x); return c * c * (3 - 2 * c); };
@@ -83,9 +83,13 @@ class Sprites {
 }
 
 function text(ctx: CanvasRenderingContext2D, s: string, x: number, y: number, size: number, colour: string = COLOURS.fg, align: CanvasTextAlign = "center"): void {
-  ctx.font = `700 ${size}px system-ui, sans-serif`;
+  ctx.font = `400 ${size}px "Lilita One", system-ui, sans-serif`;
   ctx.textAlign = align;
   ctx.textBaseline = "middle";
+  ctx.lineJoin = "round";
+  ctx.lineWidth = Math.max(4, size * 0.16);
+  ctx.strokeStyle = "#0d0820";
+  ctx.strokeText(s, x, y);
   ctx.fillStyle = colour;
   ctx.fillText(s, x, y);
 }
@@ -126,7 +130,7 @@ function drawBecome(ctx: CanvasRenderingContext2D, t: number, sprites: Sprites):
   ghost(ctx, POSE_DEFINITIONS.idle.ghostSvgPath, 250, 440, 0.75, "rgba(255, 255, 255, 0.5)");
   text(ctx, "You, in front of a camera", 250, 490, 24, COLOURS.muted);
   const pulse = 0.5 + 0.5 * Math.sin(t * Math.PI * 6);
-  arrow(ctx, 420, 540, 280, `rgba(242, 193, 78, ${0.5 + 0.5 * pulse})`);
+  arrow(ctx, 420, 540, 280, `rgba(255, 200, 61, ${0.5 + 0.5 * pulse})`);
   const poses = ["idle", "punch", "idle", "kick", "win"];
   sprites.draw(ctx, "red", poses[beat(t, poses.length)], 710, 440, 0.75);
   text(ctx, "Your fighter, in the game", 710, 490, 24, COLOURS.muted);
@@ -278,7 +282,7 @@ function drawFight(ctx: CanvasRenderingContext2D, t: number, sprites: Sprites): 
   const [red, blue, hit] = beats[beat(t, beats.length)];
   const ground = 470;
   // The floor's far edge above the feet, as on the game's stages: they stand on it, not on its edge.
-  ctx.fillStyle = "#2f2838";
+  ctx.fillStyle = "#38287a";
   ctx.fillRect(0, ground - 30, W, H - ground + 30);
   sprites.draw(ctx, "red", red, 360, ground, 0.72);
   sprites.draw(ctx, "blue", blue, 600, ground, 0.72, true);
@@ -296,7 +300,7 @@ function drawFight(ctx: CanvasRenderingContext2D, t: number, sprites: Sprites): 
   }
   // Health bars: blue's drops with each hit.
   const hits = beats.slice(0, beat(t, beats.length) + 1).filter((b) => b[2] === "blue").length;
-  for (const [x, health, colour] of [[60, 1, "#e8483b"], [W - 60 - 360, 1 - hits * 0.35, "#4a8ae8"]] as const) {
+  for (const [x, health, colour] of [[60, 1, "#ff5a47"], [W - 60 - 360, 1 - hits * 0.35, "#4aa8ff"]] as const) {
     ctx.fillStyle = "#00000066";
     ctx.fillRect(x, 40, 360, 22);
     ctx.fillStyle = colour;
