@@ -7,6 +7,7 @@ import type { CameraStatus } from "../camera-source";
 import type { CameraDevice } from "../local-camera";
 import type { PhoneHostStatus } from "../phone-host";
 import { canRetake, targetAt, type StudioFlowState } from "../studio-flow";
+import { feedbackUrl } from "../../shared/feedback";
 import { clear, h } from "./dom";
 
 /** Everything captured so far in this session (as the screens see it). */
@@ -279,7 +280,12 @@ export function renderScreen(root: HTMLElement, flow: StudioFlowState, data: Stu
           h("p", { class: "privacy" },
             h("strong", {}, "Private by design. "),
             "Photos and voice are processed on this computer and saved in this browser, nowhere else. A phone's picture comes straight here, peer to peer. There's no cloud backup, so export fighters you love from fighter select."),
-          h("p", { class: "muted" }, h("a", { href: `${import.meta.env.BASE_URL}about`, target: "_blank", rel: "noopener" }, "About, FAQ & credits")),
+          h("p", { class: "muted" },
+            h("a", { href: `${import.meta.env.BASE_URL}about`, target: "_blank", rel: "noopener" }, "About, FAQ & credits"),
+            " · ",
+            h("a", { href: feedbackUrl("bug"), target: "_blank", rel: "noopener" }, "Report a problem"),
+            " · ",
+            h("a", { href: feedbackUrl("idea"), target: "_blank", rel: "noopener" }, "Suggest an idea")),
         ),
       ));
       playVideo();
@@ -489,6 +495,7 @@ export function renderScreen(root: HTMLElement, flow: StudioFlowState, data: Stu
         h("h2", {}, "Something went wrong"),
         h("p", { class: "error" }, s.message),
         h("button", { type: "button", class: "primary", on: { click: () => a.restart() } }, "Start over"),
+        h("p", { class: "muted" }, "Keeps happening? ", h("a", { href: feedbackUrl("bug", `Error: ${s.message}`), target: "_blank", rel: "noopener" }, "Report the problem"), " (opens GitHub with this error filled in)."),
       ));
       break;
   }

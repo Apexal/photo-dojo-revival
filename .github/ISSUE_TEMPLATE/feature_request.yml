@@ -1,0 +1,16 @@
+name: Suggest an idea
+description: A new move, stage, mode or anything that would make it more fun.
+labels: [idea]
+body:
+  - type: textarea
+    id: idea
+    attributes:
+      label: Your idea
+      description: What would you like, and what would it be like to play?
+    validations:
+      required: true
+  - type: textarea
+    id: why
+    attributes:
+      label: Why?
+      description: What's missing or annoying today? (optional)

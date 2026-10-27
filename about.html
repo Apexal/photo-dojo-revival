@@ -5,9 +5,9 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
     <meta name="theme-color" content="#1d1240" />
     <title>About · Photo Dojo: Revival</title>
-    <meta name="description" content="How Photo Dojo: Revival works, what happens to your photos, answers to common questions, and credits." />
+    <meta name="description" content="How Photo Dojo: Revival, a local two-player fighting game made of your own photos, works: what happens to your photos, answers to common questions, and credits." />
     <meta property="og:title" content="About Photo Dojo: Revival" />
-    <meta property="og:description" content="A free browser fighting game made of your own photos. How it works, privacy, FAQ and credits." />
+    <meta property="og:description" content="A free couch fighting game made of your own photos: two players, one screen. How it works, privacy, FAQ and credits." />
     <meta property="og:image" content="__SITE_URL__/og-image.png" />
     <meta name="twitter:card" content="summary_large_image" />
     <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
@@ -17,7 +17,13 @@
     <main>
       <header>
         <h1>Photo Dojo<span>Revival</span></h1>
-        <p class="lead">Snap yourself with a phone or a webcam, then fight your friends on the big screen. A free fighting game made of your own photos, in the browser.</p>
+        <p class="lead">Snap yourself with a phone or a webcam, then fight a friend sitting next to you on the big screen. A free couch fighting game made of your own photos, in the browser.</p>
+        <ul class="badges">
+          <li>🛋️ Local multiplayer</li>
+          <li>👥 2 players, one screen</li>
+          <li>🎮 Keyboard or controllers</li>
+          <li>🤖 Or alone vs. the CPU</li>
+        </ul>
         <p class="actions">
           <a class="button primary" href="/">Play</a>
           <a class="button" href="/studio">Build a fighter</a>
@@ -31,7 +37,7 @@
           <li><strong>Open the game on a laptop or a computer hooked up to a TV,</strong> and click “Open the studio”.</li>
           <li><strong>Pick a camera.</strong> Scan the studio's QR code with a phone and prop it up, and the phone becomes the studio's camera. Or use the computer's own webcam.</li>
           <li><strong>Strike 16 poses</strong> on the big screen: stance, punches, kicks, getting hit, a victory pose, your fighting style's signature move, and a handshake for good sportsmanship. Then record three battle cries.</li>
-          <li><strong>Back to the game.</strong> Pick your fighter and fight, two players on one keyboard or with game controllers. Alone? Practice against the computer.</li>
+          <li><strong>Back to the game.</strong> Pick your fighter and fight someone in the same room: two players on one keyboard, or with game controllers. Alone? Fight the computer, or practice.</li>
         </ol>
       </section>
 
@@ -60,6 +66,10 @@
 
       <section id="faq">
         <h2>FAQ</h2>
+        <details>
+          <summary>Can I play with friends over the internet?</summary>
+          <p>No: it's local multiplayer, a couch game. Both players sit at the same screen, sharing a keyboard or each with a controller. On your own you can fight the computer (easy, normal or hard), practice, or run the tutorial. You can send a friend your fighter file, though, and they can fight as you on their own computer.</p>
+        </details>
         <details>
           <summary>What do I need?</summary>
           <p>A laptop or a computer hooked up to a TV, with a recent Chrome, Edge, Firefox or Safari. A camera: a phone (any recent iPhone or Android), the computer's webcam, or on a Mac an iPhone through Continuity Camera. Two players can share one keyboard, or plug in game controllers (Xbox, PlayStation and most others work).</p>
@@ -93,18 +103,23 @@
           <p>No: the AI models need more memory than a phone's browser gives a page, so fighters are built on a computer. The phone can be its camera. Fighter files move between computers with Export and Import.</p>
         </details>
         <details>
-          <summary>Can I play with friends over the internet?</summary>
-          <p>Not yet: it's a couch game, with both players at the same screen. You can send a friend your fighter file, though.</p>
-        </details>
-        <details>
           <summary>Is this Nintendo's Photo Dojo?</summary>
           <p>No. It's an unofficial fan project inspired by <em>Photo Dojo</em>, a 2009 DSiWare game by Nintendo. It isn't affiliated with or endorsed by Nintendo, and contains no Nintendo code or assets.</p>
         </details>
       </section>
 
+      <section id="feedback">
+        <h2>Found a bug? Got an idea?</h2>
+        <p>Tell me on GitHub (a free account is needed). A problem report is filled in with your browser and the game's version to help track it down; you see everything before you send it, and it's public, so leave out anything private.</p>
+        <p class="actions">
+          <a class="button primary" data-feedback="bug" href="https://github.com/Apexal/photo-dojo-revival/issues/new?template=bug_report.yml">Report a problem</a>
+          <a class="button" data-feedback="idea" href="https://github.com/Apexal/photo-dojo-revival/issues/new?template=feature_request.yml">Suggest an idea</a>
+        </p>
+      </section>
+
       <section id="credits">
         <h2>Credits</h2>
-        <p>Made by <strong>Frank Matranga</strong>. Free and open source under the MIT license: <a href="https://github.com/Apexal/photo-dojo-revival">github.com/Apexal/photo-dojo-revival</a>. Bug reports and ideas are welcome there.</p>
+        <p>Made by <strong>Frank Matranga</strong>. Free and open source under the MIT license: <a href="https://github.com/Apexal/photo-dojo-revival">github.com/Apexal/photo-dojo-revival</a>. <a href="#feedback">Bug reports and ideas</a> are welcome there.</p>
         <p>Inspired by <em>Photo Dojo</em> (Nintendo, 2009).</p>
         <p>Built with:</p>
         <ul class="credits">
@@ -120,8 +135,9 @@
       </section>
 
       <footer>
-        <p>Photo Dojo: Revival v__APP_VERSION__ · <a href="https://github.com/Apexal/photo-dojo-revival">GitHub</a> · An unofficial fan project, not affiliated with Nintendo.</p>
+        <p>Photo Dojo: Revival v__APP_VERSION__ · <a href="https://github.com/Apexal/photo-dojo-revival">GitHub</a> · <a href="#feedback">Feedback</a> · An unofficial fan project, not affiliated with Nintendo.</p>
       </footer>
     </main>
+    <script type="module" src="/src/about/main.ts"></script>
   </body>
 </html>

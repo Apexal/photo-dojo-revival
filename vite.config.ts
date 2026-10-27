@@ -44,8 +44,9 @@ function localModels(): Plugin {
  * e.g. https://photo-dojo.pages.dev: link previews need an absolute image URL;
  * without it they fall back to a relative one, which some apps ignore).
  */
+const { version } = JSON.parse(readFileSync(resolve(import.meta.dirname, "package.json"), "utf8")) as { version: string };
+
 function htmlPlaceholders(): Plugin {
-  const { version } = JSON.parse(readFileSync(resolve(import.meta.dirname, "package.json"), "utf8")) as { version: string };
   const siteUrl = (process.env.VITE_SITE_URL ?? "").replace(/\/$/, "");
   return {
     name: "html-placeholders",
@@ -61,6 +62,8 @@ const workerProxy = {
 export default defineConfig({
   // HTTPS=1 npm run dev: self-signed HTTPS so phones on the LAN get camera access.
   plugins: [prettyUrls(), htmlPlaceholders(), localModels(), ...(process.env.HTTPS ? [basicSsl()] : [])],
+  // The same version in code (bug reports: src/shared/feedback.ts).
+  define: { __APP_VERSION__: JSON.stringify(version) },
   server: {
     host: true,
     // The signaling Worker (wrangler dev on :8787) is proxied through the dev server, so pages

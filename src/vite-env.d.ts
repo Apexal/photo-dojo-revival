@@ -10,3 +10,6 @@ interface ImportMetaEnv {
   /** Base URL of the music files (the R2 bucket); defaults to /music/ (git-ignored public/music/). */
   readonly VITE_MUSIC_BASE_URL?: string;
 }
+
+/** package.json's version (vite.config.ts `define`). */
+declare const __APP_VERSION__: string;

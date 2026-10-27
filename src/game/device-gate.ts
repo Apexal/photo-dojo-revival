@@ -39,11 +39,11 @@ export function gatePhones(start: () => void): void {
   gate.id = "phone-gate";
   gate.innerHTML = `
     <h1>Photo Dojo<span>REVIVAL</span></h1>
-    <p><strong>The fight happens on a big screen.</strong> Open this page on a laptop or a TV, and play with keyboards or game controllers.</p>
+    <p><strong>The fight happens on a big screen.</strong> It's a couch game: two players side by side at one laptop or TV, sharing a keyboard or with game controllers. Open this page there.</p>
     <p>Fighters are built in the studio, which runs on a computer too. This phone can be its camera: scan the code the studio shows.</p>
     <a class="button primary" href="${base}capture">Use this phone as the camera</a>
     <button type="button">Show the game anyway</button>
-    <p class="muted">Your photos never leave your devices. <a href="${base}about">About, FAQ &amp; credits</a></p>
+    <p class="muted">Your photos never leave your devices. <a href="${base}about">About, FAQ &amp; credits</a> · <a href="${base}about#feedback">Bugs &amp; ideas</a></p>
   `;
   gate.querySelector("button")!.addEventListener("click", () => {
     try {

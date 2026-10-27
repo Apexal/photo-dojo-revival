@@ -8,6 +8,8 @@ h2 { margin: 0 0 14px; font-size: 32px; line-height: 1.1; -webkit-text-stroke: v
 section { margin-top: 48px; }
 p { margin: 0 0 12px; }
 .lead { font-size: 21px; font-weight: 600; max-width: 36em; }
+.badges { list-style: none; display: flex; flex-wrap: wrap; gap: 8px 10px; margin: 18px 0 0; padding: 0; }
+.badges li { padding: 6px 12px; border: 3px solid var(--ink); border-radius: 999px; background: var(--panel); box-shadow: var(--shadow-pop-sm); font-size: 15px; font-weight: 800; }
 .actions { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 24px; }
 ol.steps { margin: 0; padding-left: 1.4em; display: grid; gap: 12px; }
 ol.steps li::marker { font-family: var(--font-display); color: var(--accent); }

@@ -153,7 +153,7 @@ export class TitleScene extends Phaser.Scene {
     const logo = this.add.text(cx, 86, "PHOTO DOJO", displayText(112, COLOR.accent)).setOrigin(0.5).setDepth(OVERLAY_DEPTH);
     // Stamped across the logo's corner once it has developed.
     const revival = stamp(this, cx + 250, 152, "Revival", HEX.bad, 30).setDepth(OVERLAY_DEPTH + 1);
-    const tagline = this.add.text(cx, 204, "Snap yourself. Fight your friends.", bodyText(24, COLOR.fg, 800, { stroke: COLOR.ink, strokeThickness: 5 }))
+    const tagline = this.add.text(cx, 204, "Snap yourself. Fight your friends, side by side.", bodyText(24, COLOR.fg, 800, { stroke: COLOR.ink, strokeThickness: 5 }))
       .setOrigin(0.5).setDepth(OVERLAY_DEPTH);
     const late: Phaser.GameObjects.GameObject[] = [revival, tagline, ...this.buildFooter()];
     const library: LibraryEntry[] = this.registry.get(REGISTRY.library) ?? [];
@@ -168,21 +168,26 @@ export class TitleScene extends Phaser.Scene {
     if (!this.setup.revealed) this.reveal(logo, late);
   }
 
-  /** Bottom right: the About page (new tab, so the room stays open), and the fan-project disclaimer. */
+  /** Bottom right: the About page and feedback (new tabs, so the room stays open), and the fan-project disclaimer. */
   private buildFooter(): Phaser.GameObjects.GameObject[] {
     const x = GAME_WIDTH - 16;
     const style = bodyText(15, COLOR.fg, 800, { stroke: COLOR.ink, strokeThickness: 4 });
-    const about = this.add.text(x, GAME_HEIGHT - 34, "About · FAQ · Credits ↗", style).setOrigin(1, 1).setDepth(OVERLAY_DEPTH)
-      .setInteractive({ useHandCursor: true });
-    about.on("pointerover", () => about.setColor(COLOR.accent));
-    about.on("pointerout", () => about.setColor(COLOR.fg));
-    about.on("pointerdown", (_p: unknown, _x: number, _y: number, ev: Phaser.Types.Input.EventData) => {
-      ev.stopPropagation(); // not a "press any button"
-      window.open(`${import.meta.env.BASE_URL}about`, "_blank", "noopener");
-    });
+    const link = (right: number, label: string, path: string) => {
+      const text = this.add.text(right, GAME_HEIGHT - 34, label, style).setOrigin(1, 1).setDepth(OVERLAY_DEPTH)
+        .setInteractive({ useHandCursor: true });
+      text.on("pointerover", () => text.setColor(COLOR.accent));
+      text.on("pointerout", () => text.setColor(COLOR.fg));
+      text.on("pointerdown", (_p: unknown, _x: number, _y: number, ev: Phaser.Types.Input.EventData) => {
+        ev.stopPropagation(); // not a "press any button"
+        window.open(`${import.meta.env.BASE_URL}${path}`, "_blank", "noopener");
+      });
+      return text;
+    };
+    const feedback = link(x, "Bugs & ideas ↗", "about#feedback");
+    const about = link(x - feedback.width - 24, "About · FAQ · Credits ↗", "about");
     const disclaimer = this.add.text(x, GAME_HEIGHT - 12, "Unofficial fan project · not affiliated with Nintendo", { ...style, fontSize: "13px", fontStyle: "600", color: COLOR.muted })
       .setOrigin(1, 1).setDepth(OVERLAY_DEPTH);
-    return [about, disclaimer];
+    return [about, feedback, disclaimer];
   }
 
   /** First visit (nothing captured yet): how to get yourself in the game. */

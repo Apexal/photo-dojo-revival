@@ -1,0 +1,32 @@
+name: Report a problem
+description: Something in the game, the studio or the phone camera didn't work.
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time! This issue is public, so don't attach photos of anyone who hasn't agreed to it.
+  - type: dropdown
+    id: area
+    attributes:
+      label: Where did it happen?
+      options:
+        - The game (fighting, menus, controllers)
+        - The studio (building a fighter)
+        - The phone camera
+        - Somewhere else
+    validations:
+      required: true
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened?
+      description: What did you do, what did you expect, and what happened instead?
+    validations:
+      required: true
+  - type: textarea
+    id: environment
+    attributes:
+      label: Your setup
+      description: Filled in automatically when you come from the game. Add your camera, phone or controller if it's relevant.
+      render: text

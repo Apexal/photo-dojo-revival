@@ -1,6 +1,6 @@
 # Photo Dojo: Revival
 
-A browser-only 2D fighting game. Open the Character Studio on a computer, pick a fighting style and pose for sixteen photos in front of a camera (a phone streaming to the computer, or the computer's own webcam), and the computer turns them into a sprite fighter locally. Then two people fight with controllers or a shared keyboard. No accounts, no backend storage: fighters live in each browser's IndexedDB. See [PLAN.md](PLAN.md) for the design and [docs/character-studio.md](docs/character-studio.md) for the studio and the phone camera.
+A browser-only 2D fighting game. Open the Character Studio on a computer, pick a fighting style and pose for sixteen photos in front of a camera (a phone streaming to the computer, or the computer's own webcam), and the computer turns them into a sprite fighter locally. Then two people fight side by side: it's local multiplayer (a couch game), on one screen with controllers or a shared keyboard, and there's no online play. Alone, you can fight the CPU or practice. No accounts, no backend storage: fighters live in each browser's IndexedDB. See [PLAN.md](PLAN.md) for the design and [docs/character-studio.md](docs/character-studio.md) for the studio and the phone camera.
 
 ## Run it
 
@@ -74,6 +74,10 @@ Keyboard keys can be remapped in **Settings** (Tab or a pad's Select button on f
 - Fighter select works with a mouse or touch too. Click a tile to select it, then use the tile's Export or 🗑 button, ✎ Rename on a captured fighter (type the new name, Enter to save, Esc to cancel), or ✂ Edit to open it in the studio. Clicking a selected tile again picks it for a player who has joined. With more than 12 fighters the grid pages: move past the last row, or click ◀ ▶.
 
 The frame data and the reasoning behind it are in [docs/fighting-mechanics.md](docs/fighting-mechanics.md).
+
+### Bugs and ideas
+
+The About page (`/about#feedback`), the title screen's footer, the phone page and the studio link to this repo's issue forms (`.github/ISSUE_TEMPLATE/`). A problem report opened from the game comes prefilled with the version, page, browser, screen and WebGPU support (`src/shared/feedback.ts`), and the studio's error screen adds the error message. Nothing is sent until the player submits the issue on GitHub.
 
 ## Test
 

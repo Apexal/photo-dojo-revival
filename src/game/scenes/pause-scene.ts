@@ -1,5 +1,6 @@
 import Phaser from "phaser";
 import { GRAB_TIPS, GUARD_TIPS, controlLabels, deviceName, moveGuide } from "../input/control-labels";
+import { feedbackUrl } from "../../shared/feedback";
 import { isPlayerInput } from "../input/input-descriptor";
 import { MenuInput } from "../input/menu-input";
 import { getOptions } from "../options";
@@ -15,7 +16,7 @@ const DISCONNECT_Y = 76;
 
 /**
  * Pause menu over the frozen fight: Resume / Controls / Settings / Restart
- * round / Quit. Any controller can drive it. While a player's controller is
+ * round / Report a problem / Quit. Any controller can drive it. While a player's controller is
  * disconnected it says so and Resume waits for them to reconnect.
  */
 export class PauseScene extends Phaser.Scene {
@@ -27,6 +28,7 @@ export class PauseScene extends Phaser.Scene {
   private disconnectBox!: Phaser.GameObjects.Graphics;
   private shownDisconnect: number | null = null;
   private hint!: Phaser.GameObjects.Text;
+  private note!: Phaser.GameObjects.Text;
 
   constructor() {
     super("pause");
@@ -42,7 +44,7 @@ export class PauseScene extends Phaser.Scene {
     this.shownDisconnect = null;
     const practice = this.fight.isPractice;
     this.add.rectangle(0, 0, GAME_WIDTH, GAME_HEIGHT, HEX.ink, 0.75).setOrigin(0);
-    const panel = popBox(this, (GAME_WIDTH - PANEL_W) / 2, 128, PANEL_W, 424, { fill: HEX.panel, radius: RADIUS.lg, shadow: SHADOW.lg });
+    const panel = popBox(this, (GAME_WIDTH - PANEL_W) / 2, 128, PANEL_W, 480, { fill: HEX.panel, radius: RADIUS.lg, shadow: SHADOW.lg });
     this.disconnectBox = this.add.graphics().setVisible(false);
     this.disconnectText = this.add.text(GAME_WIDTH / 2, DISCONNECT_Y, "", displayText(26, COLOR.ink, { outline: false, align: "center", padding: { x: 20, y: 12 } }))
       .setOrigin(0.5).setVisible(false);
@@ -52,15 +54,27 @@ export class PauseScene extends Phaser.Scene {
       { label: () => "Controls", onConfirm: () => this.showControls(true) },
       { label: () => "Settings", onConfirm: () => this.openSettings() },
       { label: () => (practice ? "Reset positions" : "Restart round"), onConfirm: () => this.fight.restartRound(), disabled: () => this.fight.disconnectedPlayer !== null },
+      { label: () => "Report a problem ↗", onConfirm: () => this.reportProblem() },
       { label: () => (this.fight.series ? `Quit to ${SERIES_INFO[this.fight.series].home}` : "Quit to fighter select"), onConfirm: () => this.fight.quitToSelect() },
     ], { width: 420 });
     this.hint = this.add.text(GAME_WIDTH / 2, GAME_HEIGHT - 60, "", bodyText(17, COLOR.muted, 600)).setOrigin(0.5);
     const hint = this.hint;
-    this.menuObjects = [panel, title, hint];
+    this.note = this.add.text(GAME_WIDTH / 2, 628, "", bodyText(17, COLOR.fg, 800, { align: "center" })).setOrigin(0.5);
+    this.menuObjects = [panel, title, hint, this.note];
     const onResume = () => this.menuInput.reset();
     this.events.on(Phaser.Scenes.Events.RESUME, onResume);
     this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => this.events.off(Phaser.Scenes.Events.RESUME, onResume));
     this.updateDisconnect();
+  }
+
+  /** GitHub's bug form in a new tab, with the browser's details filled in. */
+  private reportProblem(): void {
+    // Not "noopener": with it, window.open returns null even when the tab opened.
+    const tab = window.open(feedbackUrl("bug", `Paused in ${this.fight.isPractice ? "practice" : "a fight"}`), "_blank");
+    if (tab) tab.opener = null;
+    this.note.setText(tab
+      ? "Opened in a new tab: tell us what happened there."
+      : "The browser blocked the new tab. Click Report a problem with the mouse, or see About → Bugs & ideas.");
   }
 
   private openSettings(): void {
