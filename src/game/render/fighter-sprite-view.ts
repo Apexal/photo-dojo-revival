@@ -10,7 +10,8 @@ import { fallPose, hitShake, holdsStruckPose } from "./hit-feel";
 import { PoseTransitions } from "./pose-transitions";
 import { PoseTweener, type FrameRef, type TweenLayer, type TweenSource } from "./pose-tweener";
 import { GaitShape, STANCE, STEP, WalkGait, stepPose, type GaitFrame } from "./walk-gait";
-import { worldToScreen } from "./stage";
+import { Ragdoll, torsoCover } from "./ragdoll";
+import { FLOOR_SCREEN_Y, GAME_WIDTH, worldToScreen } from "./stage";
 import { TweenMeshes, readAlpha } from "./tween-meshes";
 import { TOP_EDGE_STEP, blendProfiles, topProfile, type TopEdge } from "./top-edge";
 
@@ -111,6 +112,10 @@ export class FighterSpriteView {
   /** What was drawn last render, upright (null while tipped over): for topEdge. */
   private placed: { from: FrameRef; to: FrameRef; t: number; at: { x: number; y: number }; facing: 1 | -1 } | null = null;
   private readonly profiles = new Map<string, (number | null)[] | null>();
+  /** KO'd: the capture they were hit in, going limp from where they stood (ragdoll.ts). */
+  private ragdoll: { body: Ragdoll; frame: FrameRef; backing: FrameRef; origin: { x: number; y: number } } | null = null;
+  /** The capture whose arms cover its torso least, with that cover (torsoCover): drawn under a ragdoll. Built on the first KO. */
+  private clearestTorso: { frame: FrameRef; cover: number } | null = null;
 
   /** `grip`: the handshake as the round intro aims it (FightSimulation.grips); without it the hand doesn't shake. */
   constructor(
@@ -160,7 +165,9 @@ export class FighterSpriteView {
     p.x += hitShake(state, frame, opponent);
     // Just hit: the struck pose holds through most of the freeze (hit-feel.ts).
     const struck = holdsStruckPose(state) && this.lastShown;
-    // Knocked down / KO'd: the plain photo, tipped over (no morphs while falling or lying).
+    // KO'd: the photo goes limp and flops down.
+    if (!struck && tweening && this.renderRagdoll(state)) return;
+    // Knocked down (or KO'd without WebGL): the plain photo, tipped over (no morphs while falling or lying).
     const fall = struck ? null : fallPose(state);
     const layers = !struck && !fall && tween ? this.layersFor(tween, step) : null;
     const lying = fall ? Math.sin((fall.tilt * Math.PI) / 2) : 0;
@@ -189,6 +196,63 @@ export class FighterSpriteView {
     this.shadow.setPosition(floor.x - state.facing * lying * 120, floor.y + 4);
     const size = Math.max(0.4, 1 + state.position.y / 400);
     this.shadow.setScale(size * (1 + 1.6 * lying), size);
+  }
+
+  /**
+   * Draw a KO'd fighter as a ragdoll: false when they aren't KO'd or it can't
+   * be drawn (the tipped-over photo stands in). Stepped by the KO's own frame
+   * count, so the replay, which draws the same states again, flops the same way.
+   */
+  private renderRagdoll(state: FighterState): boolean {
+    if (state.action !== "ko" || !this.tweener) {
+      this.ragdoll = null;
+      return false;
+    }
+    if (this.ragdoll && state.actionFrame < this.ragdoll.body.frames) this.ragdoll = null; // the replay went back
+    if (!this.ragdoll) {
+      const frame = this.lastShown ?? frameOf(state);
+      const landmarks = this.tweener.skeleton({ from: frame, to: frame, t: 0 });
+      if (!landmarks) return false;
+      const origin = worldToScreen(state.position);
+      const side = (x: number) => state.facing * (x - origin.x);
+      const walls = [side(WALL_MARGIN), side(GAME_WIDTH - WALL_MARGIN)].sort((a, b) => a - b) as [number, number];
+      const velocity = { x: state.facing * state.velocity.x, y: state.velocity.y };
+      // Under the limp photo, whichever capture shows the most of the torso (if it's clearer than this one).
+      const clearest = this.clearestCapture();
+      const backing = clearest.cover < torsoCover(landmarks) ? clearest.frame : frame;
+      this.ragdoll = { body: new Ragdoll({ landmarks, velocity, floor: FLOOR_SCREEN_Y - origin.y, walls }), frame, backing, origin };
+    }
+    const { body, frame, backing, origin } = this.ragdoll;
+    body.advanceTo(state.actionFrame);
+    const skeleton = body.skeleton();
+    const layers = this.tweener.limp(frame, skeleton, backing);
+    if (!layers) {
+      this.ragdoll = null;
+      return false;
+    }
+    this.meshes.show(layers, state.facing, origin, this.depth);
+    this.sprite.setVisible(false);
+    this.placed = null;
+    // The shadow spreads under whatever of them is near the floor.
+    const xs = skeleton.map((l) => origin.x + state.facing * l.x);
+    const left = Math.min(...xs), right = Math.max(...xs);
+    const pelvisHeight = FLOOR_SCREEN_Y - (origin.y + (skeleton[LANDMARK.leftHip].y + skeleton[LANDMARK.rightHip].y) / 2);
+    const size = Math.max(0.4, 1 - pelvisHeight / 600);
+    this.shadow.setPosition((left + right) / 2, FLOOR_SCREEN_Y + 4);
+    this.shadow.setScale(size * Math.max(0.8, (right - left) / 140), size);
+    return true;
+  }
+
+  private clearestCapture(): { frame: FrameRef; cover: number } {
+    if (!this.clearestTorso) {
+      for (const poseId of POSE_IDS) {
+        for (let variant = 0; variant < variantCount(this.geometry, poseId); variant++) {
+          const cover = torsoCover(frameGeometry(this.geometry, poseId, variant).landmarks);
+          if (!this.clearestTorso || cover < this.clearestTorso.cover) this.clearestTorso = { frame: { poseId, variant }, cover };
+        }
+      }
+    }
+    return this.clearestTorso!;
   }
 
   /**
@@ -337,6 +401,9 @@ export class FighterSpriteView {
     return { mask, landmarks: frameGeometry(this.geometry, frame.poseId, frame.variant).landmarks, anchor };
   }
 }
+
+/** How close to the screen's edges a ragdoll can flop, px. */
+const WALL_MARGIN = 20;
 
 /** The handshake with the arm aimed at where the hands meet (HandshakeGrip.landmarks): a stand-in, like the shake's raised and lowered hands (variants 1 and 2). */
 const GRIP: FrameRef = { poseId: "handshake", variant: 3 };

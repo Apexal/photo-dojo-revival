@@ -417,6 +417,24 @@ export class PoseTweener {
     return [{ ...far.layer, id: `${far.layer.id}:body`, triangles: far.entry.bodyTriangles, alpha: 1 }, leaving.layer, arriving.layer];
   }
 
+  /**
+   * One capture warped onto any skeleton (relative to its feet anchor, facing
+   * right, sides labelled as the capture's), every limb it can see cut loose so
+   * each swings on its own: the K.O. ragdoll. `backing`: another capture whose
+   * torso and head (no arms or legs) are warped onto the same skeleton and drawn
+   * underneath, to fill the holes a limb leaves where it lay across the body.
+   * Null when it can't be warped (a backing that can't is just left out).
+   */
+  limp(frame: FrameRef, skeleton: NormalizedLandmark[], backing?: FrameRef): TweenLayer[] | null {
+    const entry = this.deformerFor(frame, frame, "limp");
+    if (!entry) return null;
+    const layer = (frame: FrameRef, entry: DeformerEntry, id: string, triangles: Uint32Array): TweenLayer =>
+      ({ frame, id, triangles, uvs: entry.uvs, positions: entry.deformer.deform(entry.handles.map((h) => handlePoint(skeleton, h))), alpha: 1 });
+    const top = layer(frame, entry, `${frameKey(frame)}>limp`, entry.deformer.triangles);
+    const under = backing && frameKey(backing) !== frameKey(frame) ? this.deformerFor(backing, frame, "backing") : null;
+    return under ? [layer(backing!, under, `${frameKey(backing!)}>backing:${frameKey(frame)}`, under.coreTriangles), top] : [top];
+  }
+
   /** Capture `frame` (as paired with `other`) warped onto `skeleton`. */
   private warp(frame: FrameRef, other: FrameRef, skeleton: NormalizedLandmark[], alpha: number): { layer: TweenLayer; entry: DeformerEntry } | null {
     const entry = this.deformerFor(frame, other);
@@ -449,6 +467,13 @@ export class PoseTweener {
     return frameKey(x) > frameKey(y) ? [swapSides(mx.landmarks), my.landmarks] : [mx.landmarks, swapSides(my.landmarks)];
   }
 
+  /** `frame`'s landmarks relabelled to agree with `other`'s as they are, and `other`'s. */
+  private matchedTo(frame: FrameRef, other: FrameRef): [NormalizedLandmark[], NormalizedLandmark[]] | null {
+    const mine = this.meshFor(frame), theirs = this.meshFor(other);
+    if (!mine || !theirs) return null;
+    return [sidesFlipped(mine.landmarks, theirs.landmarks) ? swapSides(mine.landmarks) : mine.landmarks, theirs.landmarks];
+  }
+
   private meshFor(frame: FrameRef): MeshEntry | null {
     const key = frameKey(frame);
     if (!this.meshes.has(key)) {
@@ -473,16 +498,21 @@ export class PoseTweener {
     return this.meshes.get(key)!;
   }
 
-  private deformerFor(frame: FrameRef, other: FrameRef): DeformerEntry | null {
-    const key = `${frameKey(frame)}>${frameKey(other)}`;
+  /**
+   * `limp`: cut loose every limb the capture can see, not just the ones that
+   * move toward `other`. `backing`: the same, with sides labelled as `other`'s
+   * own (it's warped onto `other`'s skeleton, which keeps its labels).
+   */
+  private deformerFor(frame: FrameRef, other: FrameRef, mode: "tween" | "limp" | "backing" = "tween"): DeformerEntry | null {
+    const key = `${frameKey(frame)}>${mode === "limp" ? "limp" : mode === "backing" ? `backing:${frameKey(other)}` : frameKey(other)}`;
     if (!this.deformers.has(key)) {
       const base = this.meshFor(frame);
-      const pair = this.pairLandmarks(frame, other);
+      const pair = mode === "backing" ? this.matchedTo(frame, other) : this.pairLandmarks(frame, other);
       let entry: DeformerEntry | null = null;
       if (base && pair) {
         const [mine, theirs] = pair;
         const handles = HANDLES.filter((h) => trustedIn(mine, h.from, h.to) && trustedIn(theirs, h.from, h.to));
-        const cut = movingLimbs(mine, theirs);
+        const cut = mode !== "tween" ? LIMBS.filter((limb) => trustedIn(mine, limb.root, ...limb.joints)) : movingLimbs(mine, theirs);
         const { mesh, uvs } = cutLimbs(base, mine, cut);
         try {
           const deformer = new ArapDeformer(mesh, handles.map((h) => handlePoint(mine, h)), {}, handles.map((h) => handleGroup(h, cut)));
