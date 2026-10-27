@@ -25,7 +25,7 @@ import { getOptions, setOption } from "../options";
 import { HitboxDebugView } from "../render/hitbox-debug-view";
 import { LOW_HEALTH, clockCue, clockTicked, lowHealthPulse } from "../render/hud-cues";
 import { GAME_HEIGHT, GAME_WIDTH, PLAYER_COLORS, worldToScreen } from "../render/stage";
-import { stageFor, type StageDefinition } from "../stages/stages";
+import { stageFor, type StageDefinition, type StageEffects } from "../stages/stages";
 import { playStageMusic, preloadStage, stopStageMusic, updateStageMusicVolume } from "../stages/stage-music";
 import { REGISTRY } from "./boot-scene";
 import { MIRROR_TINT } from "./controls-scene";
@@ -95,6 +95,8 @@ export class FightScene extends Phaser.Scene {
   /** Under the center banner, after the K.O. */
   private perfectText!: Phaser.GameObjects.Text;
   private stage!: StageDefinition;
+  /** The stage's weather around the fighters (null if it has none). */
+  private stageEffects: StageEffects | null = null;
   /** The stage's soundtrack (null if it has none). */
   private music: Phaser.Sound.BaseSound | null = null;
   private sounds: Record<SoundId, string[]>[] = [];
@@ -169,6 +171,7 @@ export class FightScene extends Phaser.Scene {
 
     this.stage = stageFor(this.setup.stageId);
     this.stage.build(this, this.add.container(0, 0).setDepth(0));
+    this.stageEffects = this.stage.effects?.(this, { under: 5, over: 15 }) ?? null;
     this.music = playStageMusic(this, this.stage, 800);
     const mirrorMatch = a.fighter.fighterId === b.fighter.fighterId;
     this.views = [0, 1].map((i) => new FighterSpriteView(this, PREFIXES[i], this.geometry[i], i === 1 && mirrorMatch ? MIRROR_TINT : undefined, this.sim.grips[i]));
@@ -787,6 +790,7 @@ export class FightScene extends Phaser.Scene {
   private renderState(state: FightState): void {
     const tweening = getOptions(this.registry).poseTweening;
     state.fighters.forEach((f, i) => this.views[i]?.render(f, state.frame, tweening, state.fighters[1 - i]));
+    this.stageEffects?.update(state.fighters.map((f, i) => ({ state: f, topEdge: () => this.views[i].topEdge() })));
     // The streaks stand in for the motion a hard cut skips; when the poses morph, the motion is shown.
     this.drawMotionLines(state.fighters, (i) => !(tweening && this.views[i]?.canTween));
     this.markers.render(state.frame);

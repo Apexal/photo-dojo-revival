@@ -12,7 +12,7 @@ import { getOptions } from "../options";
 import { FighterSpriteView, fallbackSoundKey, fighterTextureKeys, loadFighterSounds, preloadFighterTextures } from "../render/fighter-sprite-view";
 import { HitMarkers } from "../render/hit-markers";
 import { GAME_HEIGHT, GAME_WIDTH } from "../render/stage";
-import { randomStage, type StageDefinition } from "../stages/stages";
+import { randomStage, type StageDefinition, type StageEffects } from "../stages/stages";
 import { preloadStage } from "../stages/stage-music";
 import { pickTake } from "../sound-choice";
 import { REGISTRY } from "./boot-scene";
@@ -53,6 +53,7 @@ export class TitleScene extends Phaser.Scene {
   private setup: TitleSceneData = {};
   private pair!: [LibraryEntry, LibraryEntry];
   private stage!: StageDefinition;
+  private stageEffects: StageEffects | null = null;
   private sim!: FightSimulation;
   private sources: DummyInputSource[] = [];
   private views: FighterSpriteView[] = [];
@@ -92,6 +93,7 @@ export class TitleScene extends Phaser.Scene {
   create(): void {
     playMenuMusic(this);
     this.stage.build(this, this.add.container(0, 0).setDepth(0));
+    this.stageEffects = this.stage.effects?.(this, { under: 5, over: 15 }) ?? null;
     const geometry = this.pair.map((e) => geometryOf(e.fighter)) as [ReturnType<typeof geometryOf>, ReturnType<typeof geometryOf>];
     this.sim = new FightSimulation(geometry, { seed: (Math.random() * 2 ** 32) >>> 0 });
     this.sources = [0, 1].map((i) => {
@@ -236,6 +238,7 @@ export class TitleScene extends Phaser.Scene {
     }
     const tweening = getOptions(this.registry).poseTweening;
     state.fighters.forEach((f, i) => this.views[i]?.render(f, state.frame, tweening, state.fighters[1 - i]));
+    this.stageEffects?.update(state.fighters.map((f, i) => ({ state: f, topEdge: () => this.views[i].topEdge() })));
     this.markers.render(state.frame);
     if (this.boutOver(state) && this.boutOverAt === null) this.boutOverAt = time;
     if (this.boutOverAt !== null && time - this.boutOverAt > BOUT_GAP_MS) this.nextBout();

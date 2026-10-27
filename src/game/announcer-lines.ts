@@ -45,6 +45,7 @@ export const ANNOUNCER_LINES = {
   "tale-of-the-tape": "Here's the tale of the tape!",
   "stage-dusk-dojo": "Dusk Dojo",
   "stage-lunar-dojo": "Lunar Dojo",
+  "stage-winter-dojo": "Winter Dojo",
   quarterfinals: "Quarterfinals!",
   semifinals: "Semifinals!",
   "final-match": "The final match!",

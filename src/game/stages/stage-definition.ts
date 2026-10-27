@@ -1,4 +1,6 @@
 import type Phaser from "phaser";
+import type { FighterState } from "../../simulation/fighter-state-machine";
+import type { TopEdge } from "../render/top-edge";
 
 /**
  * A place to fight. Stages are scenery only: the fight's floor, walls and
@@ -6,7 +8,8 @@ import type Phaser from "phaser";
  * the rules. To add one: write a StageDefinition in its own file in this
  * folder and list it in STAGES (stages.ts). Images and sounds go in
  * public/stages/<id>/ and are queued in `preload`; a soundtrack only needs
- * `music` (stage-music.ts loads and plays it).
+ * `music` (stage-music.ts loads and plays it). Weather that touches the
+ * fighters goes in `effects`.
  */
 export interface StageDefinition {
   /** Stable id: kept in the match setup and as the last pick. Never reuse or rename one. */
@@ -32,4 +35,25 @@ export interface StageDefinition {
    * once per scene; animate with scene tweens if you like.
    */
   build(scene: Phaser.Scene, layer: Phaser.GameObjects.Container): void;
+  /**
+   * Optional effects over and around the fighters, in scenes that show a bout
+   * (the fight, the title demo). Render only, like everything else here: they
+   * read the fighters and never change them. Draw at `depths.under` (over the
+   * backdrop, under the fighters and their shadows) or `depths.over` (over the
+   * fighters, under the HUD), in the same screen space as `build`.
+   */
+  effects?(scene: Phaser.Scene, depths: { readonly under: number; readonly over: number }): StageEffects;
+}
+
+/** A stage's live effects (StageDefinition.effects). */
+export interface StageEffects {
+  /** Every rendered frame, after the fighters are drawn, with both of them as shown. */
+  update(fighters: readonly StageFighter[]): void;
+}
+
+/** A fighter as a stage's effects see it. */
+export interface StageFighter {
+  readonly state: FighterState;
+  /** Their top edge on screen as just drawn (FighterSpriteView.topEdge); null while tipped over. */
+  topEdge(): TopEdge | null;
 }

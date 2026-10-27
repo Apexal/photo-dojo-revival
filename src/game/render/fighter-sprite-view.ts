@@ -12,6 +12,7 @@ import { PoseTweener, type FrameRef, type TweenLayer, type TweenSource } from ".
 import { GaitShape, STANCE, STEP, WalkGait, stepPose, type GaitFrame } from "./walk-gait";
 import { worldToScreen } from "./stage";
 import { TweenMeshes, readAlpha } from "./tween-meshes";
+import { TOP_EDGE_STEP, blendProfiles, topProfile, type TopEdge } from "./top-edge";
 
 export const textureKey = (prefix: string, poseId: PoseId, variant = 0) => `${prefix}:pose:${poseId}${variant ? `#${variant}` : ""}`;
 export const soundKey = (prefix: string, soundId: SoundId, take = 0) => `${prefix}:sound:${soundId}${take ? `#${take}` : ""}`;
@@ -104,6 +105,9 @@ export class FighterSpriteView {
   private lastShown: FrameRef | null = null;
   private depth = 0;
   private readonly lyingShapes = new Map<string, { turn: number; lift: (rotation: number, facing: 1 | -1) => number }>();
+  /** What was drawn last render, upright (null while tipped over): for topEdge. */
+  private placed: { from: FrameRef; to: FrameRef; t: number; at: { x: number; y: number }; facing: 1 | -1 } | null = null;
+  private readonly profiles = new Map<string, (number | null)[] | null>();
 
   /** `grip`: the handshake as the round intro aims it (FightSimulation.grips); without it the hand doesn't shake. */
   constructor(
@@ -161,6 +165,7 @@ export class FighterSpriteView {
     if (layers) {
       this.meshes.show(layers, state.facing, p, this.depth);
       this.lastShown = tween!.t < 0.5 ? tween!.from : tween!.to;
+      this.placed = { from: tween!.from, to: tween!.to, t: tween!.t, at: p, facing: state.facing };
     } else {
       this.meshes.hide();
       const shown = struck || frameOf(state);
@@ -172,6 +177,7 @@ export class FighterSpriteView {
       }
       this.showSprite(shown, state.facing, p);
       if (!struck) this.lastShown = shown;
+      this.placed = fall ? null : { from: shown, to: shown, t: 0, at: p, facing: state.facing };
     }
     this.sprite.setRotation(rotation);
     this.sprite.setVisible(!layers);
@@ -180,6 +186,39 @@ export class FighterSpriteView {
     this.shadow.setPosition(floor.x - state.facing * lying * 120, floor.y + 4);
     const size = Math.max(0.4, 1 + state.position.y / 400);
     this.shadow.setScale(size * (1 + 1.6 * lying), size);
+  }
+
+  /**
+   * The top edge of the fighter as last rendered, in screen px (one point per
+   * TOP_EDGE_STEP-wide sprite column, so the same index stays on the same part
+   * of them as they turn): what snow settles on. A morph blends its two
+   * captures' edges, which is close for small ones like the idle sway. Null
+   * while they're tipped over, or before the textures can be read.
+   */
+  topEdge(): TopEdge | null {
+    const placed = this.placed;
+    if (!placed) return null;
+    const capture = (f: FrameRef): FrameRef => (f.poseId === "handshake" ? { poseId: "handshake", variant: 0 } : f);
+    const from = capture(placed.from), to = capture(placed.to);
+    const a = this.profile(from), b = this.profile(to);
+    if (!a || !b) return null;
+    const anchorA = groundAnchorFor(this.geometry, from.poseId, from.variant);
+    const anchorB = groundAnchorFor(this.geometry, to.poseId, to.variant);
+    const t = placed.t;
+    const ax = anchorA.x + (anchorB.x - anchorA.x) * t, ay = anchorA.y + (anchorB.y - anchorA.y) * t;
+    return blendProfiles(a, b, t).map((y, i) => y === null ? null : {
+      x: placed.at.x + placed.facing * ((i + 0.5) * TOP_EDGE_STEP - ax),
+      y: placed.at.y + y - ay,
+    });
+  }
+
+  private profile(frame: FrameRef): (number | null)[] | null {
+    const key = this.frameTexture(frame);
+    if (!this.profiles.has(key)) {
+      const mask = readAlpha(this.sprite.scene, key);
+      this.profiles.set(key, mask && topProfile(mask));
+    }
+    return this.profiles.get(key)!;
   }
 
   /**
