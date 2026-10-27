@@ -8,6 +8,7 @@ import {
   createMatch,
   judgeRound,
   matchWinnerFor,
+  nextRoundStakes,
   secondsRemaining,
   startNextRound,
   tickRound,
@@ -111,5 +112,15 @@ describe("round rules", () => {
     const copy = structuredClone(s);
     tickRound(s, [0, 100]);
     expect(s).toEqual(copy);
+  });
+});
+
+describe("nextRoundStakes", () => {
+  it("is match point for a player a round from the match, the final round when both are or the cap is next", () => {
+    expect(nextRoundStakes(1, [1, 0])).toEqual({ kind: "matchPoint", player: 0 });
+    expect(nextRoundStakes(1, [0, 1])).toEqual({ kind: "matchPoint", player: 1 });
+    expect(nextRoundStakes(2, [1, 1])).toEqual({ kind: "final" });
+    expect(nextRoundStakes(1, [0, 0])).toEqual({ kind: "next", round: 2 }); // a draw
+    expect(nextRoundStakes(MAX_ROUNDS - 1, [0, 0])).toEqual({ kind: "final" });
   });
 });

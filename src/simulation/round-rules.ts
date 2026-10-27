@@ -67,6 +67,15 @@ export function matchWinnerFor(wins: [number, number], roundsPlayed: number): Ro
   return null;
 }
 
+/** What's at stake in the next round: the last one, someone a round from the match, or just the next. */
+export function nextRoundStakes(roundNumber: number, wins: readonly [number, number]): { kind: "final" } | { kind: "matchPoint"; player: PlayerIndex } | { kind: "next"; round: number } {
+  const next = roundNumber + 1;
+  const close = wins.map((w) => w === ROUNDS_TO_WIN - 1);
+  if (next >= MAX_ROUNDS || (close[0] && close[1])) return { kind: "final" };
+  if (close[0] || close[1]) return { kind: "matchPoint", player: close[0] ? 0 : 1 };
+  return { kind: "next", round: next };
+}
+
 /**
  * Advance one frame. Returns a new state; never mutates.
  * intro → fighting → (KO or timeout) → outro → roundOver | matchOver.

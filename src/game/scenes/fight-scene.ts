@@ -641,13 +641,11 @@ export class FightScene extends Phaser.Scene {
       this.scene.launch("match-result", data);
       return;
     }
-    const r = state.round;
     const names = this.setup.entries.map((e) => e.fighter.name);
+    const rounds = this.stats.result.rounds;
     const data: RoundResultData = {
-      roundNumber: r.roundNumber,
-      roundWinner: r.roundWinner ?? "draw",
-      reason: r.roundEndReason ?? "ko",
-      wins: r.wins,
+      summary: rounds[rounds.length - 1],
+      wins: state.round.wins,
       names: [names[0], names[1]],
       inputs: this.setup.inputs,
     };

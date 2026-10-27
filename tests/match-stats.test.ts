@@ -83,6 +83,32 @@ describe("MatchStatsTracker", () => {
     expect(players[0].damageDealt).toBe(MAX_HEALTH);
     expect(frames).toBeGreaterThan(0);
     expect(rounds[0].frames).toBe(frames);
+    // The round's own numbers: it's the only round, so the same as the match's.
+    expect(rounds[0].players[0]).toEqual(players[0]);
+    expect(rounds[0].firstBlood).toBe(0);
+    expect(rounds[0].finisher).toBe("punch");
+  });
+
+  it("keeps each round's numbers apart, and only names a finisher for a K.O.", () => {
+    const { sim } = tracked();
+    const stats = new MatchStatsTracker();
+    const base = sim.current;
+    const at = (events: FightState["events"] = []): FightState => ({ ...base, events });
+    const hit = { type: "hit", attacker: 0, defender: 1, attack: "punch", blocked: false, damage: 5, at: { x: 0, y: 0 } } as const;
+    const back = { ...hit, attacker: 1, defender: 0, attack: "kick" } as const;
+    stats.record(at([hit]));
+    stats.record(at([hit]));
+    stats.record(at([back, { type: "ko", player: 0 }, { type: "roundEnd", outcome: 1, reason: "ko" }]));
+    stats.record(at([back]));
+    stats.record(at([hit]));
+    stats.record(at([{ type: "roundEnd", outcome: 0, reason: "timeout" }]));
+    const { rounds, players } = stats.result;
+    expect(rounds.map((r) => [r.players[0].hits, r.players[1].hits])).toEqual([[2, 1], [1, 1]]);
+    expect(rounds.map((r) => r.firstBlood)).toEqual([0, 1]);
+    expect(rounds.map((r) => r.finisher)).toEqual(["kick", null]);
+    expect(rounds[0].players[1].roundsWon).toBe(1);
+    expect(rounds[1].players[1].roundsWon).toBe(0);
+    expect([players[0].hits, players[1].hits]).toEqual([3, 2]);
   });
 
   it("ends a streak when the opponent lands one back or blocks", () => {

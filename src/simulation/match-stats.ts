@@ -1,4 +1,4 @@
-import type { AttackId } from "../shared/frame-data";
+import type { AttackId, GrabId } from "../shared/frame-data";
 import type { FightState } from "./fight-simulation";
 import { MAX_HEALTH, type PlayerIndex, type RoundEndReason, type RoundOutcome } from "./round-rules";
 
@@ -38,6 +38,12 @@ export interface RoundSummary {
   health: [number, number];
   /** Fighting time, in simulation frames. */
   frames: number;
+  /** Each player's numbers over this round alone (`roundsWon` 1 for the winner). */
+  players: [PlayerStats, PlayerStats];
+  /** Who landed the round's first clean hit or throw (null if nobody did). */
+  firstBlood: PlayerIndex | null;
+  /** The hit or throw that won it by K.O. (null on time or a double K.O.). */
+  finisher: AttackId | GrabId | null;
 }
 
 export interface MatchStats {
@@ -96,12 +102,24 @@ export class HitStreak {
  */
 export class MatchStatsTracker {
   private readonly players: [PlayerStats, PlayerStats] = [emptyStats(), emptyStats()];
+  /** The same numbers for the round being played. */
+  private round: [PlayerStats, PlayerStats] = [emptyStats(), emptyStats()];
+  private firstBlood: PlayerIndex | null = null;
+  private finisher: AttackId | GrabId | null = null;
   private readonly rounds: RoundSummary[] = [];
   private frames = 0;
   private roundFrames = 0;
   private readonly streak = new HitStreak();
 
   record(state: FightState): void {
+    // Nothing is fought in an intro: this also starts a restarted round over.
+    if (state.round.phase === "intro") this.startRound();
+    // Damage: what came off each fighter's health this step (hits, throws), credited to the other.
+    // It and the streaks go before the events, so the K.O. blow counts in the round it ends.
+    this.trackDamage(state);
+    for (const { player, hits } of this.streak.record(state)) {
+      this.both(player, (s) => (s.longestStreak = Math.max(s.longestStreak, hits)));
+    }
     if (state.round.phase === "fighting") {
       this.frames++;
       this.roundFrames++;
@@ -109,53 +127,71 @@ export class MatchStatsTracker {
     for (const ev of state.events) {
       switch (ev.type) {
         case "attackActive":
-          this.players[ev.player].attacks++;
+          this.both(ev.player, (s) => s.attacks++);
           break;
         case "hit": {
-          const attacker = this.players[ev.attacker];
           if (ev.blocked) {
-            attacker.blockedByOpponent++;
-            this.players[ev.defender].blocks++;
+            this.both(ev.attacker, (s) => s.blockedByOpponent++);
+            this.both(ev.defender, (s) => s.blocks++);
             break;
           }
-          attacker.hits++;
-          attacker.movesLanded[ev.attack] = (attacker.movesLanded[ev.attack] ?? 0) + 1;
-          attacker.favoriteMove = mostLanded(attacker.movesLanded);
+          this.firstBlood ??= ev.attacker;
+          this.both(ev.attacker, (s) => {
+            s.hits++;
+            s.movesLanded[ev.attack] = (s.movesLanded[ev.attack] ?? 0) + 1;
+            s.favoriteMove = mostLanded(s.movesLanded);
+          });
           break;
         }
         case "parry":
-          this.players[ev.attacker].blockedByOpponent++;
-          this.players[ev.player].blocks++;
+          this.both(ev.attacker, (s) => s.blockedByOpponent++);
+          this.both(ev.player, (s) => s.blocks++);
           break;
         case "throw":
-          this.players[ev.attacker].throws++;
+          this.firstBlood ??= ev.attacker;
+          this.both(ev.attacker, (s) => s.throws++);
           break;
         case "throwTech":
-          this.players[ev.defender].throwTechs++;
+          this.both(ev.defender, (s) => s.throwTechs++);
           break;
         case "knockdown":
-          this.players[other(ev.player)].knockdowns++;
+          this.both(other(ev.player), (s) => s.knockdowns++);
           break;
         case "taunt":
-          this.players[ev.player].taunts++;
+          this.both(ev.player, (s) => s.taunts++);
+          break;
+        case "ko":
+          this.finisher = finishingMove(state, ev.player);
           break;
         case "roundEnd": {
           const health: [number, number] = [state.fighters[0].health, state.fighters[1].health];
-          this.rounds.push({ round: state.round.roundNumber, outcome: ev.outcome, reason: ev.reason, health, frames: this.roundFrames });
-          this.roundFrames = 0;
           if (ev.outcome !== "draw") {
-            this.players[ev.outcome].roundsWon++;
-            if (health[ev.outcome] === MAX_HEALTH) this.players[ev.outcome].perfectRounds++;
+            this.both(ev.outcome, (s) => s.roundsWon++);
+            if (health[ev.outcome] === MAX_HEALTH) this.both(ev.outcome, (s) => s.perfectRounds++);
           }
+          this.rounds.push({
+            round: state.round.roundNumber, outcome: ev.outcome, reason: ev.reason, health, frames: this.roundFrames,
+            players: [copy(this.round[0]), copy(this.round[1])], firstBlood: this.firstBlood,
+            finisher: ev.reason === "ko" && ev.outcome !== "draw" ? this.finisher : null,
+          });
+          this.startRound();
           break;
         }
       }
     }
-    for (const { player, hits } of this.streak.record(state)) {
-      this.players[player].longestStreak = Math.max(this.players[player].longestStreak, hits);
-    }
-    // Damage: what came off each fighter's health this step (hits, throws), credited to the other.
-    this.trackDamage(state);
+  }
+
+  /** Applies a change to a player's match numbers and their round numbers. */
+  private both(p: PlayerIndex, change: (s: PlayerStats) => void): void {
+    change(this.players[p]);
+    change(this.round[p]);
+  }
+
+  private startRound(): void {
+    this.round = [emptyStats(), emptyStats()];
+    this.roundFrames = 0;
+    this.firstBlood = null;
+    this.finisher = null;
   }
 
   private lastHealth: [number, number] | null = null;
@@ -167,7 +203,7 @@ export class MatchStatsTracker {
     if (this.lastHealth && state.round.roundNumber === this.lastRound) {
       for (const p of [0, 1] as const) {
         const lost = this.lastHealth[p] - health[p];
-        if (lost > 0) this.players[other(p)].damageDealt += lost;
+        if (lost > 0) this.both(other(p), (s) => (s.damageDealt += lost));
       }
     }
     this.lastHealth = health;
@@ -177,13 +213,22 @@ export class MatchStatsTracker {
   get result(): MatchStats {
     return {
       players: [copy(this.players[0]), copy(this.players[1])],
-      rounds: this.rounds.map((r) => ({ ...r, health: [...r.health] as [number, number] })),
+      rounds: this.rounds.map((r) => ({ ...r, health: [...r.health] as [number, number], players: [copy(r.players[0]), copy(r.players[1])] })),
       frames: this.frames,
     };
   }
 }
 
 const other = (p: PlayerIndex): PlayerIndex => (p === 0 ? 1 : 0);
+
+/** What put `player` down in this step: the other fighter's clean hit or throw (null if neither, e.g. a trade). */
+function finishingMove(state: FightState, player: PlayerIndex): AttackId | GrabId | null {
+  for (const ev of state.events) {
+    if (ev.type === "hit" && !ev.blocked && ev.defender === player) return ev.attack;
+    if (ev.type === "throw" && ev.defender === player) return ev.grab;
+  }
+  return null;
+}
 
 const copy = (s: PlayerStats): PlayerStats => ({ ...s, movesLanded: { ...s.movesLanded } });
 

@@ -224,7 +224,7 @@ try {
   await game.screenshot({ path: `${OUT}/07-round-result.png` });
   await game.waitForTimeout(800);
   await game.keyboard.press("j");
-  // Well before the screen's own 3.5 s auto-continue: the press has to work.
+  // Well before the screen's own 9 s auto-continue: the press has to work.
   await game.waitForFunction(() => {
     const s = window.fotoFighter.scene.getScene("fight").sim.current.round;
     return s.roundNumber === 2 && !window.fotoFighter.scene.isActive("round-result");
