@@ -1,4 +1,4 @@
-# Photo Dojo Revival — Technical Plan
+# Foto Fighter — Technical Plan
 
 A browser-only 2D fighting game. Players pose for sixteen photos in front of a camera (a phone streaming to the computer, or the computer's own), the computer turns them into a sprite fighter locally, and two people fight with controllers. No accounts, no backend storage. All data lives in each browser's IndexedDB.
 
@@ -39,7 +39,7 @@ Everything heavy (pose detection, segmentation, image normalization) runs on the
 ## 2. Repository layout
 
 ```
-photo-dojo/
+foto-fighter/
   package.json
   vite.config.ts
   index.html                       # game entry (laptop)
@@ -166,7 +166,7 @@ IndexedDB via the `idb` package. Database `photo-dojo`, version 3.
 
 On first write, call `navigator.storage.persist()` so the browser is less likely to evict the data. Show a one-line warning on the character select screen if it returns `false`.
 
-Provide **Export** (one `.photodojo` file: a zip built with `fflate` containing `fighter.json` + PNGs + webms) and **Import** so fighters survive a cleared browser. This is also how fighters move between computers.
+Provide **Export** (one `.fotofighter` file: a zip built with `fflate` containing `fighter.json` + PNGs + webms) and **Import** so fighters survive a cleared browser. This is also how fighters move between computers.
 
 ---
 
@@ -184,7 +184,7 @@ Superseded by [docs/character-studio.md](docs/character-studio.md): the pipeline
 
 ## 5. Transfer (retired)
 
-Finished fighters no longer travel between devices: the studio saves them into the IndexedDB the game reads, on the same computer. The phone ↔ studio link (signaling as below, then a video track plus a `camera` data channel for stills) is specified in [docs/character-studio.md](docs/character-studio.md) §4. `.photodojo` export/import (§3) moves fighters between computers.
+Finished fighters no longer travel between devices: the studio saves them into the IndexedDB the game reads, on the same computer. The phone ↔ studio link (signaling as below, then a video track plus a `camera` data channel for stills) is specified in [docs/character-studio.md](docs/character-studio.md) §4. `.fotofighter` export/import (§3) moves fighters between computers.
 
 Signaling is unchanged: a Cloudflare Worker with one `SignalingRoom` Durable Object per room code relays SDP/ICE verbatim between at most two sockets (the studio as host, the phone as guest) and expires after 10 minutes or when both close. Room codes are 6 characters from an unambiguous alphabet. An optional Worker route mints short-lived Cloudflare TURN credentials for networks where a direct connection fails.
 
@@ -195,7 +195,7 @@ Signaling is unchanged: a Cloudflare Worker with one `SignalingRoom` Durable Obj
 ### 6.1 Scenes
 
 - `BootScene`: opens IndexedDB, loads settings.
-- `CharacterSelectScene`: grid of fighter thumbnails. The "Add a fighter" panel opens the Character Studio (`/studio`) or imports a `.photodojo` file; a captured fighter's tile can open the studio on it (Edit). Each player picks with their own pad; "press any button" assigns pads to players by who pressed first.
+- `CharacterSelectScene`: grid of fighter thumbnails. The "Add a fighter" panel opens the Character Studio (`/studio`) or imports a `.fotofighter` file; a captured fighter's tile can open the studio on it (Edit). Each player picks with their own pad; "press any button" assigns pads to players by who pressed first.
 - `FightScene`: owns a `FightSimulation`, steps it at a fixed 60 Hz using an accumulator on Phaser's `update(delta)`, and renders the latest state. Never mutates simulation state from render code.
 - `RoundResultScene`: round / match result, rematch, back to select.
 
@@ -278,7 +278,7 @@ Vitest, Node environment, no DOM for simulation tests.
 - `pose-geometry.test.ts`: angle computation on hand-built landmark sets; scoring returns 0 for exact, 1 at tolerance edge.
 - `pose-matcher.test.ts`: hold timer triggers at 500 ms of continuous match, resets on a miss, starts over when they move.
 - `sprite-normalizer.test.ts`: canonical torso length achieved; anchor lands on the ground line; left-facing input is flipped. Use `OffscreenCanvas` under `happy-dom` or test the pure transform math separately.
-- `fighter-codec.test.ts`: round-trips a Fighter (and through a `.photodojo` file); rejects missing poses, bad manifests and non-zip files.
+- `fighter-codec.test.ts`: round-trips a Fighter (and through a `.fotofighter` file); rejects missing poses, bad manifests and non-zip files.
 - `fight-simulation.test.ts`: scripted input sequences produce expected states (punch connects on frame 5, block takes 25 %, hitstop freezes both).
 - `collision.test.ts`: hitbox/hurtbox overlap with facing flips.
 - `round-rules.test.ts`: timer expiry, KO, best-of-3.

@@ -36,7 +36,7 @@ const MIME_TYPES: Record<PartKind, RegExp> = {
   thumbnail: /^image\/png$/,
   sound: /^audio\/(webm|mp4|ogg|wav)(;|$)/,
 };
-export const FIGHTER_FILE_EXTENSION = ".photodojo";
+export const FIGHTER_FILE_EXTENSION = ".fotofighter";
 
 export type PartKind = "pose" | "sound" | "thumbnail";
 
@@ -275,7 +275,7 @@ export function decodeFighter(manifest: FighterManifest, parts: Uint8Array[]): F
 }
 
 // ---------------------------------------------------------------------------
-// .photodojo file: a zip with fighter.json + PNGs + audio clips.
+// .fotofighter file: a zip with fighter.json + PNGs + audio clips.
 
 /** fighter.json and every part a fighter can have, with room to spare. */
 const MAX_FILE_ENTRIES = 64;

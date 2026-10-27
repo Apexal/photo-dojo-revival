@@ -61,7 +61,7 @@ h1, h2, h3 { font-family: var(--font-display); font-weight: 400; }
 /* Outlined display text with a hard drop (titles, logos). */
 .outlined { -webkit-text-stroke: var(--stroke-md) var(--ink); paint-order: stroke fill; text-shadow: var(--shadow-text); }
 
-/* A tilted label slapped across a corner: REVIVAL, STUDIO, CAMERA, NEW!. */
+/* A tilted label slapped across a corner: STUDIO, CAMERA, NEW!. */
 .stamp { display: inline-block; font: 400 22px/1 var(--font-display); letter-spacing: 0.12em; text-transform: uppercase; padding: 6px 12px 5px; border: 3px solid var(--ink); border-radius: var(--radius-sm); box-shadow: var(--shadow-pop-sm); background: var(--bad); color: var(--ink); transform: rotate(-5deg); -webkit-text-stroke: 0; text-shadow: none; }
 
 /* Buttons: sit on a hard shadow, lift on hover, press down onto it. */

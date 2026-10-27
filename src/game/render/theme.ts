@@ -115,7 +115,7 @@ export function drawBackdrop(scene: Phaser.Scene): Phaser.GameObjects.TileSprite
   return scene.add.tileSprite(0, 0, scene.scale.width, scene.scale.height, HALFTONE).setOrigin(0).setDepth(-100).setScrollFactor(0);
 }
 
-/** A tilted label (REVIVAL, READY, NEW!) on a colour fill: returns a container centred on (x, y). */
+/** A tilted label (READY, NEW!) on a colour fill: returns a container centred on (x, y). */
 export function stamp(scene: Phaser.Scene, x: number, y: number, label: string, fill: number = HEX.bad, size = 22): Phaser.GameObjects.Container {
   const text = scene.add.text(0, 0, label.toUpperCase(), displayText(size, COLOR.ink, { outline: false, letterSpacing: Math.round(size * 0.12) })).setOrigin(0.5);
   const w = text.width + size * 1.1;

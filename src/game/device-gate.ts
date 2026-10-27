@@ -38,7 +38,7 @@ export function gatePhones(start: () => void): void {
   const gate = document.createElement("main");
   gate.id = "phone-gate";
   gate.innerHTML = `
-    <h1>Photo Dojo<span>REVIVAL</span></h1>
+    <h1>Foto Fighter</h1>
     <p><strong>The fight happens on a big screen.</strong> It's a couch game: two players side by side at one laptop or TV, sharing a keyboard or with game controllers. Open this page there.</p>
     <p>Fighters are built in the studio, which runs on a computer too. This phone can be its camera: scan the code the studio shows.</p>
     <a class="button primary" href="${base}capture">Use this phone as the camera</a>
@@ -74,7 +74,7 @@ export function gateStudio(start: () => void): void {
   const gate = document.createElement("main");
   gate.id = "phone-gate";
   gate.innerHTML = `
-    <h1>Photo Dojo<span>STUDIO</span></h1>
+    <h1>Foto Fighter<span>STUDIO</span></h1>
     <p><strong>The studio runs on a computer.</strong> Open this page on a laptop or desktop to build a fighter.</p>
     <p>This phone can be its camera: scan the code the studio shows, or open the camera page and enter the code.</p>
     <a class="button primary" href="${base}capture">Use this phone as the camera</a>

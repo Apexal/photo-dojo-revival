@@ -68,7 +68,7 @@ describe("fighter codec", () => {
   });
 });
 
-describe(".photodojo files", () => {
+describe(".fotofighter files", () => {
   it("round-trips through export/import", async () => {
     const fighter = makeFighter({ name: "Big Frank" });
     const file = await exportFighterFile(fighter);
@@ -83,7 +83,7 @@ describe(".photodojo files", () => {
   });
 
   it("names files safely", () => {
-    expect(fighterFileName({ name: "Big Frank!!" })).toBe("Big-Frank.photodojo");
-    expect(fighterFileName({ name: "   " })).toBe("fighter.photodojo");
+    expect(fighterFileName({ name: "Big Frank!!" })).toBe("Big-Frank.fotofighter");
+    expect(fighterFileName({ name: "   " })).toBe("fighter.fotofighter");
   });
 });

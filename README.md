@@ -1,4 +1,4 @@
-# Photo Dojo: Revival
+# Foto Fighter
 
 A browser-only 2D fighting game. Open the Character Studio on a computer, pick a fighting style and pose for sixteen photos in front of a camera (a phone streaming to the computer, or the computer's own webcam), and the computer turns them into a sprite fighter locally. Then two people fight side by side: it's local multiplayer (a couch game), on one screen with controllers or a shared keyboard, and there's no online play. Alone, you can fight the CPU or practice. No accounts, no backend storage: fighters live in each browser's IndexedDB. See [PLAN.md](PLAN.md) for the design and [docs/character-studio.md](docs/character-studio.md) for the studio and the phone camera.
 
@@ -110,7 +110,7 @@ Each capture takes the sharpest of a short burst of frames at the camera's full 
 
 ## Layout
 
-- `src/shared/`: fighter model, `.photodojo` codec, IndexedDB storage, pose definitions and geometry, frame data, room codes. Also canonical stick-figure skeletons, used for placeholders, ghosts and test landmarks.
+- `src/shared/`: fighter model, `.fotofighter` codec, IndexedDB storage, pose definitions and geometry, frame data, room codes. Also canonical stick-figure skeletons, used for placeholders, ghosts and test landmarks.
 - `src/simulation/`: the fight, in pure TypeScript with no Phaser imports. Fixed-timestep and deterministic.
 - `src/capture/`: the capture pipeline (camera, MediaPipe pose, matcher, ISNet background removal, normalizer, sounds), used by the studio.
 - `src/studio/`: the Character Studio (`/studio`): flow, camera sources (this computer's camera or a phone), the phone's room, drafts, editing, screens.

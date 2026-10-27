@@ -45,7 +45,7 @@ try {
     navigator.getGamepads = () => (window.__unplugged ? [null, null, null, null] : [null, (window.__pad = snapshot()), null, null]);
   });
   await page.goto(BASE + "/");
-  await page.waitForFunction(() => window.photoDojo?.scene.isActive("title"), null, { timeout: 20000 });
+  await page.waitForFunction(() => window.fotoFighter?.scene.isActive("title"), null, { timeout: 20000 });
   await page.evaluate(() => window.dispatchEvent(Object.assign(new Event("gamepadconnected"), { gamepad: window.__pad })));
   const tap = async (button) => {
     await page.evaluate((b) => window.__press(b, true), button);
@@ -53,11 +53,11 @@ try {
     await page.evaluate((b) => window.__press(b, false), button);
     await page.waitForTimeout(120);
   };
-  const sel = () => page.evaluate(() => window.photoDojo.scene.getScene("character-select").players[0]);
+  const sel = () => page.evaluate(() => window.fotoFighter.scene.getScene("character-select").players[0]);
 
   await tap(0); // A on the title: straight to fighter select, joined as P1
-  await page.waitForFunction(() => window.photoDojo.scene.isActive("character-select") && window.photoDojo.scene.getScene("character-select").players[0]?.input.kind === "pad", null, { timeout: 3000 });
-  check(!(await page.evaluate(() => window.photoDojo.scene.getScene("character-select").players[0].ready)), "the start press doesn't also pick");
+  await page.waitForFunction(() => window.fotoFighter.scene.isActive("character-select") && window.fotoFighter.scene.getScene("character-select").players[0]?.input.kind === "pad", null, { timeout: 3000 });
+  check(!(await page.evaluate(() => window.fotoFighter.scene.getScene("character-select").players[0].ready)), "the start press doesn't also pick");
   check((await page.evaluate(() => window.__rumbles.length)) >= 1, "joining buzzes the pad");
   step(`pad joined as P1 (${JSON.stringify((await sel()).input)}), with a confirmation rumble`);
 
@@ -69,17 +69,17 @@ try {
   await tap(0); // A: take the fighter under the CPU's cursor
   await tap(13); // d-pad down: Practice
   await tap(0); // A: go
-  await page.waitForFunction(() => window.photoDojo.scene.isActive("stage-select"), null, { timeout: 5000 });
+  await page.waitForFunction(() => window.fotoFighter.scene.isActive("stage-select"), null, { timeout: 5000 });
   await tap(0); // A: take the highlighted stage
-  await page.waitForFunction(() => window.photoDojo.scene.getScene("fight")?.sim?.practice === true, null, { timeout: 5000 });
-  await page.waitForFunction(() => window.photoDojo.scene.getScene("fight").sim.current.round.phase === "fighting", null, { timeout: 5000 });
+  await page.waitForFunction(() => window.fotoFighter.scene.getScene("fight")?.sim?.practice === true, null, { timeout: 5000 });
+  await page.waitForFunction(() => window.fotoFighter.scene.getScene("fight").sim.current.round.phase === "fighting", null, { timeout: 5000 });
   step("A to pick, A + A to choose the opponent, down + A for practice, then A on the stage select started it (the scene changes survive a pad at index 1)");
 
   // Dummy punches; walk the pad's fighter into it and get hit.
   await page.keyboard.press("6"); // dummy: punch
   await page.evaluate(() => window.__rumbles.splice(0));
   await page.evaluate(() => window.__press(15, true)); // hold right
-  await page.waitForFunction(() => window.photoDojo.scene.getScene("fight").sim.current.fighters[0].action === "hurt", null, { timeout: 8000 });
+  await page.waitForFunction(() => window.fotoFighter.scene.getScene("fight").sim.current.fighters[0].action === "hurt", null, { timeout: 8000 });
   await page.evaluate(() => window.__press(15, false));
   await page.waitForTimeout(200);
   // Keep taking hits: every one should rumble, not just the first.
@@ -95,7 +95,7 @@ try {
 
   // Pause with Start, turn rumble off with R, unpause: no more rumble.
   await tap(9);
-  check(await page.evaluate(() => window.photoDojo.scene.getScene("fight").paused), "Start pauses");
+  check(await page.evaluate(() => window.fotoFighter.scene.getScene("fight").paused), "Start pauses");
   await page.keyboard.press("r");
   await tap(9);
   await page.evaluate(() => window.__rumbles.splice(0));
@@ -108,8 +108,8 @@ try {
 
   // Unplug mid-fight: the game pauses and says so; any button on the pad brings it back.
   const fightState = () => page.evaluate(() => {
-    const f = window.photoDojo.scene.getScene("fight");
-    return { paused: f.paused, disconnected: f.disconnectedPlayer, menu: window.photoDojo.scene.isActive("pause") };
+    const f = window.fotoFighter.scene.getScene("fight");
+    return { paused: f.paused, disconnected: f.disconnectedPlayer, menu: window.fotoFighter.scene.isActive("pause") };
   });
   check(!(await fightState()).paused, "back in the fight before unplugging");
   await page.evaluate(() => { window.__unplugged = true; });

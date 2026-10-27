@@ -254,4 +254,4 @@ function cameraErrorText(err: unknown): string {
 
 const root = document.getElementById("app");
 // Exposed for debugging from the console (and the e2e smoke test).
-if (root) (window as unknown as { photoDojoCamera: PhoneApp }).photoDojoCamera = new PhoneApp(root);
+if (root) (window as unknown as { fotoFighterCamera: PhoneApp }).fotoFighterCamera = new PhoneApp(root);

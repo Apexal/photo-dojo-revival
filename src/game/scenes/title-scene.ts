@@ -19,7 +19,7 @@ import { REGISTRY } from "./boot-scene";
 import type { CharacterSelectData } from "./character-select-scene";
 import { MIRROR_TINT } from "./controls-scene";
 import { playMenuMusic } from "../menu-music";
-import { bodyText, COLOR, displayText, HEX, popBox, SHADOW, stamp } from "../render/theme";
+import { bodyText, COLOR, displayText, HEX, popBox, SHADOW } from "../render/theme";
 
 export interface TitleSceneData {
   /** A later bout of the demo: the logo is already up, no flash. */
@@ -150,12 +150,10 @@ export class TitleScene extends Phaser.Scene {
     // A darker sky behind the words, fading out above the fighters' heads.
     this.add.graphics().setDepth(OVERLAY_DEPTH - 1)
       .fillGradientStyle(HEX.ink, HEX.ink, HEX.ink, HEX.ink, 0.75, 0.75, 0, 0).fillRect(0, 0, GAME_WIDTH, 350);
-    const logo = this.add.text(cx, 86, "PHOTO DOJO", displayText(112, COLOR.accent)).setOrigin(0.5).setDepth(OVERLAY_DEPTH);
-    // Stamped across the logo's corner once it has developed.
-    const revival = stamp(this, cx + 250, 152, "Revival", HEX.bad, 30).setDepth(OVERLAY_DEPTH + 1);
+    const logo = this.add.text(cx, 86, "FOTO FIGHTER", displayText(112, COLOR.accent)).setOrigin(0.5).setDepth(OVERLAY_DEPTH);
     const tagline = this.add.text(cx, 204, "Snap yourself. Fight your friends, side by side.", bodyText(24, COLOR.fg, 800, { stroke: COLOR.ink, strokeThickness: 5 }))
       .setOrigin(0.5).setDepth(OVERLAY_DEPTH);
-    const late: Phaser.GameObjects.GameObject[] = [revival, tagline, ...this.buildFooter()];
+    const late: Phaser.GameObjects.GameObject[] = [tagline, ...this.buildFooter()];
     const library: LibraryEntry[] = this.registry.get(REGISTRY.library) ?? [];
     if (!library.some((e) => !e.builtIn)) late.push(...this.buildHowTo(cx, 256));
     const prompt = this.add.text(cx, library.some((e) => !e.builtIn) ? 256 : 318, "Press any button", displayText(34, COLOR.fg)).setOrigin(0.5).setDepth(OVERLAY_DEPTH);

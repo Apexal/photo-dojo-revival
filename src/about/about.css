@@ -2,8 +2,7 @@
 html { scroll-behavior: smooth; }
 body { line-height: 1.55; }
 main { max-width: 760px; margin: 0 auto; padding: max(32px, env(safe-area-inset-top)) 20px max(32px, env(safe-area-inset-bottom)); }
-h1 { position: relative; display: inline-block; margin: 16px 0 34px; font-size: clamp(52px, 11vw, 80px); line-height: 0.9; color: var(--accent); letter-spacing: 0.01em; text-transform: uppercase; -webkit-text-stroke: var(--stroke-lg) var(--ink); paint-order: stroke fill; text-shadow: var(--shadow-text); }
-h1 span { position: absolute; right: -14px; bottom: -28px; font-size: clamp(18px, 3.4vw, 26px); letter-spacing: 0.14em; padding: 6px 12px 5px; border: 3px solid var(--ink); border-radius: var(--radius-sm); box-shadow: var(--shadow-pop-sm); background: var(--bad); color: var(--ink); transform: rotate(-5deg); -webkit-text-stroke: 0; text-shadow: none; }
+h1 { position: relative; display: inline-block; margin: 16px 0 20px; font-size: clamp(52px, 11vw, 80px); line-height: 0.9; color: var(--accent); letter-spacing: 0.01em; text-transform: uppercase; -webkit-text-stroke: var(--stroke-lg) var(--ink); paint-order: stroke fill; text-shadow: var(--shadow-text); }
 h2 { margin: 0 0 14px; font-size: 32px; line-height: 1.1; -webkit-text-stroke: var(--stroke-sm) var(--ink); paint-order: stroke fill; text-shadow: 0 3px 0 var(--ink); }
 section { margin-top: 48px; }
 p { margin: 0 0 12px; }

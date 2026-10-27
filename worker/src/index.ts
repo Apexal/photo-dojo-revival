@@ -49,7 +49,7 @@ export default {
       return stub.fetch(request);
     }
     if (url.pathname === "/turn-credentials") return turnCredentials(request, env);
-    if (url.pathname === "/") return new Response("photo-dojo signaling\n", { headers: CORS });
+    if (url.pathname === "/") return new Response("foto-fighter signaling\n", { headers: CORS });
     return new Response("Not found", { status: 404 });
   },
 } satisfies ExportedHandler<Env>;

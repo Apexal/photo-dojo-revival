@@ -57,5 +57,5 @@ gatePhones(async () => {
   });
 
   // Handy for debugging from the console.
-  (window as unknown as { photoDojo: Phaser.Game }).photoDojo = game;
+  (window as unknown as { fotoFighter: Phaser.Game }).fotoFighter = game;
 });

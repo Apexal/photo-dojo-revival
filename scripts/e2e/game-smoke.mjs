@@ -33,15 +33,15 @@ try {
   const game = await ctx.newPage();
   watch(game, "game");
   await game.goto(BASE + "/");
-  await game.waitForFunction(() => window.photoDojo?.scene.isActive("title"), null, { timeout: 20000 });
-  await game.waitForFunction(() => window.photoDojo.scene.getScene("title").sim?.current.frame > 30, null, { timeout: 10000 });
+  await game.waitForFunction(() => window.fotoFighter?.scene.isActive("title"), null, { timeout: 20000 });
+  await game.waitForFunction(() => window.fotoFighter.scene.getScene("title").sim?.current.frame > 30, null, { timeout: 10000 });
   step("title screen is up, demo fight running");
   await game.screenshot({ path: `${OUT}/00-title.png` });
   await game.keyboard.press("Enter"); // not a player key: starts without joining anyone
-  await game.waitForFunction(() => window.photoDojo.scene.isActive("character-select"), null, { timeout: 5000 });
-  check((await game.evaluate(() => window.photoDojo.scene.getScene("character-select").players.every((p) => p === null))), "Enter on the title joins nobody");
+  await game.waitForFunction(() => window.fotoFighter.scene.isActive("character-select"), null, { timeout: 5000 });
+  check((await game.evaluate(() => window.fotoFighter.scene.getScene("character-select").players.every((p) => p === null))), "Enter on the title joins nobody");
   step("character select is up");
-  const panel = () => game.evaluate(() => window.photoDojo.scene.getScene("character-select").addObjects.filter((o) => o.type === "Text").map((o) => o.text));
+  const panel = () => game.evaluate(() => window.fotoFighter.scene.getScene("character-select").addObjects.filter((o) => o.type === "Text").map((o) => o.text));
   check((await panel()).includes("Open the studio (N)"), `the Add a fighter panel offers the studio (${JSON.stringify(await panel())})`);
   await game.waitForTimeout(500);
   await game.screenshot({ path: `${OUT}/01-select.png` });
@@ -57,9 +57,9 @@ try {
     return { id: fighter.fighterId };
   });
   await game.goto(BASE + "/?to=select");
-  await game.waitForFunction(() => window.photoDojo?.scene.isActive("character-select"), null, { timeout: 20000 });
-  check(!(await game.evaluate(() => window.photoDojo.scene.isActive("title"))) && (await game.evaluate(() => location.search)) === "", "/?to=select opens fighter select (not the title) and drops the parameter");
-  check(await game.evaluate((id) => window.photoDojo.registry.get("library")[0]?.fighter.fighterId === id, sent.id), "the saved fighter is first in the library after the reload");
+  await game.waitForFunction(() => window.fotoFighter?.scene.isActive("character-select"), null, { timeout: 20000 });
+  check(!(await game.evaluate(() => window.fotoFighter.scene.isActive("title"))) && (await game.evaluate(() => location.search)) === "", "/?to=select opens fighter select (not the title) and drops the parameter");
+  check(await game.evaluate((id) => window.fotoFighter.registry.get("library")[0]?.fighter.fighterId === id, sent.id), "the saved fighter is first in the library after the reload");
   const stored = await game.evaluate(async (id) => {
     const { loadFighter } = await import("/src/shared/fighter-storage.ts");
     const f = await loadFighter(id);
@@ -74,7 +74,7 @@ try {
   // First tile of the grid (character-select-scene.ts: GRID_X 40, GRID_Y 116, TILE 120); its buttons sit along its bottom edge.
   const TILE_X = 40, TILE_Y = 116, TILE = 120;
   await clickGame(game, TILE_X + TILE / 2, TILE_Y + TILE / 2); // first tile
-  check((await game.evaluate(() => window.photoDojo.scene.getScene("character-select").selected)) === 0, "clicking a tile selects it");
+  check((await game.evaluate(() => window.fotoFighter.scene.getScene("character-select").selected)) === 0, "clicking a tile selects it");
   await game.waitForTimeout(100);
   await game.screenshot({ path: `${OUT}/02b-tile-selected.png` });
   const [download] = await Promise.all([game.waitForEvent("download"), clickGame(game, TILE_X + 30, TILE_Y + TILE - 16)]);
@@ -85,24 +85,24 @@ try {
   await game.waitForFunction(() => /^(Imported|Updated)/.test(document.getElementById("toolbar-status").textContent), null, { timeout: 5000 });
   step("re-imported the exported file");
   // The same fighter again reloads its images (a new revision): let the grid redraw with them before clicking it.
-  await game.waitForFunction(() => !window.photoDojo.scene.getScene("character-select").load.isLoading(), null, { timeout: 5000 });
+  await game.waitForFunction(() => !window.fotoFighter.scene.getScene("character-select").load.isLoading(), null, { timeout: 5000 });
   await game.waitForTimeout(100);
   // Delete needs a confirm on the tile; "Keep" backs out.
   await clickGame(game, TILE_X + TILE / 2, TILE_Y + TILE / 2);
   await clickGame(game, TILE_X + 96, TILE_Y + TILE - 16); // 🗑
   await game.waitForTimeout(100);
   await game.screenshot({ path: `${OUT}/02c-delete.png` });
-  check((await game.evaluate(() => window.photoDojo.scene.getScene("character-select").pendingDelete)) !== null, "delete asks to confirm");
+  check((await game.evaluate(() => window.fotoFighter.scene.getScene("character-select").pendingDelete)) !== null, "delete asks to confirm");
   await clickGame(game, TILE_X + 88, TILE_Y + TILE - 16); // Keep
-  check((await game.evaluate(() => window.photoDojo.scene.getScene("character-select").pendingDelete)) === null, "Keep cancels the delete");
+  check((await game.evaluate(() => window.fotoFighter.scene.getScene("character-select").pendingDelete)) === null, "Keep cancels the delete");
   step("mouse: tile select, export button, delete confirm/cancel");
   // ✎ Rename sits along the selected tile's top edge; typing fast mustn't double letters.
   await game.waitForTimeout(400); // a tile ignores clicks for 300 ms after one of its buttons
   await clickGame(game, TILE_X + TILE / 2, TILE_Y + TILE / 2);
   await game.waitForTimeout(100);
   await clickGame(game, TILE_X + 30, TILE_Y + 16);
-  await game.waitForFunction(() => window.photoDojo.scene.isActive("rename"), null, { timeout: 3000 })
-    .catch(async () => { throw new Error(`rename didn't open: ${await game.evaluate(() => { const sc = window.photoDojo.scene.getScene("character-select"); return JSON.stringify({ selected: sc.selected, buttons: sc.tileButtons.map((b) => [b.text, b.x, b.y]), lib: sc.library.slice(0, 2).map((e) => [e.fighter.name, e.builtIn]) }); })}`); });
+  await game.waitForFunction(() => window.fotoFighter.scene.isActive("rename"), null, { timeout: 3000 })
+    .catch(async () => { throw new Error(`rename didn't open: ${await game.evaluate(() => { const sc = window.fotoFighter.scene.getScene("character-select"); return JSON.stringify({ selected: sc.selected, buttons: sc.tileButtons.map((b) => [b.text, b.x, b.y]), lib: sc.library.slice(0, 2).map((e) => [e.fighter.name, e.builtIn]) }); })}`); });
   for (let i = 0; i < 12; i++) await game.keyboard.press("Backspace");
   await game.keyboard.type(" Wire   Blue II ");
   await game.keyboard.press("Enter");
@@ -126,34 +126,34 @@ try {
   await game.screenshot({ path: `${OUT}/03-picking.png` });
   await game.keyboard.press("Comma"); // P2 ready
   // VS, then the stage select (there's more than one stage): P2 moves to the second stage and picks it.
-  await game.waitForFunction(() => window.photoDojo.scene.isActive("stage-select"), null, { timeout: 10000 });
+  await game.waitForFunction(() => window.fotoFighter.scene.isActive("stage-select"), null, { timeout: 10000 });
   await game.waitForTimeout(150);
   await game.keyboard.press("ArrowRight");
   await game.waitForTimeout(100);
-  const stagePicked = await game.evaluate(() => { const s = window.photoDojo.scene.getScene("stage-select"); return s.options[s.index]; });
+  const stagePicked = await game.evaluate(() => { const s = window.fotoFighter.scene.getScene("stage-select"); return s.options[s.index]; });
   await game.screenshot({ path: `${OUT}/03a-stage-select.png` });
   await game.keyboard.press("Comma");
-  await game.waitForFunction(() => window.photoDojo.scene.isActive("controls"), null, { timeout: 10000 });
-  check((await game.evaluate(() => window.photoDojo.scene.getScene("controls").setup.stageId)) === stagePicked, `the picked stage (${stagePicked}) goes into the match`);
+  await game.waitForFunction(() => window.fotoFighter.scene.isActive("controls"), null, { timeout: 10000 });
+  check((await game.evaluate(() => window.fotoFighter.scene.getScene("controls").setup.stageId)) === stagePicked, `the picked stage (${stagePicked}) goes into the match`);
   step(`stage select: picked ${stagePicked}`);
   await game.waitForTimeout(1200); // let the move previews animate
   await game.screenshot({ path: `${OUT}/03b-controls.png` });
-  const cards = await game.evaluate(() => window.photoDojo.scene.getScene("controls").cards.length);
+  const cards = await game.evaluate(() => window.fotoFighter.scene.getScene("controls").cards.length);
   check(cards === 18, `controls screen shows 9 move previews per player, the signature move last (${cards})`);
   step("pre-match controls screen with move previews");
   await game.keyboard.press("j"); // P1 ready
   await game.waitForTimeout(100);
-  check(await game.evaluate(() => window.photoDojo.scene.isActive("controls")), "waits for both players");
+  check(await game.evaluate(() => window.fotoFighter.scene.isActive("controls")), "waits for both players");
   await game.keyboard.press("Comma"); // P2 ready
-  await game.waitForFunction(() => window.photoDojo.scene.isActive("fight"), null, { timeout: 10000 });
+  await game.waitForFunction(() => window.fotoFighter.scene.isActive("fight"), null, { timeout: 10000 });
   step("fight started");
   const fight = () => game.evaluate(() => {
-    const s = window.photoDojo.scene.getScene("fight").sim.current;
+    const s = window.fotoFighter.scene.getScene("fight").sim.current;
     return { phase: s.round.phase, f: s.fighters.map((f) => ({ x: Math.round(f.position.x), action: f.action, health: f.health })) };
   });
-  await game.waitForFunction(() => window.photoDojo.scene.getScene("fight").sim.current.round.phase === "fighting", null, { timeout: 5000 });
+  await game.waitForFunction(() => window.fotoFighter.scene.getScene("fight").sim.current.round.phase === "fighting", null, { timeout: 5000 });
   const variants = await game.evaluate(() => {
-    const scene = window.photoDojo.scene.getScene("fight");
+    const scene = window.fotoFighter.scene.getScene("fight");
     return { punch: scene.geometry[1].variants?.punch?.length ?? 0, texture: scene.textures.exists("p1:pose:punch#1") };
   });
   check(variants.punch === 1 && variants.texture, `built-in fighter has a punch alternate loaded (${JSON.stringify(variants)})`);
@@ -162,17 +162,17 @@ try {
   // Walk until in punch range (the fighters start most of the stage apart).
   await game.keyboard.down("d");
   await game.waitForFunction(() => {
-    const [a, b] = window.photoDojo.scene.getScene("fight").sim.current.fighters;
+    const [a, b] = window.fotoFighter.scene.getScene("fight").sim.current.fighters;
     return Math.abs(b.position.x - a.position.x) < 220;
   }, null, { timeout: 8000 }).catch(() => {});
   await game.keyboard.up("d");
   const walked = await fight();
   if (walked.f[0].x <= start.f[0].x + 100) {
     console.log("walk debug", await game.evaluate(() => {
-      const sc = window.photoDojo.scene.getScene("fight");
+      const sc = window.fotoFighter.scene.getScene("fight");
       const src = sc.sources[0];
       const d = src.keys?.right?.[0];
-      return JSON.stringify({ src: src.id, read: src.read(), dKey: d && { isDown: d.isDown, code: d.keyCode }, active: window.photoDojo.scene.getScenes(true).map((x) => x.sys.settings.key), paused: sc.paused, phase: sc.sim.current.round.phase, inputs: sc.setup.inputs });
+      return JSON.stringify({ src: src.id, read: src.read(), dKey: d && { isDown: d.isDown, code: d.keyCode }, active: window.fotoFighter.scene.getScenes(true).map((x) => x.sys.settings.key), paused: sc.paused, phase: sc.sim.current.round.phase, inputs: sc.setup.inputs });
     }));
   }
   check(walked.f[0].x > start.f[0].x + 100, `P1 walked right (${start.f[0].x} → ${walked.f[0].x})`);
@@ -188,19 +188,19 @@ try {
   step(`punches landed: P2 health ${hit.f[1].health}`);
   await game.keyboard.press("F1");
   await game.waitForTimeout(100);
-  check(await game.evaluate(() => window.photoDojo.scene.getScene("fight").debug.visible), "F1 shows hitboxes");
+  check(await game.evaluate(() => window.fotoFighter.scene.getScene("fight").debug.visible), "F1 shows hitboxes");
   await game.keyboard.down("k");
   await game.waitForTimeout(150);
   await game.screenshot({ path: `${OUT}/05-kick-hitboxes.png` });
   await game.keyboard.up("k");
   await game.keyboard.press("Escape");
   await game.waitForTimeout(200);
-  check((await game.evaluate(() => window.photoDojo.scene.getScene("fight").paused)) === true, "Esc pauses");
-  check(await game.evaluate(() => window.photoDojo.scene.isActive("pause")), "Esc opens the pause menu");
+  check((await game.evaluate(() => window.fotoFighter.scene.getScene("fight").paused)) === true, "Esc pauses");
+  check(await game.evaluate(() => window.fotoFighter.scene.isActive("pause")), "Esc opens the pause menu");
   await game.screenshot({ path: `${OUT}/06-paused.png` });
   await game.keyboard.press("Escape");
   await game.waitForTimeout(150);
-  check((await game.evaluate(() => window.photoDojo.scene.getScene("fight").paused)) === false, "Esc again resumes");
+  check((await game.evaluate(() => window.fotoFighter.scene.getScene("fight").paused)) === false, "Esc again resumes");
 
   // Run out the clock quickly: jump the sim to a KO by beating P2.
   for (let i = 0; i < 40; i++) {
@@ -212,28 +212,28 @@ try {
     await game.keyboard.press("k");
     await game.waitForTimeout(450);
   }
-  await game.waitForFunction(() => window.photoDojo.scene.getScene("fight").replay !== null, null, { timeout: 8000 });
+  await game.waitForFunction(() => window.fotoFighter.scene.getScene("fight").replay !== null, null, { timeout: 8000 });
   await game.waitForTimeout(1500);
   await game.screenshot({ path: `${OUT}/06b-ko-replay.png` });
-  const replayFrames = await game.evaluate(() => window.photoDojo.scene.getScene("fight").replay.states.length);
+  const replayFrames = await game.evaluate(() => window.fotoFighter.scene.getScene("fight").replay.states.length);
   check(replayFrames > 60, `KO replay has the lead-up (${replayFrames} frames)`);
   step(`KO replay playing (${replayFrames} frames, slow motion)`);
   await game.keyboard.press("j"); // skip
-  await game.waitForFunction(() => window.photoDojo.scene.isActive("round-result"), null, { timeout: 5000 });
+  await game.waitForFunction(() => window.fotoFighter.scene.isActive("round-result"), null, { timeout: 5000 });
   step("skipped the replay → round result screen");
   await game.screenshot({ path: `${OUT}/07-round-result.png` });
   await game.waitForTimeout(800);
   await game.keyboard.press("j");
   // Well before the screen's own 3.5 s auto-continue: the press has to work.
   await game.waitForFunction(() => {
-    const s = window.photoDojo.scene.getScene("fight").sim.current.round;
-    return s.roundNumber === 2 && !window.photoDojo.scene.isActive("round-result");
+    const s = window.fotoFighter.scene.getScene("fight").sim.current.round;
+    return s.roundNumber === 2 && !window.fotoFighter.scene.isActive("round-result");
   }, null, { timeout: 1500 });
   step("punch on the round result → round 2 started");
 
   // New moves through the real keyboard: S+J uppercut, J+K throw.
-  await game.waitForFunction(() => window.photoDojo.scene.getScene("fight").sim.current.round.phase === "fighting", null, { timeout: 5000 });
-  const actionOf = () => game.evaluate(() => window.photoDojo.scene.getScene("fight").sim.current.fighters.map((f) => f.action));
+  await game.waitForFunction(() => window.fotoFighter.scene.getScene("fight").sim.current.round.phase === "fighting", null, { timeout: 5000 });
+  const actionOf = () => game.evaluate(() => window.fotoFighter.scene.getScene("fight").sim.current.fighters.map((f) => f.action));
   await game.keyboard.down("s");
   await game.keyboard.press("j");
   await game.waitForTimeout(50);
@@ -242,31 +242,31 @@ try {
   check(upper[0] === "uppercut", `S+J starts an uppercut (${upper[0]})`);
   await game.waitForTimeout(600);
   // Sides swap every round: in round 2 P1 starts on the right.
-  const p1OnRight = await game.evaluate(() => { const [a, b] = window.photoDojo.scene.getScene("fight").sim.current.fighters; return a.position.x > b.position.x; });
+  const p1OnRight = await game.evaluate(() => { const [a, b] = window.fotoFighter.scene.getScene("fight").sim.current.fighters; return a.position.x > b.position.x; });
   check(p1OnRight, "players swapped sides for round 2");
   const toward = p1OnRight ? "a" : "d";
   await game.keyboard.down(toward);
   await game.waitForFunction(() => {
-    const [a, b] = window.photoDojo.scene.getScene("fight").sim.current.fighters;
+    const [a, b] = window.fotoFighter.scene.getScene("fight").sim.current.fighters;
     return Math.abs(b.position.x - a.position.x) < 90;
   }, null, { timeout: 8000 });
   await game.keyboard.up(toward);
   await game.waitForTimeout(100);
-  const before = await game.evaluate(() => window.photoDojo.scene.getScene("fight").sim.current.fighters[1].health);
+  const before = await game.evaluate(() => window.fotoFighter.scene.getScene("fight").sim.current.fighters[1].health);
   await game.keyboard.down("j");
   await game.keyboard.down("k");
   await game.waitForTimeout(40);
   await game.keyboard.up("j");
   await game.keyboard.up("k");
-  await game.waitForFunction((hp) => window.photoDojo.scene.getScene("fight").sim.current.fighters[1].health < hp, before, { timeout: 3000 });
+  await game.waitForFunction((hp) => window.fotoFighter.scene.getScene("fight").sim.current.fighters[1].health < hp, before, { timeout: 3000 });
   step("J+K throw lands on the idle opponent");
 
   // --- finish the match (P2 down to 1 health: the next clean hit is the KO) → stats page → rematch ---
   await game.evaluate(() => {
-    const sim = window.photoDojo.scene.getScene("fight").sim; // poking the private state: only to keep the test short
+    const sim = window.fotoFighter.scene.getScene("fight").sim; // poking the private state: only to keep the test short
     sim.state = { ...sim.state, fighters: [sim.state.fighters[0], { ...sim.state.fighters[1], health: 1 }] };
   });
-  const phaseNow = () => game.evaluate(() => window.photoDojo.scene.getScene("fight").sim.current.round.phase);
+  const phaseNow = () => game.evaluate(() => window.fotoFighter.scene.getScene("fight").sim.current.round.phase);
   for (let i = 0; i < 60 && (await phaseNow()) === "fighting"; i++) {
     await game.keyboard.down(toward);
     await game.waitForTimeout(120);
@@ -274,22 +274,22 @@ try {
     await game.keyboard.press("j");
     await game.waitForTimeout(200);
   }
-  await game.waitForFunction(() => window.photoDojo.scene.getScene("fight").sim.current.round.phase === "matchOver", null, { timeout: 15000 });
+  await game.waitForFunction(() => window.fotoFighter.scene.getScene("fight").sim.current.round.phase === "matchOver", null, { timeout: 15000 });
   await game.waitForTimeout(2500);
   await game.keyboard.press("j"); // skip the KO replay
-  await game.waitForFunction(() => window.photoDojo.scene.isActive("match-result"), null, { timeout: 8000 });
-  const matchStats = await game.evaluate(() => window.photoDojo.scene.getScene("match-result").result.stats);
+  await game.waitForFunction(() => window.fotoFighter.scene.isActive("match-result"), null, { timeout: 8000 });
+  const matchStats = await game.evaluate(() => window.fotoFighter.scene.getScene("match-result").result.stats);
   check(matchStats.rounds.length === 2 && matchStats.players[0].roundsWon === 2, `stats page: P1 won both rounds (${JSON.stringify(matchStats.rounds)})`);
   check(matchStats.players[0].hits > 0 && matchStats.players[0].throws >= 1 && matchStats.players[0].damageDealt === 200, `stats page counts P1's hits, throw and damage (${JSON.stringify(matchStats.players[0])})`);
   await game.waitForTimeout(1300); // past the page's input delay
   await game.screenshot({ path: `${OUT}/08-match-result.png` });
   await game.keyboard.press("j");
   await game.waitForFunction(() => {
-    const r = window.photoDojo.scene.getScene("fight").sim?.current.round;
-    return !window.photoDojo.scene.isActive("match-result") && r?.roundNumber === 1 && r.wins[0] === 0 && r.wins[1] === 0;
+    const r = window.fotoFighter.scene.getScene("fight").sim?.current.round;
+    return !window.fotoFighter.scene.isActive("match-result") && r?.roundNumber === 1 && r.wins[0] === 0 && r.wins[1] === 0;
   }, null, { timeout: 3000 });
   step(`match over → stats page (${matchStats.players[0].hits} clean hits, ${matchStats.players[0].throws} throw) → punch: rematch`);
-  await game.waitForFunction(() => window.photoDojo.scene.getScene("fight").sim.current.round.phase === "fighting", null, { timeout: 5000 });
+  await game.waitForFunction(() => window.fotoFighter.scene.getScene("fight").sim.current.round.phase === "fighting", null, { timeout: 5000 });
 
   // --- vs CPU, then practice: quit to select (pause menu: up from Resume wraps to Quit); one player picks, punch opens the CPU's slot ---
   await game.keyboard.press("Escape");
@@ -297,13 +297,13 @@ try {
   await game.keyboard.press("w");
   await game.waitForTimeout(80);
   await game.keyboard.press("j");
-  await game.waitForFunction(() => window.photoDojo.scene.isActive("character-select"), null, { timeout: 5000 });
+  await game.waitForFunction(() => window.fotoFighter.scene.isActive("character-select"), null, { timeout: 5000 });
   await game.waitForTimeout(300);
   const selectState = () => game.evaluate(() => {
-    const sc = window.photoDojo.scene.getScene("character-select");
+    const sc = window.fotoFighter.scene.getScene("character-select");
     return JSON.stringify({
       players: sc.players.map((p) => p && { ready: p.ready, cursor: p.cursor, prev: p.previous, input: p.input }),
-      active: sc.sys.isActive(), status: sc.sys.settings.status, scenes: window.photoDojo.scene.getScenes(true).map((x) => x.sys.settings.key),
+      active: sc.sys.isActive(), status: sc.sys.settings.status, scenes: window.fotoFighter.scene.getScenes(true).map((x) => x.sys.settings.key),
       lib: sc.library.length,
       jKey: (() => { const k = sc.players[0]?.source?.keys?.punch?.[0]; return k ? { isDown: k.isDown, listeners: k.listenerCount("down") } : null; })(),
       kbEnabled: sc.input.keyboard.enabled, managerEnabled: sc.input.keyboard.manager.enabled,
@@ -321,64 +321,64 @@ try {
     window.__keys = [];
     for (const t of ["keydown", "keyup"]) window.addEventListener(t, (e) => window.__keys.push(`${t}:${e.key}@${e.timeStamp.toFixed(1)}`), true);
   });
-  const cpuSlot = () => game.evaluate(() => window.photoDojo.scene.getScene("character-select").cpu);
+  const cpuSlot = () => game.evaluate(() => window.fotoFighter.scene.getScene("character-select").cpu);
   const press = async (key) => { await game.keyboard.press(key); await game.waitForTimeout(80); };
-  await stepTo("join", () => !!window.photoDojo.scene.getScene("character-select").players[0]);
-  await stepTo("pick", () => window.photoDojo.scene.getScene("character-select").players[0]?.ready === true);
-  await stepTo("opponent", () => !!window.photoDojo.scene.getScene("character-select").cpu);
+  await stepTo("join", () => !!window.fotoFighter.scene.getScene("character-select").players[0]);
+  await stepTo("pick", () => window.fotoFighter.scene.getScene("character-select").players[0]?.ready === true);
+  await stepTo("opponent", () => !!window.fotoFighter.scene.getScene("character-select").cpu);
   const opened = await cpuSlot();
   check(opened.slot === 1 && !opened.picked, `punch opens the CPU's slot (${JSON.stringify(opened)})`);
   await press("d");
-  check((await cpuSlot()).cursor === (opened.cursor + 1) % (await game.evaluate(() => window.photoDojo.scene.getScene("character-select").library.length)), "the player's controller moves the CPU's cursor");
-  const opponentId = await game.evaluate(() => { const sc = window.photoDojo.scene.getScene("character-select"); return sc.library[sc.cpu.cursor].fighter.fighterId; });
-  await stepTo("cpu pick", () => window.photoDojo.scene.getScene("character-select").cpu?.picked === true);
+  check((await cpuSlot()).cursor === (opened.cursor + 1) % (await game.evaluate(() => window.fotoFighter.scene.getScene("character-select").library.length)), "the player's controller moves the CPU's cursor");
+  const opponentId = await game.evaluate(() => { const sc = window.fotoFighter.scene.getScene("character-select"); return sc.library[sc.cpu.cursor].fighter.fighterId; });
+  await stepTo("cpu pick", () => window.fotoFighter.scene.getScene("character-select").cpu?.picked === true);
   await press("d"); // level: easy → normal
-  await stepTo("cpu match", () => window.photoDojo.scene.isActive("stage-select"));
-  await stepTo("cpu stage", () => window.photoDojo.scene.isActive("controls"));
+  await stepTo("cpu match", () => window.fotoFighter.scene.isActive("stage-select"));
+  await stepTo("cpu stage", () => window.fotoFighter.scene.isActive("controls"));
   await game.waitForTimeout(600); // the controls screen ignores input at first
-  await stepTo("cpu ready", () => window.photoDojo.scene.isActive("fight"));
-  await game.waitForFunction(() => window.photoDojo.scene.getScene("fight").sim.current.round.phase === "fighting", null, { timeout: 8000 });
+  await stepTo("cpu ready", () => window.fotoFighter.scene.isActive("fight"));
+  await game.waitForFunction(() => window.fotoFighter.scene.getScene("fight").sim.current.round.phase === "fighting", null, { timeout: 8000 });
   const vsCpu = await game.evaluate(() => {
-    const f = window.photoDojo.scene.getScene("fight");
+    const f = window.fotoFighter.scene.getScene("fight");
     return { input: f.setup.inputs[1], behavior: f.dummy.behavior, practice: f.sim.practice, opponent: f.setup.entries[1].fighter.fighterId, timer: f.timerText.text };
   });
   check(vsCpu.input.kind === "cpu" && vsCpu.input.level === "normal" && vsCpu.behavior === "cpuNormal" && !vsCpu.practice && vsCpu.timer !== "PRACTICE",
     `a real match against the normal CPU (${JSON.stringify(vsCpu)})`);
   check(vsCpu.opponent === opponentId, "against the fighter the player chose");
   // The CPU fights back on its own.
-  await game.waitForFunction(() => window.photoDojo.scene.getScene("fight").stats.result.players[1].attacks > 0, null, { timeout: 10000 });
+  await game.waitForFunction(() => window.fotoFighter.scene.getScene("fight").stats.result.players[1].attacks > 0, null, { timeout: 10000 });
   step("vs CPU: chose the opponent and level, then a match with a clock against a CPU that attacks");
   await game.keyboard.press("Escape");
   await game.waitForTimeout(150);
   await game.keyboard.press("w");
   await game.waitForTimeout(80);
   await game.keyboard.press("j");
-  await game.waitForFunction(() => window.photoDojo.scene.isActive("character-select"), null, { timeout: 5000 });
+  await game.waitForFunction(() => window.fotoFighter.scene.isActive("character-select"), null, { timeout: 5000 });
   await game.waitForTimeout(300);
 
-  await stepTo("join again", () => !!window.photoDojo.scene.getScene("character-select").players[0]);
-  await stepTo("pick again", () => window.photoDojo.scene.getScene("character-select").players[0]?.ready === true);
-  await stepTo("opponent again", () => !!window.photoDojo.scene.getScene("character-select").cpu);
-  await stepTo("practice opponent", () => window.photoDojo.scene.getScene("character-select").cpu?.picked === true);
+  await stepTo("join again", () => !!window.fotoFighter.scene.getScene("character-select").players[0]);
+  await stepTo("pick again", () => window.fotoFighter.scene.getScene("character-select").players[0]?.ready === true);
+  await stepTo("opponent again", () => !!window.fotoFighter.scene.getScene("character-select").cpu);
+  await stepTo("practice opponent", () => window.fotoFighter.scene.getScene("character-select").cpu?.picked === true);
   await press("s"); // Practice
-  await stepTo("practice", () => window.photoDojo.scene.isActive("stage-select"));
-  await stepTo("stage", () => window.photoDojo.scene.isActive("fight"));
-  await game.waitForFunction(() => window.photoDojo.scene.getScene("fight")?.sim?.practice === true && window.photoDojo.scene.isActive("fight"), null, { timeout: 8000 });
-  await game.waitForFunction(() => window.photoDojo.scene.getScene("fight").sim.current.round.phase === "fighting", null, { timeout: 5000 });
-  check((await game.evaluate(() => window.photoDojo.scene.getScene("fight").dummy.behavior)) === "cpuEasy", "practice opens against the easy CPU");
+  await stepTo("practice", () => window.fotoFighter.scene.isActive("stage-select"));
+  await stepTo("stage", () => window.fotoFighter.scene.isActive("fight"));
+  await game.waitForFunction(() => window.fotoFighter.scene.getScene("fight")?.sim?.practice === true && window.fotoFighter.scene.isActive("fight"), null, { timeout: 8000 });
+  await game.waitForFunction(() => window.fotoFighter.scene.getScene("fight").sim.current.round.phase === "fighting", null, { timeout: 5000 });
+  check((await game.evaluate(() => window.fotoFighter.scene.getScene("fight").dummy.behavior)) === "cpuEasy", "practice opens against the easy CPU");
   await game.keyboard.press("2"); // dummy: block
-  check((await game.evaluate(() => window.photoDojo.scene.getScene("fight").dummy.behavior)) === "block", "number keys pick the dummy's behavior");
+  check((await game.evaluate(() => window.fotoFighter.scene.getScene("fight").dummy.behavior)) === "block", "number keys pick the dummy's behavior");
   await game.keyboard.down("d");
-  await game.waitForFunction(() => { const [a, b] = window.photoDojo.scene.getScene("fight").sim.current.fighters; return b.position.x - a.position.x < 140; }, null, { timeout: 8000 });
+  await game.waitForFunction(() => { const [a, b] = window.fotoFighter.scene.getScene("fight").sim.current.fighters; return b.position.x - a.position.x < 140; }, null, { timeout: 8000 });
   await game.keyboard.up("d");
   await game.keyboard.press("j");
-  await game.waitForFunction(() => window.photoDojo.scene.getScene("fight").sim.current.fighters[1].action === "blockstun", null, { timeout: 2000 });
+  await game.waitForFunction(() => window.fotoFighter.scene.getScene("fight").sim.current.fighters[1].action === "blockstun", null, { timeout: 2000 });
   await game.screenshot({ path: `${OUT}/07b-practice.png` });
   await game.keyboard.press("1"); // stand still, take hits
   for (let i = 0; i < 5; i++) { await game.keyboard.press("j"); await game.waitForTimeout(300); }
-  const hurt = await game.evaluate(() => window.photoDojo.scene.getScene("fight").sim.current.fighters[1].health);
-  await game.waitForFunction(() => window.photoDojo.scene.getScene("fight").sim.current.fighters[1].health === 100, null, { timeout: 4000 });
-  const timer = await game.evaluate(() => window.photoDojo.scene.getScene("fight").timerText.text);
+  const hurt = await game.evaluate(() => window.fotoFighter.scene.getScene("fight").sim.current.fighters[1].health);
+  await game.waitForFunction(() => window.fotoFighter.scene.getScene("fight").sim.current.fighters[1].health === 100, null, { timeout: 4000 });
+  const timer = await game.evaluate(() => window.fotoFighter.scene.getScene("fight").timerText.text);
   check(timer === "PRACTICE" && hurt < 100, `practice: no clock (${timer}), health refills (was ${hurt})`);
   step("practice mode: dummy blocks on command, health refills, no timer");
 
@@ -414,18 +414,18 @@ try {
   await studio.waitForFunction(() => /^[A-Z2-9]{6}$/.test(document.querySelector("[data-room-code]")?.textContent ?? ""), null, { timeout: 10000 });
   const studioCode = await studio.textContent("[data-room-code]");
   await studio.waitForSelector("img.qr", { timeout: 10000 });
-  check(await studio.evaluate(() => window.photoDojoStudio.cameraEnv().phone.url.endsWith("/capture?room=" + window.photoDojoStudio.phoneHost.roomCode)), "the studio's QR opens /capture?room=CODE");
-  await studio.waitForFunction(() => window.photoDojoStudio.phoneHost.status.kind === "waiting", null, { timeout: 10000 });
+  check(await studio.evaluate(() => window.fotoFighterStudio.cameraEnv().phone.url.endsWith("/capture?room=" + window.fotoFighterStudio.phoneHost.roomCode)), "the studio's QR opens /capture?room=CODE");
+  await studio.waitForFunction(() => window.fotoFighterStudio.phoneHost.status.kind === "waiting", null, { timeout: 10000 });
   await studio.screenshot({ path: `${OUT}/12-studio-phone-setup.png` });
   step(`studio opened room ${studioCode} for a phone`);
   const phoneCam = await ctx.newPage();
   watch(phoneCam, "phone camera");
   await phoneCam.goto(BASE + "/capture?room=" + studioCode);
-  await studio.waitForFunction(() => { const s = window.photoDojoStudio.source; return s?.kind === "phone" && s.status.kind === "ready" && s.video.videoWidth > 0; }, null, { timeout: 30000 });
+  await studio.waitForFunction(() => { const s = window.fotoFighterStudio.source; return s?.kind === "phone" && s.status.kind === "ready" && s.video.videoWidth > 0; }, null, { timeout: 30000 });
   await phoneCam.waitForFunction(() => document.querySelector(".headline")?.textContent === "Streaming to the studio", null, { timeout: 10000 });
   const phoneVideo = await phoneCam.evaluate(() => ({ width: document.querySelector("video.preview").videoWidth, height: document.querySelector("video.preview").videoHeight }));
   const remoteStill = await studio.evaluate(async () => {
-    const source = window.photoDojoStudio.source;
+    const source = window.fotoFighterStudio.source;
     const raw = await source.link.requestStill({ x: 0.25, y: 0.1, width: 0.5, height: 0.8 }, 3);
     const magic = Array.from(new Uint8Array(await raw.blob.slice(0, 8).arrayBuffer()));
     const { frame, sharpness } = await source.grabStill(null, 3);
@@ -440,21 +440,21 @@ try {
   await studio.click("[data-action=start]");
   await studio.click("[data-archetype=guardian]"); // the style comes first
   await studio.getByText("Let's go").click();
-  await studio.waitForFunction(() => window.photoDojoStudio.flow.screen.name === "pose", null, { timeout: 90000 });
+  await studio.waitForFunction(() => window.fotoFighterStudio.flow.screen.name === "pose", null, { timeout: 90000 });
   await phoneCam.waitForFunction(() => document.body.innerText.includes("Pose 1/16 — Fighting stance"), null, { timeout: 10000 });
   await studio.waitForTimeout(1000);
   await studio.screenshot({ path: `${OUT}/14-studio-phone-live.png` });
   step("studio live on the phone's video; the phone shows the studio's status line");
   // The phone drops without a bye (as when Wi-Fi blips).
-  await phoneCam.evaluate(() => window.photoDojoCamera.connection.session.lose("e2e: link dropped"));
-  await studio.waitForFunction(() => window.photoDojoStudio.flow.screen.name === "cameraLost", null, { timeout: 15000 });
+  await phoneCam.evaluate(() => window.fotoFighterCamera.connection.session.lose("e2e: link dropped"));
+  await studio.waitForFunction(() => window.fotoFighterStudio.flow.screen.name === "cameraLost", null, { timeout: 15000 });
   await studio.screenshot({ path: `${OUT}/15-studio-phone-lost.png` });
   check((await studio.textContent("[data-room-code]")) === studioCode, "the studio shows the same code again");
   await studio.waitForFunction(() => {
-    const app = window.photoDojoStudio;
+    const app = window.fotoFighterStudio;
     return app.flow.screen.name === "pose" && app.flow.screen.poseIndex === 0 && app.source?.status.kind === "ready";
   }, null, { timeout: 30000 });
-  check((await studio.evaluate(() => window.photoDojoStudio.phoneHost.roomCode)) === studioCode, "reconnected on the same room code");
+  check((await studio.evaluate(() => window.fotoFighterStudio.phoneHost.roomCode)) === studioCode, "reconnected on the same room code");
   await phoneCam.waitForFunction(() => document.querySelector(".headline")?.textContent === "Streaming to the studio", null, { timeout: 10000 });
   step("phone dropped → studio on cameraLost → phone reconnected on the same code → back on pose 1");
   // Leaving the studio says bye: the phone stops retrying.
@@ -469,11 +469,11 @@ try {
   watch(local, "studio local");
   await local.goto(BASE + "/studio");
   await local.click("[data-camera=local]");
-  await local.waitForFunction(() => { const s = window.photoDojoStudio.source; return s?.kind === "local" && s.status.kind === "ready"; }, null, { timeout: 15000 });
+  await local.waitForFunction(() => { const s = window.fotoFighterStudio.source; return s?.kind === "local" && s.status.kind === "ready"; }, null, { timeout: 15000 });
   await local.click("[data-action=start]");
   await local.click("[data-archetype=guardian]");
   await local.getByText("Let's go").click();
-  await local.waitForFunction(() => window.photoDojoStudio.flow.screen.name === "pose", null, { timeout: 90000 });
+  await local.waitForFunction(() => window.fotoFighterStudio.flow.screen.name === "pose", null, { timeout: 90000 });
   await local.waitForTimeout(1000);
   const localHud = await local.evaluate(() => ({ label: document.querySelector("[data-hud=label]")?.textContent, videoWidth: document.querySelector(".live video")?.videoWidth }));
   check(localHud.label === "Fighting stance" && localHud.videoWidth > 0, `studio live on the local camera: ${JSON.stringify(localHud)}`);
@@ -483,7 +483,7 @@ try {
     const { loadPlaceholderFighter } = await import("/src/game/fighter-library.ts");
     const { captureTargetsFor } = await import("/src/shared/pose-definitions.ts");
     const f = await loadPlaceholderFighter("placeholder-green", "/");
-    const app = window.photoDojoStudio;
+    const app = window.fotoFighterStudio;
     for (const t of captureTargetsFor(f.archetype)) {
       const pose = t.variant ? f.poseVariants[t.poseId][t.variant - 1] : f.poses[t.poseId];
       const bmp = await createImageBitmap(pose.imageBlob);
@@ -522,13 +522,13 @@ try {
   step("studio: review → sounds → preview → Save → saved with its sources");
   // "Back to the game" goes to /?to=select: fighter select, with the new fighter loaded at boot.
   await local.getByRole("link", { name: "Back to the game" }).last().click();
-  await local.waitForFunction(() => window.photoDojo?.scene.isActive("character-select"), null, { timeout: 20000 });
-  check(await local.evaluate((id) => window.photoDojo.registry.get("library").some((e) => e.fighter.fighterId === id && e.fighter.name === "Studio Green"), saved.id), "back in the game, the studio's fighter is in the library");
+  await local.waitForFunction(() => window.fotoFighter?.scene.isActive("character-select"), null, { timeout: 20000 });
+  check(await local.evaluate((id) => window.fotoFighter.registry.get("library").some((e) => e.fighter.fighterId === id && e.fighter.name === "Studio Green"), saved.id), "back in the game, the studio's fighter is in the library");
   step("studio → Back to the game → fighter select with the studio's fighter");
   // The panel is compact now (there are captured fighters): its "Open the studio" sits beside the previews.
   await local.waitForTimeout(800); // past the intro
   const studioButton = await local.evaluate(() => {
-    const b = window.photoDojo.scene.getScene("character-select").addObjects.find((o) => o.text === "Open the studio (N)");
+    const b = window.fotoFighter.scene.getScene("character-select").addObjects.find((o) => o.text === "Open the studio (N)");
     return b && { x: b.x, y: b.y + b.height / 2 };
   });
   check(studioButton, "fighter select has an Open the studio button");
@@ -543,9 +543,9 @@ try {
   step("/studio?edit= with an unknown id: “That fighter isn't on this computer”");
   // Wire Blue II was saved straight into storage: no sources, so no single retakes.
   await local.goto(BASE + "/studio?edit=" + sent.id);
-  await local.waitForFunction(() => window.photoDojoStudio.flow.screen.name === "review", null, { timeout: 15000 });
+  await local.waitForFunction(() => window.fotoFighterStudio.flow.screen.name === "review", null, { timeout: 15000 });
   const sourceless = await local.evaluate(() => ({
-    edit: window.photoDojoStudio.flow.edit,
+    edit: window.fotoFighterStudio.flow.edit,
     images: document.querySelectorAll(".strip img").length,
     enabled: document.querySelectorAll(".strip button:not(:disabled)").length,
     recapture: !!document.querySelector("[data-action=recapture-all]"),
@@ -568,32 +568,32 @@ try {
     return { count: (await listFighters()).length, createdAt: f.createdAt, kick: Array.from(new Uint8Array(await f.poses.kick.imageBlob.arrayBuffer())).join(), kickAt: sources.captures.find((c) => c.key === "kick").capturedAt };
   }, saved.id);
   await local.goto(BASE + "/?to=select");
-  await local.waitForFunction(() => window.photoDojo?.scene.isActive("character-select"), null, { timeout: 20000 });
+  await local.waitForFunction(() => window.fotoFighter?.scene.isActive("character-select"), null, { timeout: 20000 });
   await local.waitForTimeout(800); // past the intro
   const tile = await local.evaluate((id) => {
-    const sc = window.photoDojo.scene.getScene("character-select");
+    const sc = window.fotoFighter.scene.getScene("character-select");
     return sc.tilePosition(sc.library.findIndex((e) => e.fighter.fighterId === id));
   }, saved.id);
   await clickGame(local, tile.x + TILE / 2, tile.y + TILE / 2);
   await local.waitForTimeout(100);
   await local.screenshot({ path: `${OUT}/22-select-edit-button.png` });
   const editButton = await local.evaluate(() => {
-    const b = window.photoDojo.scene.getScene("character-select").tileButtons.find((o) => o.text === "✂ Edit");
+    const b = window.fotoFighter.scene.getScene("character-select").tileButtons.find((o) => o.text === "✂ Edit");
     return b && { x: b.x + b.width / 2, y: b.y + b.height / 2 };
   });
   check(editButton, "the selected captured fighter's tile has Edit");
   await Promise.all([local.waitForURL((u) => u.pathname === "/studio" && u.searchParams.get("edit") === saved.id, { timeout: 10000 }), clickGame(local, editButton.x, editButton.y)]);
-  await local.waitForFunction(() => window.photoDojoStudio.flow.screen.name === "review", null, { timeout: 15000 });
-  check(await local.evaluate(() => window.photoDojoStudio.flow.edit?.hasSources === true && document.querySelectorAll(".strip button:not(:disabled)").length === 16), "the studio's fighter opens with its sources: every pose can be retaken");
+  await local.waitForFunction(() => window.fotoFighterStudio.flow.screen.name === "review", null, { timeout: 15000 });
+  check(await local.evaluate(() => window.fotoFighterStudio.flow.edit?.hasSources === true && document.querySelectorAll(".strip button:not(:disabled)").length === 16), "the studio's fighter opens with its sources: every pose can be retaken");
   step("fighter select → ✂ Edit → /studio?edit=<id> on the review");
   await local.click('.strip [data-key="kick"]');
-  await local.waitForFunction(() => window.photoDojoStudio.flow.screen.name === "camera", null, { timeout: 5000 });
+  await local.waitForFunction(() => window.fotoFighterStudio.flow.screen.name === "camera", null, { timeout: 5000 });
   await local.click("[data-camera=local]");
-  await local.waitForFunction(() => { const s = window.photoDojoStudio.flow.screen; return s.name === "pose" && s.retake && window.photoDojoStudio.source?.status.kind === "ready"; }, null, { timeout: 15000 });
+  await local.waitForFunction(() => { const s = window.fotoFighterStudio.flow.screen; return s.name === "pose" && s.retake && window.fotoFighterStudio.source?.status.kind === "ready"; }, null, { timeout: 15000 });
   await local.evaluate(async () => {
     const { loadPlaceholderFighter } = await import("/src/game/fighter-library.ts");
     const pose = (await loadPlaceholderFighter("placeholder-red", "/")).poses.kick;
-    const app = window.photoDojoStudio;
+    const app = window.fotoFighterStudio;
     const bmp = await createImageBitmap(pose.imageBlob);
     const image = new OffscreenCanvas(512, 512);
     image.getContext("2d").drawImage(bmp, 0, 0);
@@ -608,7 +608,7 @@ try {
     app.dispatch({ type: "poseCaptured" });
     app.dispatch({ type: "graceElapsed" });
   });
-  await local.waitForFunction(() => window.photoDojoStudio.flow.screen.name === "review", null, { timeout: 5000 });
+  await local.waitForFunction(() => window.fotoFighterStudio.flow.screen.name === "review", null, { timeout: 5000 });
   await local.getByText("Next: sounds").click();
   await local.getByText("Skip all sounds").click();
   await local.getByPlaceholder("Fighter name").fill("Studio Green II");
@@ -632,8 +632,8 @@ try {
   check(afterEdit.record?.matches === 2 && afterEdit.draft === null, `its career record is kept, and no draft was written (${JSON.stringify({ record: afterEdit.record, draft: afterEdit.draft })})`);
   step("edited: retook the kick, renamed, saved over the same id with its sources; career record kept");
   await local.getByRole("link", { name: "Back to the game" }).last().click();
-  await local.waitForFunction(() => window.photoDojo?.scene.isActive("character-select"), null, { timeout: 20000 });
-  check(await local.evaluate((id) => window.photoDojo.registry.get("library").filter((e) => e.fighter.fighterId === id).map((e) => e.fighter.name).join() === "Studio Green II", saved.id), "back in the game, the edited fighter is in the library once, renamed");
+  await local.waitForFunction(() => window.fotoFighter?.scene.isActive("character-select"), null, { timeout: 20000 });
+  check(await local.evaluate((id) => window.fotoFighter.registry.get("library").filter((e) => e.fighter.fighterId === id).map((e) => e.fighter.name).join() === "Studio Green II", saved.id), "back in the game, the edited fighter is in the library once, renamed");
   step("studio → Back to the game → the edited fighter in the library");
   await local.close();
 

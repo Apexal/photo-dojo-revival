@@ -2,7 +2,7 @@
 
 > **Status: implemented.** Everything in sections 2–4 is in the game, plus the taunt and "chip can't KO" from section 5: blockstun and hitstun (2.1), throw and tech (2.2), high/low with the low kick and an overhead jump kick (2.3), reach and hurtbox clamping (3.1), uppercut / low kick on inputs (3.2B), cross-ups and alternating sides (3.3), the input buffer, block leniency, the jump wind-up and the replay's mash guard (4). Each rule is covered by tests in `tests/fight-simulation.test.ts` and `tests/collision.test.ts`. Section 1 describes the rules *before* these changes.
 
-Photo Dojo is a party game: two friends, one laptop, fighters made of their own goofy photos. The goal isn't tournament depth. It's that **the person who plays better usually wins, and nobody feels cheated**. This report looks at where the current rules fall short of that, and what real fighting games do about it. It suggests the smallest changes that fix each problem, ordered by how much they matter.
+Foto Fighter is a party game: two friends, one laptop, fighters made of their own goofy photos. The goal isn't tournament depth. It's that **the person who plays better usually wins, and nobody feels cheated**. This report looks at where the current rules fall short of that, and what real fighting games do about it. It suggests the smallest changes that fix each problem, ordered by how much they matter.
 
 Everything here applies to the pure simulation in `src/simulation/` and `src/shared/frame-data.ts`, so every suggestion can be unit-tested the same way the current rules are.
 
@@ -155,7 +155,7 @@ Fighting games feel unfair to newcomers mostly because inputs get "eaten". The k
 
 ## 5. Keep it light: what *not* to add
 
-These are standard in serious fighters, but they'd make Photo Dojo worse for its audience:
+These are standard in serious fighters, but they'd make Foto Fighter worse for its audience:
 
 | Feature | Why skip it |
 |---|---|

@@ -41,8 +41,8 @@ export class BootScene extends Phaser.Scene {
 
   create(): void {
     const text = this.add.text(GAME_WIDTH / 2, GAME_HEIGHT / 2, "Loading…", displayText(32, COLOR.fg)).setOrigin(0.5);
-    // An older Photo Dojo tab holding the database open stalls the upgrade until it closes.
-    const offBlocked = onDbBlocked(() => text.setText("Close other Photo Dojo tabs\nto finish loading.").setAlign("center"));
+    // An older Foto Fighter tab holding the database open stalls the upgrade until it closes.
+    const offBlocked = onDbBlocked(() => text.setText("Close other Foto Fighter tabs\nto finish loading.").setAlign("center"));
     void (async () => {
       try {
         try {

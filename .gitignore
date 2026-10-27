@@ -13,6 +13,6 @@ models/
 coverage/
 .vscode/
 .idea/
-*.photodojo
+*.fotofighter
 # Licensed music: not in the repo, served from R2 in production (src/game/music-url.ts)
 public/music/

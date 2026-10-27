@@ -21,7 +21,7 @@ Rules: one phone streams to one studio at a time, and only while the studio is o
 | Character select shows a QR; the phone runs the whole capture and sends a finished fighter | Character select has **Open the studio**; the studio shows the QR when you pick "Use a phone" |
 | Phone screen shows the ghost, the HUD, the review, the sounds | The laptop shows all of it, big; the phone shows "Streaming to the studio", a small preview and the studio's status line |
 | Sounds recorded on the phone mic | Recorded on the laptop mic |
-| A phone can build a fighter without a laptop and export a `.photodojo` | Not any more: fighters are built on the computer running the game (`.photodojo` export/import stays, from fighter select) |
+| A phone can build a fighter without a laptop and export a `.fotofighter` | Not any more: fighters are built on the computer running the game (`.fotofighter` export/import stays, from fighter select) |
 | A finished fighter can't be changed except its name | **Edit**: retake any pose, re-record sounds, rename (fighters built in the studio; others: rename, sounds, or capture everything again) |
 
 ## 3. Architecture
@@ -142,18 +142,18 @@ Voice prompts and the hold tone play on the laptop; `vibrate` goes. The `?debug=
 
 ## 6. Fighter sources and editing
 
-- New IndexedDB store **`fighterSources`** (keyed by `fighterId`; `DB_VERSION` 3, created in `upgrade`): `{ version: 1, fighterId, captures: DraftCapture[], savedAt }`: the cut-out PNG + geometry of every pose, exactly what a draft holds, so sprites can be re-planned at one fighter-wide scale after a retake. Phase 3 owns the whole store lifecycle: written when the studio saves a fighter; deleted in the same transaction as the fighter (`deleteFighter`); deleted when a `.photodojo` import overwrites a fighter id (the sources would describe another version).
-- `openFighterDb` gets `blocking: () => db.close()` (and the game reloads/ reopens on next use) and a `blocked` handler that tells the user to close other Photo Dojo tabs, so a v2 game tab can't wedge the v3 upgrade.
+- New IndexedDB store **`fighterSources`** (keyed by `fighterId`; `DB_VERSION` 3, created in `upgrade`): `{ version: 1, fighterId, captures: DraftCapture[], savedAt }`: the cut-out PNG + geometry of every pose, exactly what a draft holds, so sprites can be re-planned at one fighter-wide scale after a retake. Phase 3 owns the whole store lifecycle: written when the studio saves a fighter; deleted in the same transaction as the fighter (`deleteFighter`); deleted when a `.fotofighter` import overwrites a fighter id (the sources would describe another version).
+- `openFighterDb` gets `blocking: () => db.close()` (and the game reloads/ reopens on next use) and a `blocked` handler that tells the user to close other Foto Fighter tabs, so a v2 game tab can't wedge the v3 upgrade.
 - Phase 5, editing: `/studio?edit=<fighterId>` loads the fighter and its sources into a session (like resuming a draft) and opens the review. Saving overwrites the fighter under the same id (career records are keyed by id, so they stay), keeps `createdAt`, regenerates the thumbnail and sources.
 - Fighters **without sources** (imported from a file): rename, redo sounds, or "Capture all poses again" (single retakes and style changes need the cut-outs). Built-in placeholders aren't in IndexedDB: no Edit button; `/studio?edit=` with an unknown id shows "That fighter isn't on this computer".
-- `.photodojo` export stays as is (no sources).
+- `.fotofighter` export stays as is (no sources).
 - Drafts: one draft for a **new** fighter, on the laptop (`DRAFT_VERSION` 3; v2 drafts, e.g. on phones, are silently not offered, as `isResumable` already does). Edit sessions aren't drafted.
 
 ## 7. Game integration
 
 - Character select: the "Add a fighter" panel loses the QR/room code/phone count; it gets **Open the studio** ("use a phone or this computer's camera") and keeps Import file. Hidden while a series (tournament / king of the hill) is running, since leaving the page ends it. The selected captured fighter's tile gets **Edit** in phase 5.
 - Navigation is a page change: `/studio`; the studio's "Back to the game" goes to `/?to=select`, which `BootScene` honours by starting `CharacterSelectScene` instead of the title (menu music then starts at the first key press, as browsers require a gesture). The library reloads from IndexedDB at boot.
-- Phase 4 removes `HostSession` (BootScene's `startHosting`, `REGISTRY.host`, TitleScene's and character select's use), `fighter-sender.ts`/`fighter-receiver.ts`, the data-channel chunk code in `fighter-codec.ts` (`chunkParts`, chunk headers, `FighterAssembler`, `TransferMessage`; the `.photodojo` zip code stays), the old phone app and its tests (`tests/transfer.test.ts` fighter parts, `tests/game-link.test.ts`, the flow parts of `tests/capture-flow.test.ts`; the draft tests move to `tests/capture-draft.test.ts` in phase 3).
+- Phase 4 removes `HostSession` (BootScene's `startHosting`, `REGISTRY.host`, TitleScene's and character select's use), `fighter-sender.ts`/`fighter-receiver.ts`, the data-channel chunk code in `fighter-codec.ts` (`chunkParts`, chunk headers, `FighterAssembler`, `TransferMessage`; the `.fotofighter` zip code stays), the old phone app and its tests (`tests/transfer.test.ts` fighter parts, `tests/game-link.test.ts`, the flow parts of `tests/capture-flow.test.ts`; the draft tests move to `tests/capture-draft.test.ts` in phase 3).
 - `device-gate.ts`: phones (and iPhones generally) opening `/` or `/studio` get "the studio runs on a computer; this phone can be its camera: scan the code the studio shows" (link to `/capture`); the "bring your fighter later as a file" line goes. iPads may open the studio (the iOS memory measures in `background-remover.ts`/`main` stay: matting built after the pose models, no warm-up, fp16), with a one-line warning that a computer works better.
 - `/capture` without a room code: a code entry field ("enter the code the studio shows"); on a computer it also links to `/studio`.
 - About page: the privacy text and FAQ (about.html lines ~40, 41, 76, 80, 88, 108 say processing happens on the phone).
@@ -181,7 +181,7 @@ Every phase ends with `npm run typecheck`, `npm test`, `npm run build` passing *
 - **The stance and the step are checked as a pair** (`compareStep`, `src/shared/walk-step.ts`): the walk is drawn from the two together (`walk-gait.ts`), so taking either one compares it with the other if it's in. Both are turned to face right (`detectFacing`: the toes and the nose, since a side-on fighter looking at the camera has the nose almost between the ears), centred on the hips and scaled to a torso (and a MediaPipe whole-body label swap is undone, `side-flips.ts`), then: the same foot in front (unless a photo's feet are too level to tell), and the step's feet at least `STRIDE_LIMITS.min` torso lengths further apart than the stance's, which is the stride the walk gets, so it never has to slip. Failing either is the pose again with what to change ("Other foot. Slide your front foot forward, don't step through." / "Bigger step."; retaking the stance: "Feet a bit closer together than in your step.").
 - **Exposure and white balance are held** after a fighter's first photo (`CameraSource.lockExposure`: Image Capture `exposureMode`/`whiteBalanceMode` "manual" at the current values), so sixteen photos don't drift as the camera re-meters; released for a new fighter, re-locked at the next photo after a camera switch or restart. Only where the camera exposes those controls (many webcams in Chrome; not Safari, and not the phone yet); the console says which.
 - **Cellular/TURN**: preview quality drops, stills take seconds. Same-Wi-Fi is the expected case.
-- **No laptop, no fighter**: building on the go is gone, deliberately; `.photodojo` moves fighters between computers.
+- **No laptop, no fighter**: building on the go is gone, deliberately; `.fotofighter` moves fighters between computers.
 
 ## 10. As built: deviations from the plan
 
@@ -210,7 +210,7 @@ Small, deliberate differences found while implementing, by phase.
 - `CameraSession.startDevice(deviceId)` backs `LocalCamera`'s camera picker. `device-gate.ts` gained `gateStudio()` and `isTablet()`.
 
 **Game integration (phase 4)**
-- `fighter.json` in a `.photodojo` file still carries `type: "manifest"` and a `chunkSize` (now a private constant), so files stay readable both ways between this version and older ones. Only the data-channel chunking was removed.
+- `fighter.json` in a `.fotofighter` file still carries `type: "manifest"` and a `chunkSize` (now a private constant), so files stay readable both ways between this version and older ones. Only the data-channel chunking was removed.
 - `formatCountdown` (room-code expiry on fighter select) is gone with its only user.
 - The "Add a fighter" panel also has its own "Import a fighter file" button (the toolbar's Import is unchanged). While a series is running the panel isn't drawn and `openStudio` refuses to leave the page (a safeguard: the series scenes normally clear the series before returning to fighter select).
 - `BootScene` removes `to=select` from the address after honouring it, so a reload opens the title again.

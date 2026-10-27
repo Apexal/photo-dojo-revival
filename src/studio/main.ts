@@ -240,7 +240,7 @@ class StudioApp {
     this.banner.className = "banner";
     this.banner.hidden = true;
     document.body.prepend(this.banner);
-    onDbBlocked(() => this.showBanner("Another Photo Dojo tab (an older version) is keeping the studio from saving. Close it, then carry on here."));
+    onDbBlocked(() => this.showBanner("Another Foto Fighter tab (an older version) is keeping the studio from saving. Close it, then carry on here."));
     // Leaving says bye, so the phone stops retrying and shows "The studio closed".
     addEventListener("pagehide", () => {
       this.source?.stop();
@@ -1242,7 +1242,7 @@ class StudioApp {
       const sprite = (this.data.poses[key as PoseId] ?? this.data.variants[key])?.imageBlob;
       if (sprite) files[dir + "3-sprite.png"] = new Uint8Array(await sprite.arrayBuffer());
     }
-    downloadBlob(new Blob([zipSync(files, { level: 0 }) as Uint8Array<ArrayBuffer>], { type: "application/zip" }), "photodojo-matting-debug.zip");
+    downloadBlob(new Blob([zipSync(files, { level: 0 }) as Uint8Array<ArrayBuffer>], { type: "application/zip" }), "foto-fighter-matting-debug.zip");
   }
 
   /** The same fighter `save` writes (an edit keeps its `createdAt`; after a save, `editing` is the saved one). */
@@ -1267,4 +1267,4 @@ async function grayPng(data: ArrayLike<number>, width: number, height: number, s
 
 const root = document.getElementById("app");
 // Exposed for debugging from the console (and the e2e smoke test).
-if (root) gateStudio(() => { (window as unknown as { photoDojoStudio: StudioApp }).photoDojoStudio = new StudioApp(root); });
+if (root) gateStudio(() => { (window as unknown as { fotoFighterStudio: StudioApp }).fotoFighterStudio = new StudioApp(root); });

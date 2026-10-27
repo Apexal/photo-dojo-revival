@@ -25,7 +25,7 @@ function h<K extends keyof HTMLElementTagNameMap>(tag: K, props: Props = {}, ...
   return el;
 }
 
-const title = () => h("h1", {}, "Photo Dojo", h("span", { class: "kicker" }, "Camera"));
+const title = () => h("h1", {}, "Foto Fighter", h("span", { class: "kicker" }, "Camera"));
 
 /** What the live screen shows about the link (headline + detail). */
 export function describeLink(status: PhoneLinkStatus, roomCode: string): { headline: string; detail: string } {
@@ -72,7 +72,7 @@ export class PhoneView {
     input.id = "studio-code";
     this.show(
       title(),
-      h("p", {}, "This phone becomes the studio's camera: the computer running Photo Dojo shows a QR code and a code. Scan the QR, or type the code here."),
+      h("p", {}, "This phone becomes the studio's camera: the computer running Foto Fighter shows a QR code and a code. Scan the QR, or type the code here."),
       form,
       error ? h("p", { class: "error" }, error) : null,
       h("p", { class: "muted" }, "The picture goes straight to the studio, peer to peer. Nothing is stored on a server."),

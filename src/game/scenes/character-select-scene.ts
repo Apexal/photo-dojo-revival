@@ -252,11 +252,8 @@ export class CharacterSelectScene extends Phaser.Scene {
     this.introAt = introPlayed ? null : this.game.loop.time;
     introPlayed = true;
     drawBackdrop(this);
-    const logo = this.add.text(GRID_X, 36, "PHOTO DOJO", displayText(52, COLOR.accent));
-    const revival = stamp(this, 0, 66, "Revival", HEX.bad, 18);
-    const revivalW = stampWidth(revival, 18);
-    revival.setX(logo.x + logo.width + 12 + revivalW / 2);
-    const subtitle = this.add.text(revival.x + revivalW / 2 + 28, 58, "Pick your fighters", bodyText(22, COLOR.muted, 600));
+    const logo = this.add.text(GRID_X, 36, "FOTO FIGHTER", displayText(52, COLOR.accent));
+    const subtitle = this.add.text(logo.x + logo.width + 28, 58, "Pick your fighters", bodyText(22, COLOR.muted, 600));
     this.tiles = this.add.container(0, 0);
     this.cursors = this.add.graphics().setDepth(10);
     this.tagChips = this.add.graphics().setDepth(12);
@@ -282,7 +279,7 @@ export class CharacterSelectScene extends Phaser.Scene {
     const [settings, settingsBox] = this.headerButton(1240, 56, "⚙ Settings (Tab)", 20, () => this.openSettings());
     const [modes, modesBox] = this.headerButton(settings.x - settings.width - 12, 56, "🏆 Party modes (T)", 18, () => this.openSeries());
     this.seriesHint = this.add.text(modes.x - modes.width / 2, 100, "", bodyText(14, COLOR.accent, 800)).setOrigin(0.5, 0).setDepth(30);
-    this.introduce([logo, revival, subtitle, settingsBox, settings, modesBox, modes], 0, { y: -60 });
+    this.introduce([logo, subtitle, settingsBox, settings, modesBox, modes], 0, { y: -60 });
     // The preview fighters step in once their panels have landed.
     this.previewsHeld = this.introAt !== null;
     if (this.previewsHeld) this.time.delayedCall(INTRO_SETTLED_MS, () => {
@@ -1352,7 +1349,7 @@ export class CharacterSelectScene extends Phaser.Scene {
     this.setToolbarStatus(`Exported ${fighterFileName(entry.fighter)}`);
   }
 
-  /** One .photodojo file per captured fighter. */
+  /** One .fotofighter file per captured fighter. */
   private async exportAll(): Promise<void> {
     const captured = this.library.filter((e) => !e.builtIn);
     if (!captured.length) return this.setToolbarStatus("No captured fighters to export yet");

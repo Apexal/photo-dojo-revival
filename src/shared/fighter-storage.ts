@@ -1,6 +1,7 @@
 import { openDB, type DBSchema, type IDBPDatabase } from "idb";
 import type { Fighter } from "./fighter-model";
 
+// Named before the game was Foto Fighter; renaming it would strand every saved fighter.
 export const DB_NAME = "photo-dojo";
 /**
  * v2 adds the `drafts` store (in-progress captures); v3 `fighterSources`
@@ -36,7 +37,7 @@ export interface Settings {
   fighterRecords: Record<string, unknown>;
 }
 
-interface PhotoDojoDB extends DBSchema {
+interface FotoFighterDB extends DBSchema {
   fighters: { key: string; value: Fighter };
   settings: { key: string; value: unknown };
   drafts: { key: string; value: unknown };
@@ -47,11 +48,11 @@ interface PhotoDojoDB extends DBSchema {
 /** What the storage layer needs of a FighterSources record. */
 export interface StoredSources { fighterId: string }
 
-let dbPromise: Promise<IDBPDatabase<PhotoDojoDB>> | null = null;
+let dbPromise: Promise<IDBPDatabase<FotoFighterDB>> | null = null;
 const blockedListeners = new Set<() => void>();
 
 /**
- * Called when this tab wants to upgrade the database but another Photo Dojo
+ * Called when this tab wants to upgrade the database but another Foto Fighter
  * tab (an older version) still holds it open. Returns an unsubscribe.
  */
 export function onDbBlocked(listener: () => void): () => void {
@@ -59,9 +60,9 @@ export function onDbBlocked(listener: () => void): () => void {
   return () => { blockedListeners.delete(listener); };
 }
 
-export function openFighterDb(): Promise<IDBPDatabase<PhotoDojoDB>> {
+export function openFighterDb(): Promise<IDBPDatabase<FotoFighterDB>> {
   if (dbPromise) return dbPromise;
-  const opening = openDB<PhotoDojoDB>(DB_NAME, DB_VERSION, {
+  const opening = openDB<FotoFighterDB>(DB_NAME, DB_VERSION, {
     upgrade(db) {
       if (!db.objectStoreNames.contains("fighters")) db.createObjectStore("fighters", { keyPath: "fighterId" });
       if (!db.objectStoreNames.contains("settings")) db.createObjectStore("settings");
@@ -69,7 +70,7 @@ export function openFighterDb(): Promise<IDBPDatabase<PhotoDojoDB>> {
       if (!db.objectStoreNames.contains("fighterSources")) db.createObjectStore("fighterSources", { keyPath: "fighterId" });
     },
     blocked() {
-      console.warn("[storage] another Photo Dojo tab is holding the database open");
+      console.warn("[storage] another Foto Fighter tab is holding the database open");
       for (const l of blockedListeners) l();
     },
     // A newer tab wants to upgrade: let it, and reopen (at the new version) on the next use here.
@@ -135,7 +136,7 @@ export async function deleteFighter(fighterId: string): Promise<void> {
 }
 
 /**
- * A fighter from a `.photodojo` file: any sources stored under its id
+ * A fighter from a `.fotofighter` file: any sources stored under its id
  * described another version of it (the file has none), so they go.
  */
 export async function saveImportedFighter(fighter: Fighter): Promise<void> {
