@@ -20,6 +20,8 @@
     "test:e2e:gamepad": "node scripts/e2e/gamepad-smoke.mjs"
   },
   "dependencies": {
+    "@fontsource/lilita-one": "^5.3.0",
+    "@fontsource/nunito": "^5.3.0",
     "@mediapipe/tasks-vision": "^1.1.1",
     "fflate": "^0.8.3",
     "idb": "^8.0.4",

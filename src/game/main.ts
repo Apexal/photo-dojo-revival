@@ -1,6 +1,7 @@
 import Phaser from "phaser";
 import { gatePhones } from "./device-gate";
 import { GAME_HEIGHT, GAME_WIDTH } from "./render/stage";
+import { COLOR, loadFonts } from "./render/theme";
 import { BootScene } from "./scenes/boot-scene";
 import { CharacterSelectScene } from "./scenes/character-select-scene";
 import { ControlsScene } from "./scenes/controls-scene";
@@ -40,13 +41,14 @@ function patchSparseGamepads(): void {
 }
 patchSparseGamepads();
 
-gatePhones(() => {
+gatePhones(async () => {
+  await loadFonts();
   const game = new Phaser.Game({
     type: Phaser.AUTO,
     parent: "game",
     width: GAME_WIDTH,
     height: GAME_HEIGHT,
-    backgroundColor: "#121018",
+    backgroundColor: COLOR.bg,
     scale: { mode: Phaser.Scale.FIT, autoCenter: Phaser.Scale.CENTER_BOTH },
     input: { gamepad: true, keyboard: true },
     audio: { disableWebAudio: false },

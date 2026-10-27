@@ -7,6 +7,7 @@ import { createInputSource, isPlayerInput } from "../input/input-descriptor";
 import type { InputSource } from "../input/input-source";
 
 import { GAME_HEIGHT, GAME_WIDTH } from "../render/stage";
+import { bodyText, COLOR, displayText, drawBackdrop, HEX, popBox, RADIUS, SHADOW } from "../render/theme";
 import { STAGES, randomStage, stageFor } from "../stages/stages";
 import { playStageMusic, preloadStage, stopStageMusic } from "../stages/stage-music";
 import { REGISTRY } from "./boot-scene";
@@ -71,26 +72,26 @@ export class StageSelectScene extends Phaser.Scene {
 
     const cx = GAME_WIDTH / 2;
     this.add.graphics().setDepth(OVERLAY_DEPTH - 1)
-      .fillGradientStyle(0x0b0910, 0x0b0910, 0x0b0910, 0x0b0910, 0.8, 0.8, 0, 0).fillRect(0, 0, GAME_WIDTH, 160)
-      .fillStyle(0x0b0910, 0.75).fillRect(0, GAME_HEIGHT - 170, GAME_WIDTH, 170);
-    this.add.text(cx, 56, "CHOOSE A STAGE", { fontSize: "44px", fontStyle: "bold", color: "#f2c14e", stroke: "#121018", strokeThickness: 8 })
+      .fillGradientStyle(HEX.ink, HEX.ink, HEX.ink, HEX.ink, 0.8, 0.8, 0, 0).fillRect(0, 0, GAME_WIDTH, 160)
+      .fillStyle(HEX.ink, 0.75).fillRect(0, GAME_HEIGHT - 170, GAME_WIDTH, 170);
+    this.add.text(cx, 56, "CHOOSE A STAGE", displayText(52, COLOR.accent))
       .setOrigin(0.5).setDepth(OVERLAY_DEPTH);
     const [a, b] = this.setup.entries.map((e) => e.fighter.name);
-    this.add.text(cx, 104, this.setup.tutorial ? `${a} · tutorial` : this.setup.practice ? `${a} · practice` : `${a}  vs  ${b}`, { fontSize: "20px", color: "#f3efe6" })
+    this.add.text(cx, 104, this.setup.tutorial ? `${a} · tutorial` : this.setup.practice ? `${a} · practice` : `${a}  vs  ${b}`, bodyText(20, COLOR.fg, 800, { stroke: COLOR.ink, strokeThickness: 4 }))
       .setOrigin(0.5).setDepth(OVERLAY_DEPTH);
 
-    this.nameText = this.add.text(cx, GAME_HEIGHT - 116, "", { fontSize: "48px", fontStyle: "bold", color: "#f3efe6", stroke: "#121018", strokeThickness: 6 })
+    this.nameText = this.add.text(cx, GAME_HEIGHT - 116, "", displayText(52, COLOR.fg))
       .setOrigin(0.5).setDepth(OVERLAY_DEPTH).setInteractive({ useHandCursor: true });
     this.nameText.on("pointerdown", () => this.confirm());
     [-1, 1].forEach((dir) => {
-      const arrow = this.add.text(cx + dir * 330, GAME_HEIGHT - 116, dir < 0 ? "◀" : "▶", { fontSize: "40px", color: "#f2c14e", padding: { x: 12, y: 4 } })
+      const arrow = this.add.text(cx + dir * 330, GAME_HEIGHT - 116, dir < 0 ? "◀" : "▶", displayText(40, COLOR.accent, { padding: { x: 12, y: 4 } }))
         .setOrigin(0.5).setDepth(OVERLAY_DEPTH).setInteractive({ useHandCursor: true });
       arrow.on("pointerdown", () => this.move(dir));
     });
-    this.creditText = this.add.text(cx, GAME_HEIGHT - 158, "", { fontSize: "15px", color: "#c9c3b8", stroke: "#121018", strokeThickness: 4 })
+    this.creditText = this.add.text(cx, GAME_HEIGHT - 158, "", bodyText(15, COLOR.muted, 600, { stroke: COLOR.ink, strokeThickness: 4 }))
       .setOrigin(0.5).setDepth(OVERLAY_DEPTH);
     this.dots = this.add.graphics().setDepth(OVERLAY_DEPTH);
-    this.add.text(cx, GAME_HEIGHT - 34, "◀ ▶ choose     punch: fight!     kick: back", { fontSize: "18px", color: "#c9c3b8" })
+    this.add.text(cx, GAME_HEIGHT - 34, "◀ ▶ choose     punch: fight!     kick: back", bodyText(18, COLOR.muted, 600, { stroke: COLOR.ink, strokeThickness: 4 }))
       .setOrigin(0.5).setDepth(OVERLAY_DEPTH);
 
     // Practice has one player; the dummy isn't an input device.
@@ -132,9 +133,12 @@ export class StageSelectScene extends Phaser.Scene {
     this.music = null;
     const id = this.options[this.index];
     if (id === RANDOM) {
+      // No stage to show: the menu ground and a framed "?" card.
+      const card = 300, cy = GAME_HEIGHT / 2 - 40;
       this.layer.add([
-        this.add.rectangle(0, 0, GAME_WIDTH, GAME_HEIGHT, 0x1c1824).setOrigin(0),
-        this.add.text(GAME_WIDTH / 2, GAME_HEIGHT / 2 - 40, "?", { fontSize: "220px", fontStyle: "bold", color: "#3a3346" }).setOrigin(0.5),
+        drawBackdrop(this),
+        popBox(this, GAME_WIDTH / 2 - card / 2, cy - card / 2, card, card, { fill: HEX.panel, border: HEX.accent, borderWidth: 5, radius: RADIUS.lg, shadow: SHADOW.lg }),
+        this.add.text(GAME_WIDTH / 2, cy, "?", displayText(200, COLOR.faint, { outline: false })).setOrigin(0.5),
       ]);
       this.nameText.setText("Random");
       this.creditText.setText("");
@@ -150,8 +154,8 @@ export class StageSelectScene extends Phaser.Scene {
     this.dots.clear();
     this.options.forEach((_, i) => {
       const x = x0 + i * gap, y = GAME_HEIGHT - 70;
-      if (i === this.index) this.dots.fillStyle(0xf2c14e, 1).fillCircle(x, y, 6);
-      else this.dots.lineStyle(2, 0xc9c3b8, 0.8).strokeCircle(x, y, 5);
+      if (i === this.index) this.dots.fillStyle(HEX.accent, 1).fillCircle(x, y, 7).lineStyle(3, HEX.ink, 1).strokeCircle(x, y, 7);
+      else this.dots.lineStyle(2, HEX.muted, 0.8).strokeCircle(x, y, 5);
     });
   }
 

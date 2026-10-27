@@ -275,7 +275,7 @@ class StudioApp {
   private createPhoneHost(): PhoneHost {
     const host = new PhoneHost();
     const url = captureUrl(host.roomCode, SITE);
-    QRCode.toDataURL(url, { margin: 1, width: 280, color: { dark: "#121018", light: "#f3efe6" } }).then(
+    QRCode.toDataURL(url, { margin: 1, width: 280, color: { dark: "#0d0820", light: "#fff4dc" } }).then(
       (dataUrl) => { this.qrDataUrl = dataUrl; this.refreshCameraUi(); },
       (err) => console.warn("[studio] couldn't draw the QR code", err),
     );

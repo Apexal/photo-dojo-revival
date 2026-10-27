@@ -10,13 +10,14 @@ import { MOVE_NAMES } from "../move-names";
 import { createInputSource, isPlayerInput, type InputDescriptor } from "../input/input-descriptor";
 import type { InputSource } from "../input/input-source";
 import { textureKey } from "../render/fighter-sprite-view";
-import { GAME_HEIGHT, GAME_WIDTH, PLAYER_COLORS } from "../render/stage";
+import { GAME_WIDTH, PLAYER_COLORS } from "../render/stage";
 import { MIRROR_TINT } from "./controls-scene";
 import { REGISTRY } from "./boot-scene";
 import type { FightScene } from "./fight-scene";
 import { announce } from "../announcer";
 import { matchWinnerLine } from "../announcer-lines";
 import { SERIES_INFO, recordSeriesResult, type SeriesKind, type SeriesSession } from "../series";
+import { bodyText, COLOR, displayText, drawBackdrop, HEX, popBox, RADIUS, SHADOW, stamp } from "../render/theme";
 
 export interface MatchResultData {
   stats: MatchStats;
@@ -31,7 +32,7 @@ export interface MatchResultData {
 
 /** Long enough that mashing through the KO doesn't skip the page. */
 const INPUT_DELAY_MS = 1200;
-const PLAYER_CSS = ["#e8483b", "#3f86f0"];
+const PLAYER_CSS = [COLOR.bad, COLOR.p2];
 
 const clock = (frames: number) => {
   const seconds = Math.round(frames / FRAMES_PER_SECOND);
@@ -86,17 +87,15 @@ export class MatchResultScene extends Phaser.Scene {
     const names = entries.map((e) => e.fighter.name);
     const cx = GAME_WIDTH / 2;
 
-    this.add.rectangle(0, 0, GAME_WIDTH, GAME_HEIGHT, 0x121018, 0.98).setOrigin(0);
+    drawBackdrop(this);
     const title = winner === "draw" ? "DRAW GAME" : `${names[winner]} WINS!`;
     const cpu = this.result.inputs.findIndex((d) => d.kind === "cpu");
     announce(this, matchWinnerLine(winner, cpu < 0 ? null : (cpu as 0 | 1)));
-    this.add.text(cx, 52, title.toUpperCase(), {
-      fontSize: "60px", fontStyle: "bold", color: "#f2c14e", stroke: "#121018", strokeThickness: 8, align: "center", wordWrap: { width: 760 },
-    }).setOrigin(0.5);
+    this.add.text(cx, 52, title.toUpperCase(), displayText(62, COLOR.accent, { align: "center", wordWrap: { width: 760 } })).setOrigin(0.5);
     const [w0, w1] = [stats.players[0].roundsWon, stats.players[1].roundsWon];
     const lastRound = stats.rounds[stats.rounds.length - 1];
     const how = lastRound ? (lastRound.reason === "ko" ? "by K.O." : "on time") : "";
-    this.add.text(cx, 106, `${w0} – ${w1}  ·  ${how}  ·  match time ${clock(stats.frames)}`, { fontSize: "20px", color: "#c9c3b8" }).setOrigin(0.5);
+    this.add.text(cx, 106, `${w0} – ${w1}  ·  ${how}  ·  match time ${clock(stats.frames)}`, bodyText(20, COLOR.muted, 600)).setOrigin(0.5);
 
     [0, 1].forEach((i) => this.drawFighter(i as 0 | 1));
     this.drawTable(cx, 150);
@@ -118,16 +117,16 @@ export class MatchResultScene extends Phaser.Scene {
       if (i === 1 && entries[0].fighter.fighterId === entries[1].fighter.fighterId) sprite.setTint(MIRROR_TINT);
       if (winner !== "draw" && winner !== i) sprite.setAlpha(0.75);
     }
-    this.add.ellipse(x, feetY + 4, 160, 18, 0x000000, 0.4).setDepth(-1);
+    this.add.ellipse(x, feetY + 4, 160, 18, HEX.ink, 0.5).setDepth(-1);
     if (winner === i) {
-      this.add.text(x, feetY + 22, "WINNER", { fontSize: "16px", fontStyle: "bold", color: "#121018", backgroundColor: "#f2c14e", padding: { x: 10, y: 3 } }).setOrigin(0.5, 0);
+      stamp(this, x, feetY + 34, "Winner", HEX.accent, 18);
     }
-    const name = this.add.text(x, feetY + 54, entries[i].fighter.name, { fontSize: "26px", fontStyle: "bold", color: PLAYER_CSS[i], align: "center", wordWrap: { width: 320 } })
+    const name = this.add.text(x, feetY + 54, entries[i].fighter.name, displayText(28, PLAYER_CSS[i], { align: "center", wordWrap: { width: 320 } }))
       .setOrigin(0.5, 0);
     // Their career so far, this match included (the fight scene records it before opening this page).
     const record = recordOf(this.registry, entries[i].fighter.fighterId);
     if (record) {
-      this.add.text(x, name.y + name.height + 2, `Career ${winLoss(record)}`, { fontSize: "16px", color: "#a8a196" }).setOrigin(0.5, 0);
+      this.add.text(x, name.y + name.height + 2, `Career ${winLoss(record)}`, bodyText(16, COLOR.muted, 600)).setOrigin(0.5, 0);
     }
   }
 
@@ -135,29 +134,29 @@ export class MatchResultScene extends Phaser.Scene {
   private drawTable(cx: number, top: number): void {
     const { players } = this.result.stats;
     const rowH = 33;
+    // One panel behind the whole table (column heads to the favourite-move row).
+    popBox(this, cx - 300, top - 24, 600, (ROWS.length + 1) * rowH + 32, { fill: HEX.panel, radius: RADIUS.lg, shadow: SHADOW.lg }).setDepth(-2);
     const g = this.add.graphics();
     ROWS.forEach((row, r) => {
       const y = top + r * rowH;
-      if (r % 2 === 0) g.fillStyle(0xffffff, 0.04).fillRect(cx - 290, y - 3, 580, rowH);
+      if (r % 2 === 0) g.fillStyle(HEX.tile, 0.6).fillRect(cx - 290, y - 3, 580, rowH);
       const values = players.map(row.value);
       const best = row.higherWins === null || values[0] === values[1] ? -1 : values[0] > values[1] ? 0 : 1;
       players.forEach((s, i) => {
         const text = row.show ? row.show(values[i], s) : String(values[i]);
-        this.add.text(cx + (i === 0 ? -150 : 150), y, text, {
-          fontSize: "22px", fontStyle: best === i ? "bold" : "normal", color: best === i ? "#f2c14e" : "#f3efe6",
-        }).setOrigin(0.5, 0);
+        this.add.text(cx + (i === 0 ? -150 : 150), y, text, displayText(24, best === i ? COLOR.accent : COLOR.fg, { outline: false })).setOrigin(0.5, 0);
       });
-      this.add.text(cx, y + 2, row.label, { fontSize: "17px", color: "#a8a196" }).setOrigin(0.5, 0);
+      this.add.text(cx, y + 4, row.label, bodyText(17, COLOR.muted, 600)).setOrigin(0.5, 0);
     });
     // Favorite move: words, not a number.
     const y = top + ROWS.length * rowH;
-    if (ROWS.length % 2 === 0) g.fillStyle(0xffffff, 0.04).fillRect(cx - 290, y - 3, 580, rowH);
+    if (ROWS.length % 2 === 0) g.fillStyle(HEX.tile, 0.6).fillRect(cx - 290, y - 3, 580, rowH);
     players.forEach((s, i) => {
-      this.add.text(cx + (i === 0 ? -150 : 150), y + 2, s.favoriteMove ? MOVE_NAMES[s.favoriteMove] : "–", { fontSize: "19px", color: "#f3efe6" }).setOrigin(0.5, 0);
+      this.add.text(cx + (i === 0 ? -150 : 150), y + 2, s.favoriteMove ? MOVE_NAMES[s.favoriteMove] : "–", displayText(20, COLOR.fg, { outline: false })).setOrigin(0.5, 0);
     });
-    this.add.text(cx, y + 2, "Favorite move", { fontSize: "17px", color: "#a8a196" }).setOrigin(0.5, 0);
+    this.add.text(cx, y + 4, "Favorite move", bodyText(17, COLOR.muted, 600)).setOrigin(0.5, 0);
     // Column heads: the players' colours.
-    players.forEach((_, i) => g.fillStyle(PLAYER_COLORS[i], 1).fillRect(cx + (i === 0 ? -190 : 110), top - 12, 80, 4));
+    players.forEach((_, i) => g.fillStyle(PLAYER_COLORS[i], 1).fillRoundedRect(cx + (i === 0 ? -190 : 110), top - 13, 80, 6, 3));
   }
 
   /** "R1 · Red Stick · K.O. · 0:42" for each round. */
@@ -167,17 +166,17 @@ export class MatchResultScene extends Phaser.Scene {
       const who = r.outcome === "draw" ? "Draw" : entries[r.outcome].fighter.name;
       return `R${r.round}  ${who}  ${r.reason === "ko" ? "K.O." : "time"}  ${clock(r.frames)}`;
     });
-    const text = this.add.text(cx, y, chips.join("     "), { fontSize: "17px", color: "#c9c3b8", align: "center", wordWrap: { width: 760 } }).setOrigin(0.5, 0);
+    const text = this.add.text(cx, y, chips.join("     "), bodyText(17, COLOR.muted, 600, { align: "center", wordWrap: { width: 760 } })).setOrigin(0.5, 0);
     // A line in each round winner's colour would be noise; one muted rule above is enough.
-    this.add.rectangle(cx, y - 12, Math.min(760, text.width + 40), 1, 0x3a3346).setOrigin(0.5);
+    this.add.rectangle(cx, y - 12, Math.min(760, text.width + 40), 2, HEX.line).setOrigin(0.5);
   }
 
   private drawActions(cx: number, y: number): void {
     const button = (x: number, label: string, primary: boolean, onClick: () => void) => {
-      const t = this.add.text(x, y, label, {
-        fontSize: "24px", fontStyle: "bold", color: primary ? "#1a1410" : "#f3efe6",
-        backgroundColor: primary ? "#f2c14e" : "#1c1824", padding: { x: 20, y: 10 },
-      }).setOrigin(0.5).setInteractive({ useHandCursor: true });
+      // Padding keeps the hit area the size of the box drawn behind.
+      const t = this.add.text(x, y, label, displayText(24, primary ? COLOR.ink : COLOR.fg, { outline: false, padding: { x: 20, y: 10 } }))
+        .setOrigin(0.5).setDepth(1).setInteractive({ useHandCursor: true });
+      popBox(this, x - t.width / 2, y - t.height / 2, t.width, t.height, { fill: primary ? HEX.accent : HEX.panel, radius: RADIUS.md, shadow: SHADOW.md });
       t.on("pointerdown", onClick);
       return t;
     };

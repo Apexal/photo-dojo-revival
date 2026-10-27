@@ -9,6 +9,7 @@ import { KingOfTheHill } from "../king-of-the-hill";
 import { playMenuMusic } from "../menu-music";
 
 import { GAME_HEIGHT, GAME_WIDTH } from "../render/stage";
+import { bodyText, COLOR, displayText, drawBackdrop, drawPopBox, HEX, popBox, RADIUS, SHADOW } from "../render/theme";
 import { MAX_ENTRANTS, MIN_ENTRANTS, SERIES_INFO, SERIES_KINDS, type SeriesKind, type SeriesSession } from "../series";
 import { Tournament } from "../tournament";
 import { REGISTRY } from "./boot-scene";
@@ -54,9 +55,11 @@ export class SeriesSetupScene extends Phaser.Scene {
   private tiles!: Phaser.GameObjects.Container;
   private cursorBox!: Phaser.GameObjects.Graphics;
   private modeText!: Phaser.GameObjects.Text;
+  private modeBox!: Phaser.GameObjects.Graphics;
   private blurbText!: Phaser.GameObjects.Text;
   private countText!: Phaser.GameObjects.Text;
   private startButton!: Phaser.GameObjects.Text;
+  private startBox!: Phaser.GameObjects.Graphics;
   private thumbUrls: string[] = [];
   private enterLatched = false;
   private leaving = false;
@@ -78,19 +81,22 @@ export class SeriesSetupScene extends Phaser.Scene {
     playMenuMusic(this);
     this.library = this.registry.get(REGISTRY.library) ?? [];
     const cx = GAME_WIDTH / 2;
-    this.add.text(cx, 30, "PARTY MODES", { fontSize: "44px", fontStyle: "bold", color: "#f2c14e" }).setOrigin(0.5, 0);
-    this.modeText = this.add.text(cx, MODE_Y, "", { fontSize: "30px", fontStyle: "bold", color: "#f3efe6", padding: { x: 16, y: 4 } })
+    drawBackdrop(this);
+    this.add.text(cx, 30, "PARTY MODES", displayText(52, COLOR.party)).setOrigin(0.5, 0);
+    // The mode chip: redrawn behind the mode's name in draw(), gold while the cursor is on it.
+    this.modeBox = this.add.graphics();
+    this.modeText = this.add.text(cx, MODE_Y, "", displayText(30, COLOR.fg, { outline: false, padding: { x: 16, y: 4 } }))
       .setOrigin(0.5).setInteractive({ useHandCursor: true });
     this.modeText.on("pointerdown", () => this.switchKind(1));
-    this.blurbText = this.add.text(cx, MODE_Y + 30, "", { fontSize: "17px", color: "#c9c3b8" }).setOrigin(0.5, 0);
+    this.blurbText = this.add.text(cx, MODE_Y + 30, "", bodyText(17, COLOR.muted, 600)).setOrigin(0.5, 0);
     this.tiles = this.add.container(0, 0);
     this.cursorBox = this.add.graphics().setDepth(10);
-    this.countText = this.add.text(cx, GAME_HEIGHT - 128, "", { fontSize: "22px", color: "#f3efe6" }).setOrigin(0.5);
-    this.startButton = this.add.text(cx, GAME_HEIGHT - 80, "", {
-      fontSize: "26px", fontStyle: "bold", color: "#1a1410", backgroundColor: "#f2c14e", padding: { x: 20, y: 10 },
-    }).setOrigin(0.5).setInteractive({ useHandCursor: true });
+    this.countText = this.add.text(cx, GAME_HEIGHT - 128, "", displayText(24, COLOR.fg)).setOrigin(0.5);
+    this.startBox = this.add.graphics();
+    this.startButton = this.add.text(cx, GAME_HEIGHT - 80, "", displayText(26, COLOR.ink, { outline: false, padding: { x: 20, y: 10 } }))
+      .setOrigin(0.5).setInteractive({ useHandCursor: true });
     this.startButton.on("pointerdown", () => this.begin());
-    this.add.text(cx, GAME_HEIGHT - 30, "◀ ▶ ▲ ▼ choose  ·  punch: add / remove  ·  Enter / Start: begin  ·  kick: back", { fontSize: "17px", color: "#a8a196" })
+    this.add.text(cx, GAME_HEIGHT - 30, "◀ ▶ ▲ ▼ choose  ·  punch: add / remove  ·  Enter / Start: begin  ·  kick: back", bodyText(17, COLOR.muted, 600))
       .setOrigin(0.5);
 
     this.sources = this.setup.inputs.map((d) => createInputSource(this, d));
@@ -128,9 +134,14 @@ export class SeriesSetupScene extends Phaser.Scene {
   private draw(): void {
     const info = SERIES_INFO[this.kind];
     const onMode = this.cursor === MODE_ROW;
-    this.modeText.setText(`◀  ${info.name}  ▶`).setColor(onMode ? "#121018" : "#f3efe6").setBackgroundColor(onMode ? "#f2c14e" : "#1c1824");
+    this.modeText.setText(`◀  ${info.name}  ▶`).setColor(onMode ? COLOR.ink : COLOR.fg);
+    const m = this.modeText;
+    this.modeBox.clear();
+    drawPopBox(this.modeBox, m.x - m.width / 2, m.y - m.height / 2, m.width, m.height, onMode ? { fill: HEX.accent, radius: m.height / 2 } : { fill: HEX.panel, border: HEX.edge, radius: m.height / 2 });
     this.blurbText.setText(info.blurb);
-    this.startButton.setText(this.kind === "tournament" ? "Draw the bracket ▶" : "Take the hill ▶");
+    const b = this.startButton.setText(this.kind === "tournament" ? "Draw the bracket ▶" : "Take the hill ▶");
+    this.startBox.clear();
+    drawPopBox(this.startBox, b.x - b.width / 2, b.y - b.height / 2, b.width, b.height, { fill: HEX.accent });
 
     this.tiles.removeAll(true);
     const page = Math.floor(Math.max(0, this.cursor) / this.pageSize);
@@ -139,7 +150,9 @@ export class SeriesSetupScene extends Phaser.Scene {
       const index = first + slot;
       const { x, y } = this.tilePosition(slot);
       const order = this.picked.indexOf(index);
-      const bg = this.add.rectangle(x, y, TILE, TILE, 0x1c1824).setOrigin(0).setStrokeStyle(order >= 0 ? 3 : 1, order >= 0 ? 0xf2c14e : 0x3a3346)
+      this.tiles.add(popBox(this, x, y, TILE, TILE, { fill: HEX.panel, border: order >= 0 ? HEX.accent : HEX.ink, borderWidth: order >= 0 ? 4 : 3, radius: RADIUS.md, shadow: SHADOW.md }));
+      // An invisible hit area over the drawn tile.
+      const bg = this.add.rectangle(x, y, TILE, TILE, 0x000000, 0.001).setOrigin(0)
         .setInteractive({ useHandCursor: true });
       bg.on("pointerdown", () => {
         this.cursor = index;
@@ -149,28 +162,30 @@ export class SeriesSetupScene extends Phaser.Scene {
       if (this.textures.exists(thumbKey(entry))) {
         this.tiles.add(this.add.image(x + TILE / 2, y + TILE / 2, thumbKey(entry)).setDisplaySize(TILE - 10, TILE - 10).setAlpha(order >= 0 ? 1 : 0.55));
       }
-      this.tiles.add(this.add.text(x + TILE / 2, y + TILE + 6, entry.fighter.name, {
-        fontSize: "14px", color: order >= 0 ? "#f2c14e" : "#c9c3b8", fixedWidth: TILE + GAP, align: "center",
-      }).setOrigin(0.5, 0));
+      this.tiles.add(this.add.text(x + TILE / 2, y + TILE + 8, entry.fighter.name,
+        bodyText(14, order >= 0 ? COLOR.accent : COLOR.muted, order >= 0 ? 800 : 600, { fixedWidth: TILE + GAP, align: "center" })).setOrigin(0.5, 0));
       if (order >= 0) {
-        this.tiles.add(this.add.text(x + 4, y + 4, String(order + 1), {
-          fontSize: "16px", fontStyle: "bold", color: "#121018", backgroundColor: "#f2c14e", padding: { x: 6, y: 1 },
-        }));
+        // The pick order, as a gold chip on the tile's corner.
+        const num = this.add.text(0, 0, String(order + 1), displayText(18, COLOR.ink, { outline: false })).setOrigin(0.5);
+        const w = Math.max(26, num.width + 12), h = 26;
+        this.tiles.add(popBox(this, x - 4, y - 4, w, h, { fill: HEX.accent, radius: RADIUS.sm, shadow: SHADOW.sm }));
+        this.tiles.add(num.setPosition(x - 4 + w / 2, y - 4 + h / 2));
       }
     });
     const pages = Math.ceil(this.library.length / this.pageSize);
     if (pages > 1) {
-      this.tiles.add(this.add.text(GAME_WIDTH / 2, GRID_Y + ROWS * ROW_H - 10, `page ${page + 1} / ${pages}`, { fontSize: "15px", color: "#c9c3b8" }).setOrigin(0.5, 0));
+      this.tiles.add(this.add.text(GAME_WIDTH / 2, GRID_Y + ROWS * ROW_H - 10, `page ${page + 1} / ${pages}`, bodyText(15, COLOR.muted, 600)).setOrigin(0.5, 0));
     }
     this.cursorBox.clear();
     if (!onMode) {
       const { x, y } = this.tilePosition(this.cursor - first);
-      this.cursorBox.lineStyle(4, 0xf3efe6, 1).strokeRect(x - 5, y - 5, TILE + 10, TILE + 10);
+      this.cursorBox.lineStyle(4, HEX.fg, 1).strokeRoundedRect(x - 6, y - 6, TILE + 12, TILE + 12, RADIUS.md + 4);
     }
 
     const n = this.picked.length;
     this.countText.setText(n < MIN_ENTRANTS ? `${n} picked: pick at least ${MIN_ENTRANTS}` : `${n} fighters${n === MAX_ENTRANTS ? " (full)" : ""}`);
     this.startButton.setAlpha(n >= MIN_ENTRANTS ? 1 : 0.4);
+    this.startBox.setAlpha(n >= MIN_ENTRANTS ? 1 : 0.4);
   }
 
   private tilePosition(slot: number) {

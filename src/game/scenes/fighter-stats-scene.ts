@@ -8,6 +8,7 @@ import { MenuInput } from "../input/menu-input";
 import { MOVE_NAMES } from "../move-names";
 import { GAME_HEIGHT, GAME_WIDTH } from "../render/stage";
 import { REGISTRY } from "./boot-scene";
+import { bodyText, COLOR, displayText, drawBackdrop, HEX, popBox, RADIUS, SHADOW } from "../render/theme";
 
 export interface FighterStatsSceneData {
   fighterId: string;
@@ -20,7 +21,6 @@ export interface FighterStatsSceneData {
 /** Every fighter's attacks: the shared core, plus the archetype's if its move is an attack. */
 const CORE_MOVES: AttackId[] = ["punch", "kick", "uppercut", "lowKick", "jumpKick"];
 const BAR_W = 140;
-const GOLD = 0xf2c14e;
 const percent = (part: number, whole: number) => (whole ? `${Math.round((part / whole) * 100)}%` : "–");
 
 /**
@@ -45,16 +45,18 @@ export class FighterStatsScene extends Phaser.Scene {
     const library: LibraryEntry[] = this.registry.get(REGISTRY.library) ?? [];
     const entry = library.find((e) => e.fighter.fighterId === this.setup.fighterId);
     const record = recordOf(this.registry, this.setup.fighterId);
-    this.add.rectangle(0, 0, GAME_WIDTH, GAME_HEIGHT, 0x121018, 1).setOrigin(0).setInteractive().on("pointerdown", () => this.close());
+    drawBackdrop(this);
+    // An invisible full-screen hit area: a click anywhere closes.
+    this.add.rectangle(0, 0, GAME_WIDTH, GAME_HEIGHT, 0x000000, 0.001).setOrigin(0).setInteractive().on("pointerdown", () => this.close());
     if (!entry) return this.close();
     const archetype = ARCHETYPES[entry.fighter.archetype];
 
-    this.add.text(GAME_WIDTH / 2, 34, entry.fighter.name.toUpperCase(), { fontSize: "52px", fontStyle: "bold", color: "#f2c14e", align: "center" }).setOrigin(0.5, 0);
-    this.add.text(GAME_WIDTH / 2, 100, `${archetype.name}  ·  ${archetype.moveName}`, { fontSize: "20px", color: "#c9c3b8" }).setOrigin(0.5, 0);
+    this.add.text(GAME_WIDTH / 2, 34, entry.fighter.name.toUpperCase(), displayText(56, COLOR.accent, { align: "center" })).setOrigin(0.5, 0);
+    this.add.text(GAME_WIDTH / 2, 100, `${archetype.name}  ·  ${archetype.moveName}`, bodyText(20, COLOR.muted, 600)).setOrigin(0.5, 0);
     this.drawFighter(entry);
-    this.add.text(GAME_WIDTH / 2, GAME_HEIGHT - 44, "punch / kick / Esc: back", { fontSize: "17px", color: "#a8a196" }).setOrigin(0.5, 0);
+    this.add.text(GAME_WIDTH / 2, GAME_HEIGHT - 44, "punch / kick / Esc: back", bodyText(17, COLOR.muted, 600)).setOrigin(0.5, 0);
     if (!record) {
-      this.add.text(640, 340, "No matches yet.\nFinish a match and it starts counting.", { fontSize: "24px", color: "#c9c3b8", align: "center", lineSpacing: 8 }).setOrigin(0.5);
+      this.add.text(640, 340, "No matches yet.\nFinish a match and it starts counting.", bodyText(24, COLOR.muted, 500, { align: "center", lineSpacing: 8 })).setOrigin(0.5);
       return;
     }
     this.drawTable(record, 450, 160);
@@ -67,7 +69,7 @@ export class FighterStatsScene extends Phaser.Scene {
   private drawFighter(entry: LibraryEntry): void {
     const key = this.setup.texture;
     const feet = { x: 230, y: 610 };
-    this.add.ellipse(feet.x, feet.y + 4, 180, 20, 0x000000, 0.4);
+    this.add.ellipse(feet.x, feet.y + 4, 180, 20, HEX.ink, 0.5);
     if (!key || !this.textures.exists(key)) return;
     const anchor = groundAnchorFor(geometryOf(entry.fighter), "win");
     this.add.image(feet.x, feet.y, key).setOrigin(anchor.x / SPRITE_CANVAS_SIZE, anchor.y / SPRITE_CANVAS_SIZE).setScale(440 / SPRITE_CANVAS_SIZE);
@@ -93,18 +95,19 @@ export class FighterStatsScene extends Phaser.Scene {
       ["Favorite move", favorite ? MOVE_NAMES[favorite] : "–"],
     ];
     const rowH = 31;
+    popBox(this, x - 22, top - 16, 404, rows.length * rowH + 26, { fill: HEX.panel, radius: RADIUS.lg, shadow: SHADOW.lg }).setDepth(-2);
     const g = this.add.graphics();
     rows.forEach(([label, value], i) => {
       const y = top + i * rowH;
-      if (i % 2 === 0) g.fillStyle(0xffffff, 0.04).fillRect(x - 10, y - 3, 380, rowH);
-      this.add.text(x, y + 2, label, { fontSize: "17px", color: "#a8a196" });
-      this.add.text(x + 360, y, value, { fontSize: "21px", fontStyle: i === 0 ? "bold" : "normal", color: i === 0 ? "#f2c14e" : "#f3efe6" }).setOrigin(1, 0);
+      if (i % 2 === 0) g.fillStyle(HEX.tile, 0.6).fillRect(x - 10, y - 3, 380, rowH);
+      this.add.text(x, y + 3, label, bodyText(17, COLOR.muted, 600));
+      this.add.text(x + 360, y, value, displayText(22, i === 0 ? COLOR.accent : COLOR.fg, { outline: false })).setOrigin(1, 0);
     });
   }
 
   /** Clean hits by move: one bar each, in one colour, longest = most landed. Returns the bottom edge. */
   private drawMoves(r: FighterRecord, moves: AttackId[], x: number, top: number): number {
-    this.add.text(x, top, "Clean hits by move", { fontSize: "19px", fontStyle: "bold", color: "#f3efe6" });
+    this.add.text(x, top - 4, "Clean hits by move", displayText(26, COLOR.fg));
     const max = Math.max(1, ...moves.map((m) => r.movesLanded[m] ?? 0));
     const favorite = favoriteMoveOf(r);
     const g = this.add.graphics();
@@ -112,13 +115,13 @@ export class FighterStatsScene extends Phaser.Scene {
     moves.forEach((move, i) => {
       const y = top + 38 + i * rowH;
       const n = r.movesLanded[move] ?? 0;
-      this.add.text(x, y + 2, MOVE_NAMES[move], { fontSize: "16px", color: move === favorite ? "#f3efe6" : "#a8a196", fontStyle: move === favorite ? "bold" : "normal" });
+      this.add.text(x, y + 2, MOVE_NAMES[move], move === favorite ? bodyText(16, COLOR.fg, 800) : bodyText(16, COLOR.muted, 600));
       const barX = x + 160;
       // A faint track, then the bar from the baseline with a rounded data end.
-      g.fillStyle(0xffffff, 0.05).fillRect(barX, y + 4, BAR_W, 16);
+      g.fillStyle(HEX.well, 1).fillRoundedRect(barX, y + 4, BAR_W, 16, 4);
       const w = Math.round((n / max) * BAR_W);
-      if (w > 0) g.fillStyle(GOLD, move === favorite ? 1 : 0.6).fillRoundedRect(barX, y + 4, w, 16, { tl: 0, bl: 0, tr: Math.min(4, w), br: Math.min(4, w) });
-      this.add.text(barX + w + 8, y + 1, String(n), { fontSize: "16px", color: "#f3efe6" });
+      if (w > 0) g.fillStyle(HEX.accent, move === favorite ? 1 : 0.6).fillRoundedRect(barX, y + 4, w, 16, { tl: 0, bl: 0, tr: Math.min(4, w), br: Math.min(4, w) });
+      this.add.text(barX + w + 8, y + 1, String(n), displayText(18, COLOR.fg, { outline: false }));
     });
     return top + 38 + moves.length * rowH;
   }
@@ -130,16 +133,16 @@ export class FighterStatsScene extends Phaser.Scene {
       .filter(([id]) => names.has(id))
       .sort(([, a], [, b]) => b.wins + b.losses + b.draws - (a.wins + a.losses + a.draws))
       .slice(0, 4);
-    this.add.text(x, top, "Rivals", { fontSize: "19px", fontStyle: "bold", color: "#f3efe6" });
+    this.add.text(x, top - 4, "Rivals", displayText(26, COLOR.fg));
     if (!rivals.length) {
-      this.add.text(x, top + 36, "Only mirror matches so far", { fontSize: "16px", color: "#a8a196" });
+      this.add.text(x, top + 36, "Only mirror matches so far", bodyText(16, COLOR.muted, 600));
       return;
     }
     rivals.forEach(([id, tally], i) => {
       const y = top + 36 + i * 30;
       const name = names.get(id)!;
-      this.add.text(x, y, `vs ${name.length > 22 ? `${name.slice(0, 21)}…` : name}`, { fontSize: "16px", color: "#c9c3b8" });
-      this.add.text(x + 340, y, winLoss(tally), { fontSize: "16px", color: "#f3efe6" }).setOrigin(1, 0);
+      this.add.text(x, y, `vs ${name.length > 22 ? `${name.slice(0, 21)}…` : name}`, bodyText(16, COLOR.muted, 600));
+      this.add.text(x + 340, y, winLoss(tally), displayText(18, COLOR.fg, { outline: false })).setOrigin(1, 0);
     });
   }
 

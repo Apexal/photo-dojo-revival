@@ -60,7 +60,7 @@ describe("hit weight", () => {
   it("markers: the attacker's colour, a symbol per kind, pop out, hold through hitstop, then fade", () => {
     expect(markerColors(0).rim).toBe(PLAYER_COLORS[0]);
     expect(markerColors(1).rim).toBe(PLAYER_COLORS[1]);
-    expect(markerColors(0).core).toBe(0xf9ccc8); // P1's red, paled toward white for the hot centre
+    expect(markerColors(0).core).toBe(0xffd1cb); // P1's red, paled toward white for the hot centre
     const shapes = Object.values(HIT_MARKER_STYLES).map((s) => s.shape);
     expect(new Set(shapes).size).toBe(shapes.length);
     expect(HIT_MARKER_STYLES.ko.radius).toBeGreaterThan(HIT_MARKER_STYLES.hit.radius);

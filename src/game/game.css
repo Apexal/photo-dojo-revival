@@ -1,23 +1,18 @@
-:root { color-scheme: dark; --bg: #121018; --fg: #f3efe6; --accent: #f2c14e; }
-* { box-sizing: border-box; }
-html, body { margin: 0; height: 100%; background: var(--bg); color: var(--fg); font-family: system-ui, sans-serif; }
+@import "../shared/theme.css";
+html, body { height: 100%; }
 body { display: flex; flex-direction: column; }
 #game { flex: 1; min-height: 0; display: flex; align-items: center; justify-content: center; }
 #game canvas { display: block; }
-#toolbar { display: flex; gap: 8px; align-items: center; justify-content: center; padding: 8px 16px; flex-wrap: wrap; }
+#toolbar { display: flex; gap: 12px; align-items: center; justify-content: center; padding: 10px 16px 14px; flex-wrap: wrap; }
 #toolbar[hidden] { display: none; }
-#toolbar button { font: inherit; padding: 6px 12px; border-radius: 6px; border: 1px solid #555; background: #222; color: var(--fg); cursor: pointer; }
-#toolbar button:hover { border-color: var(--accent); }
-#toolbar-status { min-width: 12em; opacity: 0.85; }
-#toolbar a { color: var(--fg); opacity: 0.85; }
-#toolbar a:hover { color: var(--accent); opacity: 1; }
+#toolbar button { font-size: 16px; padding: 8px 14px; box-shadow: var(--shadow-pop-sm); }
+#toolbar button:hover { border-color: var(--accent); box-shadow: var(--shadow-pop); }
+#toolbar-status { min-width: 12em; color: var(--muted); font-weight: 600; }
+#toolbar a { color: var(--muted); font-weight: 800; }
+#toolbar a:hover { color: var(--accent); }
 
 /* Shown instead of the game on a phone (device-gate.ts). */
-#phone-gate { position: fixed; inset: 0; overflow: auto; display: flex; flex-direction: column; gap: 16px; padding: 24px max(20px, env(safe-area-inset-left)); max-width: 520px; margin: 0 auto; font-size: 17px; line-height: 1.45; }
-#phone-gate h1 { margin: 12px 0 0; color: var(--accent); font-size: 32px; line-height: 1.1; }
-#phone-gate h1 span { display: block; color: #e8483b; font-size: 18px; letter-spacing: 0.2em; margin-top: 4px; }
+#phone-gate { position: fixed; inset: 0; overflow: auto; display: flex; flex-direction: column; gap: 16px; padding: 24px max(20px, env(safe-area-inset-left)); max-width: 520px; margin: 0 auto; font-size: 18px; line-height: 1.5; }
+#phone-gate h1 { margin: 12px 0 18px; color: var(--accent); font-size: 40px; line-height: 1; -webkit-text-stroke: var(--stroke-sm) var(--ink); paint-order: stroke fill; text-shadow: var(--shadow-text); }
+#phone-gate h1 span { display: table; margin-top: 10px; font-size: 18px; letter-spacing: 0.12em; text-transform: uppercase; padding: 5px 10px 4px; border: 3px solid var(--ink); border-radius: var(--radius-sm); box-shadow: var(--shadow-pop-sm); background: var(--bad); color: var(--ink); transform: rotate(-5deg); -webkit-text-stroke: 0; text-shadow: none; }
 #phone-gate p { margin: 0; }
-#phone-gate .muted { color: #a8a196; font-size: 15px; }
-#phone-gate a.button, #phone-gate button { font: inherit; font-weight: 600; padding: 14px 18px; border-radius: 12px; border: 2px solid #3a3346; background: #1c1824; color: var(--fg); text-align: center; text-decoration: none; cursor: pointer; }
-#phone-gate a.button.primary { background: var(--accent); border-color: var(--accent); color: #1a1410; }
-#phone-gate a { color: var(--accent); }

@@ -5,6 +5,7 @@ import { createInputSource, isPlayerInput, type InputDescriptor } from "../input
 import type { InputSource } from "../input/input-source";
 import { GAME_HEIGHT, GAME_WIDTH } from "../render/stage";
 import type { FightScene } from "./fight-scene";
+import { bodyText, COLOR, displayText, HEX } from "../render/theme";
 
 export interface RoundResultData {
   roundNumber: number;
@@ -40,17 +41,12 @@ export class RoundResultScene extends Phaser.Scene {
     const r = this.result;
     const winnerName = (o: RoundOutcome | null) => (o === null || o === "draw" ? null : r.names[o]);
 
-    this.add.rectangle(0, 0, GAME_WIDTH, GAME_HEIGHT, 0x121018, 0.72).setOrigin(0);
+    this.add.rectangle(0, 0, GAME_WIDTH, GAME_HEIGHT, HEX.ink, 0.75).setOrigin(0);
     const title = winnerName(r.roundWinner) ? `${winnerName(r.roundWinner)} takes round ${r.roundNumber}` : `Round ${r.roundNumber}: draw`;
-    this.add.text(GAME_WIDTH / 2, 230, title, {
-      fontSize: "56px", fontStyle: "bold", color: "#f2c14e", stroke: "#121018", strokeThickness: 8,
-      align: "center", wordWrap: { width: GAME_WIDTH - 120 },
-    }).setOrigin(0.5);
-    this.add.text(GAME_WIDTH / 2, 330, `${r.reason === "ko" ? "K.O." : "Time"}  ·  ${r.names[0]} ${r.wins[0]} – ${r.wins[1]} ${r.names[1]}`, {
-      fontSize: "28px", color: "#f3efe6",
-    }).setOrigin(0.5);
+    this.add.text(GAME_WIDTH / 2, 230, title, displayText(60, COLOR.accent, { align: "center", wordWrap: { width: GAME_WIDTH - 120 } })).setOrigin(0.5);
+    this.add.text(GAME_WIDTH / 2, 330, `${r.reason === "ko" ? "K.O." : "Time"}  ·  ${r.names[0]} ${r.wins[0]} – ${r.wins[1]} ${r.names[1]}`, displayText(30, COLOR.fg)).setOrigin(0.5);
     const help = "Punch to continue";
-    this.add.text(GAME_WIDTH / 2, 440, help, { fontSize: "30px", color: "#c9c3b8" }).setOrigin(0.5);
+    this.add.text(GAME_WIDTH / 2, 440, help, bodyText(28, COLOR.muted, 800, { stroke: COLOR.ink, strokeThickness: 5 })).setOrigin(0.5);
   }
 
   private get fight(): FightScene {

@@ -9,6 +9,7 @@ import type { InputSource } from "../input/input-source";
 import { playMenuMusic } from "../menu-music";
 
 import { GAME_HEIGHT, GAME_WIDTH } from "../render/stage";
+import { bodyText, COLOR, displayText, drawBackdrop, drawPopBox, HEX, popBox, RADIUS, SHADOW } from "../render/theme";
 import type { Tournament } from "../tournament";
 import type { SeriesSession } from "../series";
 import { REGISTRY } from "./boot-scene";
@@ -16,7 +17,8 @@ import { startMatch } from "./stage-select-scene";
 
 type TournamentSession = Extract<SeriesSession, { kind: "tournament" }>;
 
-const PLAYER_CSS = ["#e8483b", "#3f86f0"];
+const PLAYER_CSS = [COLOR.bad, COLOR.p2];
+const PLAYER_HEX = [HEX.bad, HEX.p2];
 const INPUT_DELAY_MS = 500;
 /** A second kick within this long abandons the tournament. */
 const QUIT_CONFIRM_MS = 2000;
@@ -62,15 +64,16 @@ export class TournamentScene extends Phaser.Scene {
     this.sources = session.inputs.map((d) => createInputSource(this, d));
     this.previous = this.sources.map((s) => s.read());
 
+    drawBackdrop(this);
     const { bracket } = session;
-    this.add.text(GAME_WIDTH / 2, 30, "TOURNAMENT", { fontSize: "48px", fontStyle: "bold", color: "#f2c14e" }).setOrigin(0.5, 0);
+    this.add.text(GAME_WIDTH / 2, 30, "TOURNAMENT", displayText(52, COLOR.party)).setOrigin(0.5, 0);
     this.drawBracket(bracket);
     const champion = bracket.champion;
     if (champion) this.drawChampion(champion);
     else this.drawNext(bracket);
     const next = bracket.next;
     announce(this, champion ? "champion" : tournamentRoundLine(next ? bracket.roundName(next.round) : ""));
-    this.hint = this.add.text(GAME_WIDTH / 2, GAME_HEIGHT - 28, "", { fontSize: "17px", color: "#a8a196" }).setOrigin(0.5);
+    this.hint = this.add.text(GAME_WIDTH / 2, GAME_HEIGHT - 28, "", bodyText(17, COLOR.muted, 600)).setOrigin(0.5);
     this.setHint();
   }
 
@@ -89,7 +92,7 @@ export class TournamentScene extends Phaser.Scene {
     for (let r = 0; r <= bracket.rounds.length; r++) {
       const x = left + r * colW;
       const final = r === bracket.rounds.length;
-      this.add.text(x + BOX_W / 2, TOP - 34, final ? "Champion" : bracket.roundName(r), { fontSize: "16px", color: "#a8a196" }).setOrigin(0.5, 0);
+      this.add.text(x + BOX_W / 2, TOP - 34, final ? "Champion" : bracket.roundName(r), bodyText(16, COLOR.muted, 800)).setOrigin(0.5, 0);
       if (final) {
         const winner = bracket.rounds[r - 1][0].winner;
         this.drawSlot(x, slotY(r, 0), winner === null ? null : bracket.entrants[winner], winner === null ? "?" : "", { gold: winner !== null });
@@ -111,7 +114,7 @@ export class TournamentScene extends Phaser.Scene {
         // The bracket lines: out of both boxes, down/up to the middle, on into the next round.
         const [ya, yb] = [slotY(r, 2 * i), slotY(r, 2 * i + 1)];
         const mid = (ya + yb) / 2, out = x + BOX_W, turn = out + (colW - BOX_W) / 2;
-        lines.lineStyle(2, playing ? 0xf2c14e : 0x3a3346, 1);
+        lines.lineStyle(playing ? 3 : 2, playing ? HEX.accent : HEX.line, 1);
         if (bye) {
           const y = m.a === null ? yb : ya;
           lines.lineBetween(out, y, turn, y).lineBetween(turn, y, turn, mid);
@@ -124,20 +127,25 @@ export class TournamentScene extends Phaser.Scene {
   }
 
   private drawSlot(x: number, y: number, entry: LibraryEntry | null, placeholder: string, style: { lost?: boolean; gold?: boolean; player?: number }): void {
-    const stroke = style.player !== undefined ? Phaser.Display.Color.HexStringToColor(PLAYER_CSS[style.player]).color : style.gold ? 0xf2c14e : 0x3a3346;
-    this.add.rectangle(x, y - BOX_H / 2, BOX_W, BOX_H, 0x1c1824).setOrigin(0).setStrokeStyle(style.player !== undefined || style.gold ? 3 : 1, stroke);
+    // The match being played: each box in its player's colour; the champion's slot gold.
+    const border = style.player !== undefined ? PLAYER_HEX[style.player] : style.gold ? HEX.accent : HEX.ink;
+    popBox(this, x, y - BOX_H / 2, BOX_W, BOX_H, { fill: HEX.panel, border, borderWidth: style.player !== undefined ? 4 : 3, radius: RADIUS.sm, shadow: SHADOW.sm });
     const alpha = style.lost ? 0.4 : 1;
     if (entry && this.textures.exists(`thumb:${entry.fighter.fighterId}`)) {
       this.add.image(x + 6 + THUMB / 2, y, `thumb:${entry.fighter.fighterId}`).setDisplaySize(THUMB, THUMB).setAlpha(alpha);
     }
-    const color = style.player !== undefined ? PLAYER_CSS[style.player] : style.gold ? "#f2c14e" : "#f3efe6";
-    this.add.text(x + THUMB + 14, y, entry?.fighter.name ?? placeholder, {
-      fontSize: "17px", fontStyle: style.player !== undefined || style.gold ? "bold" : "normal", color: entry ? color : "#6b6574", fixedWidth: BOX_W - THUMB - 20,
-    }).setOrigin(0, 0.5).setAlpha(alpha);
+    const color = entry ? (style.player !== undefined ? PLAYER_CSS[style.player] : style.gold ? COLOR.accent : COLOR.fg) : COLOR.disabled;
+    const name = entry?.fighter.name ?? placeholder;
+    const nameStyle = style.player !== undefined || style.gold
+      ? displayText(18, color, { outline: false, fixedWidth: BOX_W - THUMB - 20 })
+      : bodyText(17, color, 600, { fixedWidth: BOX_W - THUMB - 20 });
+    this.add.text(x + THUMB + 14, y, name, nameStyle).setOrigin(0, 0.5).setAlpha(alpha);
     if (style.player !== undefined) {
-      this.add.text(x + BOX_W - 4, y - BOX_H / 2 - 2, `P${style.player + 1}`, {
-        fontSize: "12px", fontStyle: "bold", color: "#121018", backgroundColor: PLAYER_CSS[style.player], padding: { x: 4, y: 1 },
-      }).setOrigin(1, 1);
+      // The P1 / P2 tag sits on the box's top edge, at its right.
+      const tag = this.add.text(0, 0, `P${style.player + 1}`, displayText(13, COLOR.ink, { outline: false }));
+      const w = tag.width + 10, h = tag.height + 2;
+      popBox(this, x + BOX_W - 4 - w, y - BOX_H / 2 - 2 - h, w, h, { fill: PLAYER_HEX[style.player], borderWidth: 2, radius: RADIUS.sm / 2, shadow: 0 });
+      tag.setOrigin(0.5).setPosition(x + BOX_W - 4 - w / 2, y - BOX_H / 2 - 2 - h / 2).setDepth(1);
     }
   }
 
@@ -145,25 +153,19 @@ export class TournamentScene extends Phaser.Scene {
     const next = bracket.next!;
     const [a, b] = [bracket.entrants[next.a], bracket.entrants[next.b]];
     const cx = GAME_WIDTH / 2, y = 572;
-    this.add.text(cx, y - 18, bracket.roundName(next.round).toUpperCase(), { fontSize: "16px", color: "#a8a196" }).setOrigin(0.5, 1);
-    this.add.text(cx - 40, y, `P1 · ${a.fighter.name}`, { fontSize: "30px", fontStyle: "bold", color: PLAYER_CSS[0] }).setOrigin(1, 0);
-    this.add.text(cx, y, "vs", { fontSize: "26px", color: "#f2c14e" }).setOrigin(0.5, 0);
-    this.add.text(cx + 40, y, `${b.fighter.name} · P2`, { fontSize: "30px", fontStyle: "bold", color: PLAYER_CSS[1] }).setOrigin(0, 0);
-    const go = this.add.text(cx, y + 66, "Fight!  (punch)", {
-      fontSize: "24px", fontStyle: "bold", color: "#1a1410", backgroundColor: "#f2c14e", padding: { x: 20, y: 8 },
-    }).setOrigin(0.5).setInteractive({ useHandCursor: true });
-    go.on("pointerdown", () => this.fight());
+    this.add.text(cx, y - 18, bracket.roundName(next.round).toUpperCase(), bodyText(16, COLOR.muted, 800)).setOrigin(0.5, 1);
+    this.add.text(cx - 40, y, `P1 · ${a.fighter.name}`, displayText(32, PLAYER_CSS[0])).setOrigin(1, 0);
+    this.add.text(cx, y, "vs", displayText(28, COLOR.accent)).setOrigin(0.5, 0);
+    this.add.text(cx + 40, y, `${b.fighter.name} · P2`, displayText(32, PLAYER_CSS[1])).setOrigin(0, 0);
+    button(this, cx, y + 66, "Fight!  (punch)", 24, true).on("pointerdown", () => this.fight());
   }
 
   private drawChampion(champion: LibraryEntry): void {
     const cx = GAME_WIDTH / 2;
-    this.add.text(cx, 590, `${champion.fighter.name.toUpperCase()} IS THE CHAMPION!`, {
-      fontSize: "44px", fontStyle: "bold", color: "#f2c14e", stroke: "#121018", strokeThickness: 8, align: "center", wordWrap: { width: GAME_WIDTH - 120 },
-    }).setOrigin(0.5);
-    const done = this.add.text(cx, 648, "Back to fighter select", {
-      fontSize: "22px", fontStyle: "bold", color: "#f3efe6", backgroundColor: "#1c1824", padding: { x: 18, y: 8 },
-    }).setOrigin(0.5).setInteractive({ useHandCursor: true });
-    done.on("pointerdown", () => this.quit());
+    this.add.text(cx, 590, `${champion.fighter.name.toUpperCase()} IS THE CHAMPION!`, displayText(48, COLOR.accent, {
+      align: "center", wordWrap: { width: GAME_WIDTH - 120 },
+    })).setOrigin(0.5);
+    button(this, cx, 648, "Back to fighter select", 22, false).on("pointerdown", () => this.quit());
     playGameSound(this, "hit", 0.8);
   }
 
@@ -172,7 +174,7 @@ export class TournamentScene extends Phaser.Scene {
       this.session.bracket.champion ? "Any button: fighter select"
       : performance.now() < this.quitUntil ? "Kick again to abandon the tournament"
       : "Punch: fight  ·  kick twice: abandon the tournament",
-    ).setColor(performance.now() < this.quitUntil ? "#f2c14e" : "#a8a196");
+    ).setColor(performance.now() < this.quitUntil ? COLOR.accent : COLOR.muted);
   }
 
   private fight(): void {
@@ -215,4 +217,23 @@ export class TournamentScene extends Phaser.Scene {
     }
   }
 
+}
+
+/**
+ * A popped button centred on (cx, cy): gold with ink text (`primary`), or a panel that turns gold under the pointer.
+ * Returns the label, which is the hit area.
+ */
+function button(scene: Phaser.Scene, cx: number, cy: number, label: string, size: number, primary: boolean): Phaser.GameObjects.Text {
+  const box = scene.add.graphics();
+  const text = scene.add.text(cx, cy, label, displayText(size, primary ? COLOR.ink : COLOR.fg, { outline: false, padding: { x: 20, y: 9 } }))
+    .setOrigin(0.5).setInteractive({ useHandCursor: true });
+  const draw = (hot: boolean) => {
+    box.clear();
+    drawPopBox(box, cx - text.width / 2, cy - text.height / 2, text.width, text.height, primary || hot ? { fill: HEX.accent } : { fill: HEX.panel, border: HEX.edge });
+    text.setColor(primary || hot ? COLOR.ink : COLOR.fg);
+  };
+  draw(false);
+  text.on("pointerover", () => draw(true));
+  text.on("pointerout", () => draw(false));
+  return text;
 }

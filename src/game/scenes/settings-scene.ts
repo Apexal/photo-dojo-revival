@@ -5,6 +5,7 @@ import { MenuInput } from "../input/menu-input";
 import { fallbackSoundKey } from "../render/fighter-sprite-view";
 import { Menu } from "../render/menu";
 import { GAME_HEIGHT, GAME_WIDTH } from "../render/stage";
+import { bodyText, COLOR, displayText, drawBackdrop } from "../render/theme";
 import { gameSoundKey } from "../game-sounds";
 import { announcerKey } from "../announcer";
 import { getOptions, resetKeyBindings, saveKeyBindings, setOption } from "../options";
@@ -40,8 +41,10 @@ export class SettingsScene extends Phaser.Scene {
 
   create(): void {
     this.menuInput = new MenuInput(this);
-    this.add.rectangle(0, 0, GAME_WIDTH, GAME_HEIGHT, 0x121018, 0.94).setOrigin(0).setInteractive(); // swallow clicks
-    this.add.text(GAME_WIDTH / 2, 40, "SETTINGS", { fontSize: "56px", fontStyle: "bold", color: "#f2c14e" }).setOrigin(0.5, 0);
+    // A menu screen of its own, over fighter select or the paused fight (whose pause panel would show through a dim).
+    drawBackdrop(this);
+    this.add.rectangle(0, 0, GAME_WIDTH, GAME_HEIGHT, 0x000000, 0.001).setOrigin(0).setInteractive(); // swallow clicks
+    this.add.text(GAME_WIDTH / 2, 34, "SETTINGS", displayText(56, COLOR.accent)).setOrigin(0.5, 0);
 
     const options = () => getOptions(this.registry);
     const onOff = (v: boolean) => (v ? "On" : "Off");
@@ -53,7 +56,7 @@ export class SettingsScene extends Phaser.Scene {
       if (key === "musicVolume") updateMenuMusicVolume(this); // the menu music, if it's on, is the preview
     };
     const toggle = (key: "screenShake" | "dynamicCamera" | "rumble" | "poseTweening") => () => setOption(this.registry, key, !options()[key]);
-    const row = (name: string, value: string) => `${name.padEnd(18)}${value.padStart(12)}`;
+    const row = (name: string, value: string) => `${name}\t${value}`;
 
     this.menu = new Menu(this, GAME_WIDTH / 2, 120, [
       { label: () => row("Game volume", `◀ ${percent(options().gameVolume)} ▶`), onAdjust: volume("gameVolume", gameSoundKey("hit")) },
@@ -69,15 +72,13 @@ export class SettingsScene extends Phaser.Scene {
       { label: () => row("P2 keys", keyboardKeys("p2")), onConfirm: () => this.startRemap("p2") },
       { label: () => "Reset keys to default", onConfirm: () => resetKeyBindings(), disabled: () => isDefaultBindings(keyBindings()) },
       { label: () => "Back", onConfirm: () => this.close() },
-    ], { width: 640, lineHeight: 36, fontSize: 26 });
+    ], { width: 720, lineHeight: 36, fontSize: 24 });
 
-    this.promptText = this.add.text(GAME_WIDTH / 2, 552, "", { fontSize: "26px", fontStyle: "bold", color: "#f2c14e", align: "center" }).setOrigin(0.5, 0);
-    this.messageText = this.add.text(GAME_WIDTH / 2, 592, "", { fontSize: "19px", color: "#e8483b" }).setOrigin(0.5, 0);
+    this.promptText = this.add.text(GAME_WIDTH / 2, 552, "", displayText(26, COLOR.accent, { align: "center" })).setOrigin(0.5, 0);
+    this.messageText = this.add.text(GAME_WIDTH / 2, 592, "", bodyText(19, COLOR.bad, 600)).setOrigin(0.5, 0);
     this.add.text(GAME_WIDTH / 2, GAME_HEIGHT - 70,
-      "Throws need punch + kick pressed together. Some keyboards can't register that while a direction is held;\nif throws don't come out, remap to keys that are further apart.", {
-        fontSize: "16px", color: "#a8a196", align: "center",
-      }).setOrigin(0.5, 0);
-    this.add.text(GAME_WIDTH / 2, 552, "▲ ▼ choose  ·  ◀ ▶ change  ·  punch / Enter: select  ·  kick / Esc: back", { fontSize: "17px", color: "#a8a196" })
+      "Throws need punch + kick pressed together. Some keyboards can't register that while a direction is held;\nif throws don't come out, remap to keys that are further apart.", bodyText(16, COLOR.muted, 600, { align: "center" })).setOrigin(0.5, 0);
+    this.add.text(GAME_WIDTH / 2, 552, "▲ ▼ choose  ·  ◀ ▶ change  ·  punch / Enter: select  ·  kick / Esc: back", bodyText(17, COLOR.muted, 600))
       .setOrigin(0.5, 0).setName("hint");
 
     this.input.keyboard!.on("keydown", (ev: KeyboardEvent) => this.onRemapKey(ev));
@@ -101,7 +102,7 @@ export class SettingsScene extends Phaser.Scene {
     ev.preventDefault();
     if (ev.keyCode === KEY.ESC) return this.endRemap("Cancelled — keys unchanged", false);
     const refused = this.remap.press(ev.keyCode);
-    if (refused) return void this.messageText.setColor("#e8483b").setText(refused);
+    if (refused) return void this.messageText.setColor(COLOR.bad).setText(refused);
     this.messageText.setText("");
     if (!this.remap.done) return this.showPrompt();
     const layout = this.remap.layout;
@@ -111,7 +112,7 @@ export class SettingsScene extends Phaser.Scene {
 
   private endRemap(message: string, saved: boolean): void {
     this.remap = null;
-    this.messageText.setColor(saved ? "#8fd18f" : "#a8a196").setText(message);
+    this.messageText.setColor(saved ? COLOR.ok : COLOR.muted).setText(message);
     this.showPrompt();
     this.menu.refresh();
     // The keys just pressed shouldn't also move the menu.
