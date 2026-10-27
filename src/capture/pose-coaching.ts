@@ -1,5 +1,5 @@
-import { LANDMARK, type NormalizedLandmark } from "../shared/fighter-model";
-import { computeJointAngles, estimateBodyScale, midHip, type JointError, type JointName } from "../shared/pose-geometry";
+import { LANDMARK, type LimbSide, type NormalizedLandmark } from "../shared/fighter-model";
+import { computeJointAngles, estimateBodyScale, evaluatePose, midHip, type JointError, type JointName, type PoseTarget } from "../shared/pose-geometry";
 import { STICK_SEGMENTS } from "../shared/stick-figure";
 
 /** How a targeted joint is doing: in tolerance, nearly there, or well off. */
@@ -290,4 +290,25 @@ export class PoseCoach {
     this.settledCount = count;
     return rose ? count / joints.length : null;
   }
+}
+
+/**
+ * Extra room for the photo on top of the live check's tolerance: landmarks
+ * re-detected on a full-resolution still never land exactly where the live
+ * ones did, and a pose that just passed live shouldn't fail on that alone.
+ */
+export const STILL_TOLERANCE_SLACK = 1.25;
+
+export type StillPoseCheck = { ok: true; score: number; side: LimbSide } | { ok: false; score: number; correction: string | null };
+
+/**
+ * Is the photo itself in the pose? The live check passed, but the photo is the
+ * sharpest frame of a burst, or a phone's later moment, and hitboxes come from
+ * its landmarks (and the attack limb from its best side). `px` is in frame pixels.
+ */
+export function checkStillPose(px: NormalizedLandmark[], target: PoseTarget): StillPoseCheck {
+  const { score, side, joints } = evaluatePose(px, target, STILL_TOLERANCE_SLACK);
+  if (score <= 1) return { ok: true, score, side };
+  const worst = joints.filter((j) => j.delta !== null).sort((a, b) => b.error - a.error)[0];
+  return { ok: false, score, correction: worst && worst.error > 1 ? correctionFor(worst.joint, worst.delta!) : null };
 }

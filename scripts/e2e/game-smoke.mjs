@@ -407,6 +407,9 @@ try {
   const studio = await ctx.newPage();
   watch(studio, "studio");
   await studio.goto(BASE + "/studio");
+  // First visit: "How it works" before setup; skipped, it stays skipped (later studio pages share this browser).
+  await studio.locator(".intro-canvas").waitFor();
+  await studio.click("[data-action=skip-intro]");
   await studio.click("[data-camera=phone]");
   await studio.waitForFunction(() => /^[A-Z2-9]{6}$/.test(document.querySelector("[data-room-code]")?.textContent ?? ""), null, { timeout: 10000 });
   const studioCode = await studio.textContent("[data-room-code]");

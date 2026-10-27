@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { assessCutout, describeCutoutIssues } from "../src/capture/cutout-quality";
+import { assessCutout, cutoutAdvice } from "../src/capture/cutout-quality";
 import { keepPerson, skeletonPrior, type Rect } from "../src/capture/matting";
 import { LANDMARK, type NormalizedLandmark } from "../src/shared/fighter-model";
 import { buildStickFigureLandmarks } from "../src/shared/stick-figure";
@@ -62,9 +62,50 @@ describe("cut-out quality check", () => {
     const tight = { x: 0, y: 0, width: S, height: S };
     const q = assessCutout({ alpha, rect: tight, landmarks: idle, frameWidth: S, frameHeight: 470 + 40 });
     expect(q.cutOff).toContain("edge");
+    // The feet are what reach that border.
+    expect(q.edges[0]).toBe("bottom");
   });
 
-  it("describes the issues in plain words", () => {
-    expect(describeCutoutIssues(["background", "cutOff"])).toBe("some background came along, part of you is cut off");
+  it("doesn't hold a hidden limb to the cut-out (MediaPipe's guess for it can land off the body)", () => {
+    // The near arm only: the far arm is behind the body, so the photo shows no far arm at all.
+    const near = idle.map((l, i) => ([LANDMARK.leftElbow, LANDMARK.leftWrist].includes(i as 13 | 15) ? { ...l, visibility: 0 } : l));
+    const alpha = matte(Float32Array.from(skeletonPrior(near, S, S, { scale: 0.6, falloffScale: 0 }).map((v) => (v >= 1 ? 1 : 0))));
+    // MediaPipe guesses the hidden arm, with low confidence, a little behind the back.
+    const T = Math.hypot(idle[LANDMARK.leftShoulder].x - idle[LANDMARK.leftHip].x, idle[LANDMARK.leftShoulder].y - idle[LANDMARK.leftHip].y);
+    const guessed = idle.map((l, i) => ([LANDMARK.leftElbow, LANDMARK.leftWrist].includes(i as 13 | 15) ? { ...l, x: l.x - 1.2 * T, visibility: 0.5 } : l));
+    expect(assess(alpha, inFrame(guessed)).issues).toEqual([]);
+    // Seen clearly there, though, it is missing: that's a real hole.
+    const seenThere = guessed.map((l, i) => ([LANDMARK.leftElbow, LANDMARK.leftWrist].includes(i as 13 | 15) ? { ...l, visibility: 0.95 } : l));
+    expect(assess(alpha, inFrame(seenThere)).issues).not.toEqual([]);
+  });
+
+  it("passes clean cut-outs of every pose despite MediaPipe's usual joint error (a few pixels)", () => {
+    let seed = 11;
+    const rnd = () => ((seed = (seed * 16807) % 2147483647) / 2147483647);
+    for (const poseId of ["idle", "walk", "block", "crouch", "punch", "kick", "jump", "hurt", "win", "handshake"] as const) {
+      const lms = buildStickFigureLandmarks(poseId);
+      // Limbs at real widths: a side-on forearm is ~0.08 torso lengths half-wide (the old, wider core failed this).
+      const person = Uint8Array.from(skeletonPrior(lms, S, S, { scale: 0.22, falloffScale: 0 }), (v) => (v >= 1 ? 255 : 0));
+      const T = Math.hypot(lms[LANDMARK.leftShoulder].x - lms[LANDMARK.leftHip].x, lms[LANDMARK.leftShoulder].y - lms[LANDMARK.leftHip].y);
+      for (let trial = 0; trial < 5; trial++) {
+        const off = lms.map((l) => ({ ...l, x: l.x + (rnd() - 0.5) * 0.08 * T, y: l.y + (rnd() - 0.5) * 0.08 * T }));
+        expect(assess(person, inFrame(off)).issues, `${poseId} #${trial}`).toEqual([]);
+      }
+    }
+  });
+
+
+  it("says what to change for the next try, for the first issue", () => {
+    const advice = (issues: ("holes" | "background" | "cutOff")[], cutOff: string[] = [], edges: ("left" | "right" | "top" | "bottom")[] = []) =>
+      cutoutAdvice({ issues, cutOff, edges });
+    expect(advice(["background", "cutOff"])).toBe("Step away from furniture, in front of a plain wall.");
+    expect(advice(["cutOff"], ["left foot"])).toMatch(/in the frame/);
+    expect(advice(["holes"])).toMatch(/light/);
+    expect(advice([])).toBe("");
+    // Running into the photo's border: which way to go, never "left" or "right" (the preview may be mirrored).
+    expect(advice(["cutOff"], ["edge"], ["bottom"])).toMatch(/Step back.*feet.*bottom/);
+    expect(advice(["cutOff"], ["edge"], ["top"])).toMatch(/Step back.*head.*top/);
+    expect(advice(["cutOff"], ["edge"], ["right"])).toMatch(/middle of the picture/);
+    expect(advice(["cutOff"], ["edge"], ["left", "bottom"])).not.toMatch(/\b(left|right)\b/);
   });
 });

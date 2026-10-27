@@ -16,15 +16,13 @@ describe("draft summary", () => {
     expect(summarizeDraft(draft(all.filter((k) => k !== "signature")))).toMatchObject({ next: { poseIndex: SIGNATURE_TARGET_INDEX, retake: true } });
   });
 
-  it("only offers recent v3 drafts with something in them", () => {
-    expect(DRAFT_VERSION).toBe(3);
+  it("only offers recent drafts of this version with something in them", () => {
     expect(isResumable(draft(["idle"], 1000), 2000)).toBe(true);
     expect(isResumable(draft([], 1000), 2000)).toBe(false);
     expect(isResumable(draft(["idle"], 0), 10 * 24 * 3600 * 1000)).toBe(false);
     expect(isResumable(undefined)).toBe(false);
-    // A phone's v2 draft (with its room code and "friend" mode) is silently not offered.
-    expect(isResumable({ ...draft(["idle"], 1000), version: 2, mode: "friend", roomCode: "ABC234" }, 2000)).toBe(false);
-    expect(isResumable({ version: 3, savedAt: 1000 }, 2000)).toBe(false);
+    expect(isResumable({ ...draft(["idle"], 1000), version: DRAFT_VERSION - 1 }, 2000)).toBe(false);
+    expect(isResumable({ version: DRAFT_VERSION, savedAt: 1000 }, 2000)).toBe(false);
   });
 
   it("describes a draft's age", () => {

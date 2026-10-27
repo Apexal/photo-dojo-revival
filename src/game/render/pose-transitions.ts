@@ -18,11 +18,12 @@ export class PoseTransitions {
 
   /**
    * The tween to draw on simulation frame `frame`, given the capture the
-   * simulation shows (`held`), the move's own tween if it has one, and the idle
-   * sway if the fighter is standing still. A move's tween wins, then a soft
-   * cut, then the sway. Rendering the same frame twice gives the same answer.
+   * simulation shows (`held`), the move's own tween if it has one, the idle
+   * sway if the fighter is standing still, and the walk's stride (walk-gait.ts)
+   * while walking. A move's tween wins, then the stride, then a soft cut, then
+   * the sway. Rendering the same frame twice gives the same answer.
    */
-  update(frame: number, held: FrameRef, sequenceTween: FrameTween | null, sway: FrameTween | null = null): FrameTween | null {
+  update(frame: number, held: FrameRef, sequenceTween: FrameTween | null, sway: FrameTween | null = null, stride: FrameTween | null = null): FrameTween | null {
     if (frame < this.lastFrame) this.reset(); // a replay rewound time
     this.lastFrame = frame;
     if (sequenceTween) {
@@ -30,6 +31,12 @@ export class PoseTransitions {
       this.active = null;
       this.shown = sequenceTween.to;
       return sequenceTween;
+    }
+    if (stride) {
+      // A stride can stop anywhere: the next cut starts from whichever end it was nearer.
+      this.active = null;
+      this.shown = stride.t < 0.5 ? stride.from : stride.to;
+      return stride;
     }
     // Only a change of pose is a cut: swaying between two versions of idle isn't.
     if (this.shown && this.shown.poseId !== held.poseId) {

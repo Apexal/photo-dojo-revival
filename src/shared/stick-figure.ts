@@ -40,8 +40,10 @@ export const STICK_POSES: Record<Exclude<PoseId, "signature">, StickPoseParams> 
     legs: { right: { swing: 14, bend: 165 }, left: { swing: -12, bend: 165 } },
   },
   walk: {
-    torsoLean: 2, headTilt: 0, // upright mid-stride: a forward lean reads as lunging, not walking
-    arms: { right: { swing: 35, bend: 90 }, left: { swing: -10, bend: 120 } },
+    // The stance with a longer step (the walk morphs between the two): same guard and head, the front foot further out.
+    // A touch less lean than the stance: the legs swing with the torso, and at 5° the front foot leaves the floor.
+    torsoLean: 2, headTilt: 5,
+    arms: { right: { swing: 30, bend: 45 }, left: { swing: 20, bend: 40 } },
     legs: { right: { swing: 28, bend: 165 }, left: { swing: -24, bend: 160 } },
   },
   block: {

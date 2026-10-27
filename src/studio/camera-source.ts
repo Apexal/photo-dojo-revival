@@ -31,6 +31,12 @@ export interface CameraSource {
    * the person, normalized 0..1 to the live frame (the still may be larger).
    */
   grabStill(region: NormalizedRect | null, burst: number): Promise<CameraStill>;
+  /**
+   * Hold the exposure and white balance as they are now, for the rest of the
+   * fighter (what got locked; empty where the camera can't). Undone by `unlockExposure`.
+   */
+  lockExposure(): Promise<string[]>;
+  unlockExposure(): Promise<void>;
   canSwitch(): Promise<boolean>;
   switchCamera(): Promise<void>;
   /** Called immediately with the current status. Returns an unsubscribe. */

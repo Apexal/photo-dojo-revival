@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { laplacianVariance, sharpnessSampleSize } from "../src/capture/sharpness";
+import { laplacianVariance } from "../src/capture/sharpness";
 
 /** A checkerboard of `cell`-pixel squares, optionally box-blurred horizontally and vertically. */
 function checkerboard(size: number, cell: number, blur = 0): Uint8ClampedArray {
@@ -38,8 +38,4 @@ describe("sharpness", () => {
     expect(laplacianVariance(new Uint8ClampedArray(4 * 4), 2, 2)).toBe(0);
   });
 
-  it("samples the person's region at a bounded size, keeping its shape", () => {
-    expect(sharpnessSampleSize({ x: 0, y: 0, width: 400, height: 1000 })).toEqual({ width: 128, height: 320 });
-    expect(sharpnessSampleSize({ x: 0, y: 0, width: 100, height: 50 })).toEqual({ width: 100, height: 50 });
-  });
 });

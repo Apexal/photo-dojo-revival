@@ -1,5 +1,5 @@
 import type Phaser from "phaser";
-import { FLOOR_SCREEN_Y, GAME_HEIGHT, GAME_WIDTH } from "../render/stage";
+import { FLOOR_BACK_Y, GAME_HEIGHT, GAME_WIDTH } from "../render/stage";
 import type { StageDefinition } from "./stage-definition";
 
 /** Same sky every time (and on every screen that shows it). */
@@ -57,7 +57,7 @@ export const LUNAR_DOJO: StageDefinition = {
   build(scene, layer) {
     const rnd = seeded(1969);
     const sky = scene.add.graphics();
-    sky.fillGradientStyle(0x04030c, 0x04030c, 0x1b1236, 0x1b1236, 1).fillRect(0, 0, GAME_WIDTH, FLOOR_SCREEN_Y);
+    sky.fillGradientStyle(0x04030c, 0x04030c, 0x1b1236, 0x1b1236, 1).fillRect(0, 0, GAME_WIDTH, FLOOR_BACK_Y);
     // Nebula: overlapping blobs of magenta and teal, each a stack of faint discs so it fades out at the edge.
     for (const [x, y, r, color, alpha] of [
       [420, 180, 260, 0x7a2d8c, 0.1], [560, 120, 200, 0xb04a9c, 0.08], [320, 260, 180, 0x2d6b8c, 0.1],
@@ -121,19 +121,21 @@ export const LUNAR_DOJO: StageDefinition = {
       },
     });
 
-    // Lunar ridges on the horizon, with a little torii gate (the dojo's) on the nearer one.
+    // Lunar ridges on the horizon, with a little torii gate (the dojo's) on the nearer one. Heights are
+    // above the floor's far edge (H), so they sit on it.
+    const H = FLOOR_BACK_Y;
     const ridges = scene.add.graphics();
     ridges.fillStyle(0x2a2838, 1).fillPoints([
-      { x: 0, y: 590 }, { x: 140, y: 560 }, { x: 300, y: 575 }, { x: 470, y: 540 }, { x: 620, y: 572 },
-      { x: 800, y: 548 }, { x: 960, y: 578 }, { x: 1120, y: 552 }, { x: GAME_WIDTH, y: 570 },
-      { x: GAME_WIDTH, y: FLOOR_SCREEN_Y }, { x: 0, y: FLOOR_SCREEN_Y },
+      { x: 0, y: H - 80 }, { x: 140, y: H - 110 }, { x: 300, y: H - 95 }, { x: 470, y: H - 130 }, { x: 620, y: H - 98 },
+      { x: 800, y: H - 122 }, { x: 960, y: H - 92 }, { x: 1120, y: H - 118 }, { x: GAME_WIDTH, y: H - 100 },
+      { x: GAME_WIDTH, y: H }, { x: 0, y: H },
     ], true);
     ridges.fillStyle(0x3d3a4f, 1).fillPoints([
-      { x: 0, y: 628 }, { x: 180, y: 606 }, { x: 360, y: 622 }, { x: 560, y: 600 }, { x: 760, y: 626 },
-      { x: 940, y: 608 }, { x: 1120, y: 630 }, { x: GAME_WIDTH, y: 612 },
-      { x: GAME_WIDTH, y: FLOOR_SCREEN_Y }, { x: 0, y: FLOOR_SCREEN_Y },
+      { x: 0, y: H - 42 }, { x: 180, y: H - 64 }, { x: 360, y: H - 48 }, { x: 560, y: H - 70 }, { x: 760, y: H - 44 },
+      { x: 940, y: H - 62 }, { x: 1120, y: H - 40 }, { x: GAME_WIDTH, y: H - 58 },
+      { x: GAME_WIDTH, y: H }, { x: 0, y: H },
     ], true);
-    const tx = 560, ty = 600; // standing on the near ridge's peak
+    const tx = 560, ty = H - 70; // standing on the near ridge's peak
     ridges.fillStyle(0xb8322a, 1)
       .fillRect(tx - 22, ty - 40, 5, 40).fillRect(tx + 17, ty - 40, 5, 40) // posts
       .fillRect(tx - 32, ty - 46, 64, 6).fillRect(tx - 26, ty - 33, 52, 4); // beams
@@ -141,14 +143,14 @@ export const LUNAR_DOJO: StageDefinition = {
 
     // The floor: grey regolith with craters, and a glowing edge like a training mat.
     const floor = scene.add.graphics();
-    floor.fillGradientStyle(0x77748a, 0x77748a, 0x4a4759, 0x4a4759, 1).fillRect(0, FLOOR_SCREEN_Y, GAME_WIDTH, GAME_HEIGHT - FLOOR_SCREEN_Y);
+    floor.fillGradientStyle(0x77748a, 0x77748a, 0x4a4759, 0x4a4759, 1).fillRect(0, FLOOR_BACK_Y, GAME_WIDTH, GAME_HEIGHT - FLOOR_BACK_Y);
     for (let i = 0; i < 14; i++) {
-      const cx = rnd() * GAME_WIDTH, cy = FLOOR_SCREEN_Y + 12 + rnd() * 34, w = 30 + rnd() * 70;
+      const cx = rnd() * GAME_WIDTH, cy = FLOOR_BACK_Y + 12 + rnd() * (GAME_HEIGHT - FLOOR_BACK_Y - 26), w = 30 + rnd() * 70;
       floor.fillStyle(0x3c3a4a, 0.7).fillEllipse(cx, cy, w, w * 0.22);
       floor.fillStyle(0xa9a6bb, 0.35).fillEllipse(cx + 3, cy + 3, w * 0.8, w * 0.12);
     }
-    floor.lineStyle(6, 0x7fd8ff, 0.18).lineBetween(0, FLOOR_SCREEN_Y, GAME_WIDTH, FLOOR_SCREEN_Y);
-    floor.lineStyle(2, 0x9fe6ff, 0.8).lineBetween(0, FLOOR_SCREEN_Y, GAME_WIDTH, FLOOR_SCREEN_Y);
+    floor.lineStyle(6, 0x7fd8ff, 0.18).lineBetween(0, FLOOR_BACK_Y, GAME_WIDTH, FLOOR_BACK_Y);
+    floor.lineStyle(2, 0x9fe6ff, 0.8).lineBetween(0, FLOOR_BACK_Y, GAME_WIDTH, FLOOR_BACK_Y);
     layer.add(floor);
   },
 };

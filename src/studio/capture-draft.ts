@@ -9,7 +9,7 @@ import type { PoseCaptureGeometry } from "../capture/sprite-normalizer";
  */
 export type CaptureMode = "helped" | "solo";
 
-/** v3: the studio's drafts (no room code; `helped`/`solo`). v2 drafts, e.g. on phones, aren't offered. */
+/** Bumped when the draft format changes: drafts of another version aren't offered. */
 export const DRAFT_VERSION = 3;
 /** Drafts older than this aren't offered for resuming. */
 export const DRAFT_MAX_AGE_MS = 3 * 24 * 60 * 60 * 1000;

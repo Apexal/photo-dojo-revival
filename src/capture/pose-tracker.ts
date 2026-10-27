@@ -2,10 +2,8 @@ import { PoseLandmarker } from "@mediapipe/tasks-vision";
 import type { NormalizedLandmark } from "../shared/fighter-model";
 import { POSE_MODEL_URL, VISION_FILESET, loadModelBytes, prefetchWasm, withDelegateFallback, type DownloadProgress } from "./vision-runtime";
 
-/** Live detection throttle; slower phones can't keep up with every video frame. */
+/** Live detection throttle: the heavy model can't keep up with every video frame on every computer. */
 export const LIVE_DETECTION_HZ = 15;
-
-type ImageInput = HTMLCanvasElement | OffscreenCanvas | ImageBitmap | HTMLVideoElement;
 
 /** The first inference compiles shaders / spins up WASM (seconds); do it before the first snapshot. */
 function warmUp(landmarker: PoseLandmarker): void {
@@ -69,8 +67,8 @@ export class PoseTracker {
     return toLandmarks(this.videoLandmarker.detectForVideo(video, ts));
   }
 
-  /** Landmarks for a still frame. */
-  async detectStill(image: ImageInput): Promise<NormalizedLandmark[] | null> {
+  /** Landmarks for a still frame (a fresh detection, no tracking from the live video). */
+  detectStill(image: HTMLCanvasElement | OffscreenCanvas): NormalizedLandmark[] | null {
     return toLandmarks(this.stillLandmarker.detect(image as HTMLCanvasElement));
   }
 

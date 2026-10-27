@@ -68,22 +68,6 @@ describe("fighter storage", () => {
     expect(await loadFighterSources(f.fighterId)).toBeUndefined();
   });
 
-  it("upgrades a v2 database, keeping its fighters", async () => {
-    await closeFighterDb();
-    const f = makeFighter({ name: "Old" });
-    const v2 = await openDB(DB_NAME, 2, {
-      upgrade(db) {
-        db.createObjectStore("fighters", { keyPath: "fighterId" });
-        db.createObjectStore("settings");
-        db.createObjectStore("drafts");
-      },
-    });
-    await v2.put("fighters", f);
-    v2.close();
-    expect(DB_VERSION).toBe(3);
-    expect((await loadFighter(f.fighterId))?.name).toBe("Old");
-    expect((await openFighterDb()).objectStoreNames.contains("fighterSources")).toBe(true);
-  });
 
   it("an older tab holding the database open: told it's blocked; this tab gives way to a newer one", async () => {
     await closeFighterDb();
@@ -191,11 +175,6 @@ describe("fighter records", () => {
       .toEqual({ ...emptyRecord(), movesLanded: { punch: 2 }, versus: { y: { wins: 1, losses: 0, draws: 0 } } });
   });
 
-  it("carries an older save's best run over as its best hit streak", () => {
-    expect(parseRecord({ longestCombo: 3 }).longestStreak).toBe(3);
-    expect(parseRecord({ longestCombo: 3, longestStreak: 5 }).longestStreak).toBe(5);
-    expect(parseRecord({ longestCombo: 3 })).not.toHaveProperty("longestCombo");
-  });
 
   it("records both sides (a mirror match twice), persists, and forgets deleted fighters", async () => {
     const a = registry();

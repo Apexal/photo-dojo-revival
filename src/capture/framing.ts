@@ -15,7 +15,8 @@ export interface GhostFit {
   groundY: number;
 }
 
-export type FramingAdvice = "ok" | "closer" | "further";
+/** "center": a part of the person is at a side of the picture (a lunge reaches further than standing). */
+export type FramingAdvice = "ok" | "closer" | "further" | "center";
 
 const STICK_IDLE = buildStickFigureLandmarks("idle");
 /** Body scale (≈ torso length) of the canonical figure, in sprite pixels. */
@@ -58,7 +59,26 @@ export function fitGhost(px: NormalizedLandmark[], height: number): GhostFit | n
   return { scale: Math.min(maxScale, Math.max(minScale, m.bodyScale / STICK_BODY_SCALE)), groundX: m.groundX, groundY: m.groundY };
 }
 
-/** "A bit closer" / "a bit further" from how tall the person stands in the frame and whether head and feet fit. */
+/**
+ * Clearly seen body points nearer a side of the picture than this (torso
+ * lengths) are at its edge: hands, feet and clothes reach past their
+ * landmarks, and the photo's cut-out would run into the border.
+ */
+export const EDGE_MARGIN = 0.15;
+/** Feet nearer the bottom of the picture than this (torso lengths) touch it. */
+const BOTTOM_MARGIN = 0.05;
+const EDGE_POINTS = [
+  LANDMARK.nose, LANDMARK.leftShoulder, LANDMARK.rightShoulder, LANDMARK.leftElbow, LANDMARK.rightElbow,
+  LANDMARK.leftWrist, LANDMARK.rightWrist, LANDMARK.leftHip, LANDMARK.rightHip, LANDMARK.leftKnee, LANDMARK.rightKnee,
+  LANDMARK.leftAnkle, LANDMARK.rightAnkle, LANDMARK.leftHeel, LANDMARK.rightHeel, LANDMARK.leftFootIndex, LANDMARK.rightFootIndex,
+];
+
+/**
+ * "A bit closer" / "a bit further" from how tall the person stands in the frame
+ * and whether head and feet fit; "center" when some of them is at a side.
+ * Anything but "ok" stops a capture: "further" and "center" would cut them
+ * off, "closer" leaves too few pixels for a sharp sprite and a clean cut-out.
+ */
 export function framingAdvice(px: NormalizedLandmark[], width: number, height: number): FramingAdvice {
   const m = measurePerson(px);
   if (!m) return "further";
@@ -67,7 +87,10 @@ export function framingAdvice(px: NormalizedLandmark[], width: number, height: n
     const l = px[i];
     return l.x < 0 || l.x > width || l.y < 0 || l.y > height;
   });
-  if (outOfFrame || headTop < 0 || m.groundY > height || m.standingHeight > FRAMING_RANGE.max * height) return "further";
+  const feetAtBottom = m.groundY > height - BOTTOM_MARGIN * m.bodyScale;
+  if (outOfFrame || headTop < 0 || feetAtBottom || m.standingHeight > FRAMING_RANGE.max * height) return "further";
+  const side = EDGE_MARGIN * m.bodyScale;
+  if (EDGE_POINTS.some((i) => visible(px[i]) && (px[i].x < side || px[i].x > width - side))) return "center";
   if (m.standingHeight < FRAMING_RANGE.min * height) return "closer";
   return "ok";
 }

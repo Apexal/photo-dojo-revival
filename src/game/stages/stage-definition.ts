@@ -27,7 +27,8 @@ export interface StageDefinition {
   preload?(scene: Phaser.Scene): void;
   /**
    * Draw the backdrop into `layer`, in screen space: GAME_WIDTH × GAME_HEIGHT,
-   * the floor line at FLOOR_SCREEN_Y. Everything goes under the fighters. Runs
+   * the floor's far edge at FLOOR_BACK_Y (the feet stand lower, at FLOOR_SCREEN_Y,
+   * so they're on the floor, not its edge). Everything goes under the fighters. Runs
    * once per scene; animate with scene tweens if you like.
    */
   build(scene: Phaser.Scene, layer: Phaser.GameObjects.Container): void;

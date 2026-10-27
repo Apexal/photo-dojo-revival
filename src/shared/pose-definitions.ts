@@ -30,13 +30,17 @@ const SPECS: Record<MainPoseId, DefinitionSpec> = {
     ],
     requiredVisibleLandmarks: FULL_BODY,
   },
+  // The walk is drawn from the stance and this step (walk-gait.ts): the stance with the front foot slid
+  // further forward. Guard up, same height, same lead foot, or every stride flaps the arms, bobs and crosses the legs.
   walk: {
-    label: "Take a step",
-    voicePrompt: "Walk. One big step forward, standing tall.",
+    label: "Step forward",
+    voicePrompt: "Step. Keep your guard up and slide your front foot forward. A big step, same height.",
     angleTargets: [
       { joint: "legSpread", degrees: 52, tolerance: 15 },
-      { joint: "torsoLean", degrees: 2, tolerance: 10 }, // upright, not lunging
-      { joint: "rightElbow", degrees: 100, tolerance: 60 },
+      { joint: "torsoLean", degrees: 5, tolerance: 12 }, // the stance's lean: not straightening up, not lunging
+      { joint: "rightElbow", degrees: 45, tolerance: 35 }, // the stance's guard
+      { joint: "leftElbow", degrees: 45, tolerance: 35 },
+      { joint: "rightShoulderElevation", degrees: 30, tolerance: 25 },
     ],
     requiredVisibleLandmarks: FULL_BODY,
   },

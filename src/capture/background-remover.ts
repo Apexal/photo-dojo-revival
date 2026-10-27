@@ -1,7 +1,8 @@
 import type { InferenceSession, Tensor } from "onnxruntime-web";
 import type { NormalizedLandmark } from "../shared/fighter-model";
 import { MODEL_SIZE, applyAlpha, keepPerson, personCropRect, resampleFloat, stretchToUnit, toModelInput, type Rect } from "./matting";
-import { createCanvas, context2d, toPixelLandmarks } from "./sprite-normalizer";
+import { createCanvas, context2d } from "../shared/canvas";
+import { toPixelLandmarks } from "./sprite-normalizer";
 import { MATTING_MODEL_FP16_URL, MATTING_MODEL_URL, ORT_RUNTIME_BASE, ORT_WASM_URL, loadModelBytes, type DownloadProgress } from "./vision-runtime";
 
 type Ort = typeof import("onnxruntime-web");
@@ -116,16 +117,13 @@ export class BackgroundRemover {
     const px = toPixelLandmarks(landmarks, W, H);
     const rect = personCropRect(px, W, H);
 
-    const crop = createCanvas(rect.width, rect.height);
-    const cropCtx = context2d(crop);
-    cropCtx.drawImage(frame, rect.x, rect.y, rect.width, rect.height, 0, 0, rect.width, rect.height);
-    const rgba = cropCtx.getImageData(0, 0, rect.width, rect.height).data;
+    const rgba = context2d(frame).getImageData(rect.x, rect.y, rect.width, rect.height).data;
 
     // The model takes a square: stretch the crop to fill it, as its reference code does.
     const square = createCanvas(MODEL_SIZE, MODEL_SIZE);
     const squareCtx = context2d(square);
     squareCtx.imageSmoothingQuality = "high";
-    squareCtx.drawImage(crop, 0, 0, MODEL_SIZE, MODEL_SIZE);
+    squareCtx.drawImage(frame, rect.x, rect.y, rect.width, rect.height, 0, 0, MODEL_SIZE, MODEL_SIZE);
     const input = toModelInput(squareCtx.getImageData(0, 0, MODEL_SIZE, MODEL_SIZE).data);
 
     const started = performance.now();

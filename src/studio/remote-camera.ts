@@ -276,6 +276,13 @@ export class RemoteCamera implements CameraSource {
     }
   }
 
+  /** Not on a phone yet: it would need a camera message, and iOS Safari has no exposure controls. */
+  async lockExposure(): Promise<string[]> {
+    return [];
+  }
+
+  async unlockExposure(): Promise<void> {}
+
   async canSwitch(): Promise<boolean> {
     return this.link.info?.canSwitch ?? false;
   }

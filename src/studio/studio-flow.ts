@@ -15,8 +15,11 @@ export type StudioScreen =
   | { name: "tips" }
   | { name: "loading" }
   | { name: "pose"; poseIndex: number; retake: boolean }
-  /** `rough`: the cut-out failed the quality check and waits for "retake" or "keep". */
-  | { name: "captured"; poseIndex: number; retake: boolean; rough: boolean }
+  /**
+   * The photo is being taken and checked. It only counts in the pose and cut
+   * out cleanly: otherwise `captureFailed` and the pose again (no keeping a bad one).
+   */
+  | { name: "captured"; poseIndex: number; retake: boolean }
   /**
    * Pick the archetype: first thing after setup, so the poses then run in one go
    * (`retake`: changing it from the review, which retakes the signature pose).
@@ -49,10 +52,8 @@ export type StudioEvent =
   | { type: "cancelCamera" }
   | { type: "poseCaptured" }
   | { type: "graceElapsed" }
+  /** Out of the pose in the photo, a rough cut-out, or no photo: the pose again (the app says why). */
   | { type: "captureFailed" }
-  | { type: "captureRough" }
-  | { type: "retakeRough" }
-  | { type: "keepRough" }
   | { type: "retake"; targetKey: string }
   | { type: "pickArchetype"; archetype: ArchetypeId }
   /** From the review: pick another archetype (and so retake the signature pose). */
@@ -115,7 +116,7 @@ export const soundIdAt = (index: number): SoundId => SOUND_IDS[index];
 
 /**
  * setup → archetype → tips → loading → pose 1..16, without a break (each:
- * pose → captured, or back to pose if it came out rough) → review → sounds 1..3 → preview → saving → saved. A lost camera on a live
+ * pose → captured, or back to pose if the photo wasn't right) → review → sounds 1..3 → preview → saving → saved. A lost camera on a live
  * screen pauses on `cameraLost` until it's back; a retake without a camera
  * goes through the `camera` screen. Editing a saved fighter starts on the
  * review (`startEdit`). Pure; unknown events for the current screen leave the
@@ -164,20 +165,12 @@ export function studioFlowReducer(state: StudioFlowState, event: StudioEvent): S
       }
       break;
     case "pose":
-      if (event.type === "poseCaptured") return to({ ...s, name: "captured", rough: false });
+      if (event.type === "poseCaptured") return to({ ...s, name: "captured" });
       break;
-    case "captured": {
-      const again: StudioScreen = { name: "pose", poseIndex: s.poseIndex, retake: s.retake };
-      if (event.type === "captureFailed") return to(again);
-      if (event.type === "captureRough") return to({ ...s, rough: true });
-      if (s.rough) {
-        if (event.type === "retakeRough") return to(again);
-        if (event.type === "keepRough") return to(nextAfter(state, s));
-      } else if (event.type === "graceElapsed") {
-        return to(nextAfter(state, s));
-      }
+    case "captured":
+      if (event.type === "captureFailed") return to({ name: "pose", poseIndex: s.poseIndex, retake: s.retake });
+      if (event.type === "graceElapsed") return to(nextAfter(state, s));
       break;
-    }
     case "archetype":
       // Picking the style it already has, from the review, is how to back out of changing it.
       if (event.type === "pickArchetype" && s.retake && event.archetype === state.archetype) return to({ name: "review" });

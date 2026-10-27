@@ -94,12 +94,15 @@ export function skeletonPrior(
   return out;
 }
 
-
 /**
  * Width of the always-person core around the bones, as a scale of the prior's
- * capsules: thinner than a real forearm. cutout-quality.ts checks it's opaque.
+ * capsules: well inside any real limb (radius ~0.04 torso lengths; a forearm is
+ * ~0.07 half-wide), so MediaPipe's few pixels of joint error and the cut-out's
+ * soft edge don't read as holes. cutout-quality.ts checks it's opaque. At 0.25
+ * it was wider than a forearm, and about half of perfect cut-outs with normal
+ * joint error failed the holes check.
  */
-export const CORE_SCALE = 0.25;
+export const CORE_SCALE = 0.12;
 
 /** Flood fill from seed pixels over set pixels; everything not reached is cleared. */
 export function keepConnected(mask: Uint8Array, width: number, _height: number, seeds: number[]): Uint8Array {
@@ -150,10 +153,13 @@ export function skeletonSeeds(landmarks: NormalizedLandmark[], width: number, he
  * connected to the skeleton. Landmarks are in crop pixels.
  */
 export function keepPerson(alpha: Float32Array, width: number, height: number, landmarks: NormalizedLandmark[]): Uint8ClampedArray {
-  const region = Uint8Array.from(alpha, (v) => (v >= REGION_ALPHA ? 1 : 0));
+  const region = new Uint8Array(alpha.length);
+  for (let i = 0; i < alpha.length; i++) region[i] = alpha[i] >= REGION_ALPHA ? 1 : 0;
   let kept = keepConnected(region, width, height, skeletonSeeds(landmarks, width, height));
-  if (!kept.some(Boolean)) kept = region; // the landmarks missed the matte entirely: trust the model
-  return Uint8ClampedArray.from(alpha, (v, i) => (kept[i] ? Math.round(v * 255) : 0));
+  if (!kept.includes(1)) kept = region; // the landmarks missed the matte entirely: trust the model
+  const out = new Uint8ClampedArray(alpha.length);
+  for (let i = 0; i < alpha.length; i++) if (kept[i]) out[i] = Math.round(alpha[i] * 255);
+  return out;
 }
 
 /** Square input side of the matting model. */
@@ -176,11 +182,14 @@ export function toModelInput(rgba: ArrayLike<number>, size = MODEL_SIZE): Float3
 export function stretchToUnit(values: ArrayLike<number>): Float32Array {
   let min = Infinity, max = -Infinity;
   for (let i = 0; i < values.length; i++) {
-    min = Math.min(min, values[i]);
-    max = Math.max(max, values[i]);
+    const v = values[i];
+    if (v < min) min = v;
+    if (v > max) max = v;
   }
+  const out = new Float32Array(values.length);
   const range = max - min;
-  return Float32Array.from(values, (v) => (range > 0 ? (v - min) / range : 0));
+  if (range > 0) for (let i = 0; i < values.length; i++) out[i] = (values[i] - min) / range;
+  return out;
 }
 
 /** Bilinear resample of a float mask. */

@@ -384,7 +384,11 @@ export type FighterAction =
   /** Knocked down: flying (knockdown), on the floor (downed), getting up (wakeup). */
   | "knockdown" | "downed" | "wakeup";
 
-/** Walk alternates between the walk and idle captures for a hard-cut stride. */
+/**
+ * Walk alternates between the walk and idle captures: what collides while
+ * walking. On screen (WebGL) the stride is walk-gait.ts instead, timed by
+ * distance so a foot stays planted; this cycle's soft cuts are its fallback.
+ */
 export const WALK_CYCLE: HoldFrame[] = [
   { poseId: "walk", frames: 10 },
   { poseId: "idle", frames: 10 },

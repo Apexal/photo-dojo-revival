@@ -29,10 +29,7 @@ export interface ScreenActions {
   setupDone(): void;
   start(): void;
   cancelCamera(): void;
-  manualCapture(): void;
   switchCamera(): void;
-  retakeRough(): void;
-  keepRough(): void;
   retake(targetKey: string): void;
   pickArchetype(archetype: ArchetypeId): void;
   changeArchetype(): void;
@@ -51,6 +48,8 @@ export interface ScreenActions {
   restart(): void;
   /** Editing a fighter without sources: take every pose again. */
   recaptureAll(): void;
+  /** Replay "How it works" from setup. */
+  openIntro(): void;
 }
 
 /** The camera half of setup (also the camera and camera-lost screens). */
@@ -89,6 +88,8 @@ export interface ScreenEnv {
   editing: boolean;
   /** `?edit=`: the fighter is still being read. */
   openingEdit: boolean;
+  /** "How it works", shown in place of setup (kept by the app, so re-renders don't restart it). */
+  intro: HTMLElement | null;
 }
 
 const SOUND_PROMPTS: Record<SoundId, { title: string; hint: string }> = {
@@ -237,6 +238,10 @@ export function renderScreen(root: HTMLElement, flow: StudioFlowState, data: Stu
         root.append(panel("narrow", h("h2", {}, "Opening your fighter…"), h("p", { class: "muted" }, "Reading it from this browser.")));
         break;
       }
+      if (env.intro) {
+        root.append(env.intro);
+        break;
+      }
       const ready = env.camera.status?.kind === "ready";
       root.append(h("div", { class: "setup" },
         panel("camera",
@@ -256,7 +261,8 @@ export function renderScreen(root: HTMLElement, flow: StudioFlowState, data: Stu
                 ),
               )
             : null,
-          h("p", {}, `Strike ${CAPTURE_TARGET_COUNT} poses, record ${SOUND_IDS.length} battle cries, and become a fighter.`),
+          h("p", {}, `Strike ${CAPTURE_TARGET_COUNT} poses, record ${SOUND_IDS.length} battle cries, and become a fighter. `,
+            h("button", { type: "button", class: "link", dataset: { action: "open-intro" }, on: { click: () => a.openIntro() } }, "How it works")),
           h("div", { class: "choices" },
             h("button", { type: "button", class: flow.mode === "solo" ? "primary" : "", dataset: { mode: "solo" }, on: { click: () => a.selectMode("solo") } },
               "On my own", h("small", {}, "Big prompts, and a pause after each pose to get back in position.")),
@@ -338,9 +344,6 @@ export function renderScreen(root: HTMLElement, flow: StudioFlowState, data: Stu
         ),
         h("aside", { class: "side" },
           h("div", { class: "controls" },
-            h("button", { type: "button", class: "primary", dataset: { hud: "manual" }, hidden: true, on: { click: () => a.manualCapture() } }, "Capture anyway"),
-            h("button", { type: "button", class: "primary", dataset: { hud: "rough-retake" }, hidden: true, on: { click: () => a.retakeRough() } }, "Retake"),
-            h("button", { type: "button", dataset: { hud: "rough-keep" }, hidden: true, on: { click: () => a.keepRough() } }, "Keep it"),
             env.canSwitchCamera
               ? h("button", { type: "button", class: "switch", title: "Switch camera", "aria-label": "Switch camera", dataset: { hud: "switch" }, on: { click: () => a.switchCamera() } }, "⇄ Camera")
               : null,
@@ -374,7 +377,7 @@ export function renderScreen(root: HTMLElement, flow: StudioFlowState, data: Stu
         h("h2", {}, env.editing ? `Editing ${data.name.trim() || "your fighter"}` : "Your moves"),
         h("p", { class: "muted" }, retakes
           ? "Click a pose to retake it."
-          : "This fighter came from a file or the old phone capture, so single poses can't be retaken here. Rename it, redo its sounds, or capture every pose again."),
+          : "This fighter came from a file, so single poses can't be retaken here. Rename it, redo its sounds, or capture every pose again."),
         strip(data, flow.archetype, retakes ? a.retake : undefined),
         h("div", { class: "row" },
           retakes

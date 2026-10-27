@@ -24,7 +24,7 @@ Then choose **On my own** (big prompts, a pause after each pose) or **Someone's 
 
 **Phones need HTTPS for the camera.** In dev, use `npm run dev:https` (self-signed certificate), open the Network URL Vite prints on the laptop, and scan the studio's QR code. The phone has to accept the certificate once.
 
-**Editing:** select a captured fighter on fighter select and click **✂ Edit** to open it in the studio: retake any pose, change the fighting style, redo the sounds or rename it, then save (same fighter, career record kept). Fighters imported from a file or made with the old phone capture can be renamed, get new sounds, or have every pose captured again, but single poses can't be retaken (the studio keeps the original cut-outs only for fighters it built).
+**Editing:** select a captured fighter on fighter select and click **✂ Edit** to open it in the studio: retake any pose, change the fighting style, redo the sounds or rename it, then save (same fighter, career record kept). Fighters imported from a file can be renamed, get new sounds, or have every pose captured again, but single poses can't be retaken (the studio keeps the original cut-outs only for fighters it built).
 
 To move fighters between computers, use **Export** on fighter select and **Import fighter file** on the other one. Without any camera, just pick the built-in stick figures.
 

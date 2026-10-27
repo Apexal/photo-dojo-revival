@@ -9,7 +9,6 @@ import {
   flipLandmarksHorizontally,
   jointErrors,
   mirrorJointName,
-  scorePoseMatch,
   type JointAngles,
 } from "../src/shared/pose-geometry";
 import { buildStickFigureLandmarks } from "../src/shared/stick-figure";
@@ -80,28 +79,10 @@ describe("pose scoring", () => {
   const target = { angleTargets: [{ joint: "rightElbow" as const, degrees: 175, tolerance: 25 }, { joint: "leftKnee" as const, degrees: 90, tolerance: 30 }] };
   const angles = (rightElbow: number | null, leftKnee: number | null) => ({ rightElbow, leftKnee }) as JointAngles;
 
-  it("returns 0 for an exact match", () => {
-    expect(scorePoseMatch(angles(175, 90), target)).toBe(0);
-  });
 
-  it("returns 1 at the tolerance edge, >1 outside", () => {
-    expect(scorePoseMatch(angles(150, 90), target)).toBeCloseTo(1);
-    expect(scorePoseMatch(angles(175, 120), target)).toBeCloseTo(1);
-    expect(scorePoseMatch(angles(175, 130), target)).toBeGreaterThan(1);
-  });
 
-  it("is the worst normalized error", () => {
-    expect(scorePoseMatch(angles(162.5, 75), target)).toBeCloseTo(0.5);
-    expect(scorePoseMatch(angles(170, 60), target)).toBeCloseTo(1);
-  });
 
-  it("widened tolerances shrink the score", () => {
-    expect(scorePoseMatch(angles(175, 135), target, 1.5)).toBeCloseTo(1);
-  });
 
-  it("missing angles never match", () => {
-    expect(scorePoseMatch(angles(null, 90), target)).toBe(Infinity);
-  });
 
   it("breaks the score down by joint, with the direction of each error", () => {
     expect(jointErrors(angles(150, 105), target)).toEqual([

@@ -1,7 +1,7 @@
 import Phaser from "phaser";
 import { trimLeadingSilence } from "../../shared/audio-trim";
 import { SOFT_CUTS, frameGeometry, groundAnchorFor, variantCount, type FighterGeometry } from "../../shared/frame-data";
-import { LANDMARK, POSE_IDS, SOUND_IDS, SPRITE_CANVAS_SIZE, soundTakes, type Fighter, type PoseId, type SoundId } from "../../shared/fighter-model";
+import { LANDMARK, POSE_IDS, SOUND_IDS, SPRITE_CANVAS_SIZE, soundTakes, type Fighter, type LimbSide, type NormalizedLandmark, type PoseId, type SoundId } from "../../shared/fighter-model";
 import { torsoLength } from "../../shared/pose-geometry";
 import { shakenGrip, type HandshakeGrip } from "../../shared/handshake";
 import { allTweens, frameOf, handshakeShakeOf, idleSwayOf, tweenOf, type FrameTween } from "../../simulation/fight-simulation";
@@ -9,6 +9,7 @@ import type { FighterState } from "../../simulation/fighter-state-machine";
 import { fallPose, hitShake, holdsStruckPose } from "./hit-feel";
 import { PoseTransitions } from "./pose-transitions";
 import { PoseTweener, type FrameRef, type TweenLayer, type TweenSource } from "./pose-tweener";
+import { GaitShape, STANCE, STEP, WalkGait, stepPose, type GaitFrame } from "./walk-gait";
 import { worldToScreen } from "./stage";
 import { TweenMeshes, readAlpha } from "./tween-meshes";
 
@@ -95,7 +96,9 @@ export class FighterSpriteView {
   private readonly transitions = new PoseTransitions();
   private readonly meshes: TweenMeshes;
   /** The last solve: the display can refresh faster than the 60 Hz simulation. */
-  private lastTween: { tween: FrameTween; layers: TweenLayer[] | null } | null = null;
+  private lastTween: { tween: FrameTween; swing: LimbSide | null; single: boolean; layers: TweenLayer[] | null } | null = null;
+  /** Undefined until the first render that can use it (walkGait). */
+  private gait: (WalkGait & { torso: number }) | null | undefined = undefined;
   /** The capture on screen last frame (the nearer end of a morph): what a struck fighter holds. */
   private lastShown: FrameRef | null = null;
   private depth = 0;
@@ -130,15 +133,23 @@ export class FighterSpriteView {
    */
   render(state: FighterState, frame: number, tweening = true, opponent?: FighterState): void {
     let tween: FrameTween | null = null;
-    if (tweening && this.tweener) tween = this.transitions.update(frame, frameOf(state), tweenOf(state) ?? (this.grip ? handshakeShakeOf(state, this.grip.offeredAt) : null), idleSwayOf(state));
-    else this.transitions.reset();
+    let step: GaitFrame | null = null;
+    if (tweening && this.tweener) {
+      const gait = this.walkGait();
+      const stride = gait?.update(frame, { walking: state.action === "walk", x: state.position.x, facing: state.facing }, state.action === "idle") ?? null;
+      tween = this.transitions.update(frame, frameOf(state), tweenOf(state) ?? (this.grip ? handshakeShakeOf(state, this.grip.offeredAt) : null), idleSwayOf(state), stride?.tween);
+      if (stride && tween === stride.tween) step = stride;
+    } else {
+      this.transitions.reset();
+      this.gait?.reset();
+    }
     const p = worldToScreen(state.position);
     p.x += hitShake(state, frame, opponent);
     // Just hit: the struck pose holds through most of the freeze (hit-feel.ts).
     const struck = holdsStruckPose(state) && this.lastShown;
     // Knocked down / KO'd: the plain photo, tipped over (no morphs while falling or lying).
     const fall = struck ? null : fallPose(state);
-    const layers = !struck && !fall && tween ? this.layersFor(tween) : null;
+    const layers = !struck && !fall && tween ? this.layersFor(tween, step) : null;
     const lying = fall ? Math.sin((fall.tilt * Math.PI) / 2) : 0;
     let rotation = 0;
     if (layers) {
@@ -226,11 +237,32 @@ export class FighterSpriteView {
     ];
   }
 
-  private layersFor(tween: FrameTween): TweenLayer[] | null {
-    const last = this.lastTween?.tween;
-    const same = last && last.t === tween.t && sameFrame(last.from, tween.from) && sameFrame(last.to, tween.to);
-    if (!same) this.lastTween = { tween, layers: this.tweener!.layers(tween) };
+  /** `step`: a walking stride, drawn one capture at a time (no doubled legs) with its mid-step lift (stepPose). */
+  private layersFor(tween: FrameTween, step: GaitFrame | null = null): TweenLayer[] | null {
+    const last = this.lastTween;
+    const swing = step?.swing ?? null;
+    const single = step !== null;
+    const same = last && last.tween.t === tween.t && last.swing === swing && last.single === single && sameFrame(last.tween.from, tween.from) && sameFrame(last.tween.to, tween.to);
+    if (!same) {
+      const torso = this.gait?.torso ?? 0;
+      const adjust = swing ? (skeleton: NormalizedLandmark[]) => stepPose(skeleton, tween.t, swing, torso) : undefined;
+      this.lastTween = { tween, swing, single, layers: this.tweener!.layers(tween, adjust, single) };
+    }
     return this.lastTween!.layers;
+  }
+
+  /**
+   * The planted walk (walk-gait.ts), built the first time it's needed. Null
+   * when this fighter's stance and step can't make one (no WebGL, or a step no
+   * wider than the stance): the walk cycle's soft cuts stand in.
+   */
+  private walkGait(): (WalkGait & { torso: number }) | null {
+    if (this.gait === undefined) {
+      const torso = torsoLength(this.geometry.idle.landmarks);
+      const shape = this.tweener && GaitShape.measure((w) => this.tweener!.skeleton({ from: STANCE, to: STEP, t: w }), torso);
+      this.gait = shape ? Object.assign(new WalkGait(shape), { torso }) : null;
+    }
+    return this.gait;
   }
 
   /** The texture for a frame. The handshake's made-up versions (the pumping hand) show its one capture. */

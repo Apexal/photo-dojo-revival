@@ -64,18 +64,19 @@ describe("studio flow", () => {
     expect(() => targetAt(SIGNATURE_TARGET_INDEX, null)).toThrow();
   });
 
-  it("rough captures: retake or keep", () => {
-    const s = run(initialStudioFlow(), ready, { type: "setupDone" }, guardian, { type: "start" }, { type: "modelsReady" }, { type: "poseCaptured" }, { type: "captureRough" });
-    expect(s.screen).toEqual({ name: "captured", poseIndex: 0, retake: false, rough: true });
-    expect(run(s, { type: "graceElapsed" })).toBe(s); // a rough one waits for the answer
-    expect(run(s, { type: "retakeRough" }).screen).toEqual({ name: "pose", poseIndex: 0, retake: false });
-    expect(run(s, { type: "keepRough" }).screen).toEqual({ name: "pose", poseIndex: 1, retake: false });
+  it("a photo that isn't right (out of the pose, a rough cut-out) is the pose again; there's no keeping it", () => {
+    const s = run(initialStudioFlow(), ready, { type: "setupDone" }, guardian, { type: "start" }, { type: "modelsReady" }, { type: "poseCaptured" });
+    expect(s.screen).toEqual({ name: "captured", poseIndex: 0, retake: false });
     expect(run(s, { type: "captureFailed" }).screen).toEqual({ name: "pose", poseIndex: 0, retake: false });
+    expect(run(s, { type: "graceElapsed" }).screen).toEqual({ name: "pose", poseIndex: 1, retake: false });
+    // A retake that fails stays a retake.
+    const retake = run(toReview(), { type: "retake", targetKey: "kick" }, { type: "poseCaptured" }, { type: "captureFailed" });
+    expect(retake.screen).toEqual({ name: "pose", poseIndex: indexOf("kick"), retake: true });
   });
 
   it("a lost camera mid-pose pauses on cameraLost, and comes back to the same pose with its retake flag", () => {
     let s = run(initialStudioFlow(), ready, { type: "setupDone" }, guardian, { type: "start" }, { type: "modelsReady" }, ...capture, ...capture, { type: "poseCaptured" });
-    expect(s.screen).toEqual({ name: "captured", poseIndex: 2, retake: false, rough: false });
+    expect(s.screen).toEqual({ name: "captured", poseIndex: 2, retake: false });
     s = run(s, lost);
     expect(s.screen).toEqual({ name: "cameraLost", back: { name: "pose", poseIndex: 2, retake: false } });
     expect(s.cameraReady).toBe(false);

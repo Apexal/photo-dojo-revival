@@ -1,6 +1,6 @@
 import { CameraSession } from "../capture/camera-session";
 import type { NormalizedRect } from "../shared/canvas";
-import { StatusHub, type CameraSource, type CameraStatus, type CameraStill } from "./camera-source";
+import { StatusHub, onVideoFrame, type CameraSource, type CameraStatus, type CameraStill } from "./camera-source";
 
 export interface CameraDevice {
   deviceId: string;
@@ -97,12 +97,20 @@ export class LocalCamera implements CameraSource {
   }
 
   onFrame(cb: (nowMs: number) => void): () => void {
-    return this.session.onFrame(cb);
+    return onVideoFrame(this.session.video, cb);
   }
 
   async grabStill(region: NormalizedRect | null, burst: number): Promise<CameraStill> {
     if (!this.session.isRunning) throw new Error("The camera isn't running");
     return this.session.grabSharpest(burst, region);
+  }
+
+  lockExposure(): Promise<string[]> {
+    return this.session.lockExposure();
+  }
+
+  unlockExposure(): Promise<void> {
+    return this.session.unlockExposure();
   }
 
   canSwitch(): Promise<boolean> {

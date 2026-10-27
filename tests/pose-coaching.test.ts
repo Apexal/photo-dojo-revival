@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { PoseCoach, correctionArrows, correctionFor, jointBand, segmentBands } from "../src/capture/pose-coaching";
+import { PoseCoach, STILL_TOLERANCE_SLACK, checkStillPose, correctionArrows, correctionFor, segmentBands } from "../src/capture/pose-coaching";
 import { LANDMARK } from "../src/shared/fighter-model";
 import { POSE_DEFINITIONS } from "../src/shared/pose-definitions";
 import { computeJointAngles, evaluatePose, type JointError, type JointName } from "../src/shared/pose-geometry";
@@ -19,12 +19,6 @@ describe("corrections", () => {
     expect(correctionFor("torsoLean", 12)).toBe("Stand up straighter");
   });
 
-  it("bands errors around the tolerance edge", () => {
-    expect(jointBand(0.4)).toBe("good");
-    expect(jointBand(1)).toBe("good");
-    expect(jointBand(1.4)).toBe("close");
-    expect(jointBand(3)).toBe("off");
-  });
 });
 
 describe("segment bands", () => {
@@ -188,5 +182,27 @@ describe("progress chime", () => {
     expect(c.update(three(0.5, 2, 2), 400).progress).toBeCloseTo(1 / 3);
     c.update([], 1000); // matching, or out of frame
     expect(c.update(three(0.5, 2, 2), 1500).progress).toBeNull();
+  });
+});
+
+describe("checking the photo itself", () => {
+  it("passes a photo in the pose (with the limb it attacks with), and says what slipped in one that isn't", () => {
+    expect(checkStillPose(buildStickFigureLandmarks("punch"), POSE_DEFINITIONS.punch)).toMatchObject({ ok: true, side: "right" });
+    // The punch's photo caught them back in their stance.
+    expect(checkStillPose(buildStickFigureLandmarks("idle"), POSE_DEFINITIONS.punch)).toEqual({ ok: false, score: expect.any(Number), correction: "Straighten your arm more" });
+  });
+
+  it("allows a bit more than the live check", () => {
+    const target = { angleTargets: [{ joint: "torsoLean" as const, degrees: 0, tolerance: 10 }], requiredVisibleLandmarks: [] };
+    // Lean the stick figure 11° off upright: just out live, inside the photo's slack.
+    const lm = buildStickFigureLandmarks("win");
+    const hips = { x: (lm[LANDMARK.leftHip].x + lm[LANDMARK.rightHip].x) / 2, y: (lm[LANDMARK.leftHip].y + lm[LANDMARK.rightHip].y) / 2 };
+    const lean = (deg: number) => lm.map((l) => {
+      const r = (deg * Math.PI) / 180, dx = l.x - hips.x, dy = l.y - hips.y;
+      return { ...l, x: hips.x + dx * Math.cos(r) - dy * Math.sin(r), y: hips.y + dx * Math.sin(r) + dy * Math.cos(r) };
+    });
+    const base = computeJointAngles(lm).torsoLean!;
+    expect(checkStillPose(lean(11 - base), target).ok).toBe(true);
+    expect(checkStillPose(lean(10 * STILL_TOLERANCE_SLACK + 2 - base), target).ok).toBe(false);
   });
 });

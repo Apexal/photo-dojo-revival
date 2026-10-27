@@ -58,9 +58,6 @@ export function parseRecord(value: unknown): FighterRecord {
     const n = (value as Record<string, unknown>)[key];
     if (isCount(n)) record[key] = n;
   }
-  // Saves from before hit streaks kept hits-before-recovery under this name: never more than the streak was.
-  const legacy = (value as Record<string, unknown>).longestCombo;
-  if (!record.longestStreak && isCount(legacy)) record.longestStreak = legacy;
   const moves = (value as Record<string, unknown>).movesLanded;
   if (typeof moves === "object" && moves !== null) {
     for (const [id, n] of Object.entries(moves)) if (isAttackId(id as never) && isCount(n)) record.movesLanded[id as AttackId] = n;

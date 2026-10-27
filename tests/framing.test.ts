@@ -3,10 +3,8 @@ import { LANDMARK, type NormalizedLandmark } from "../src/shared/fighter-model";
 import { computeAnchor, estimateBodyScale } from "../src/shared/pose-geometry";
 import { buildStickFigureLandmarks } from "../src/shared/stick-figure";
 import {
-  DEFAULT_HEIGHT_FRACTION,
   GhostFitter,
   STANDING_HEIGHT_RATIO,
-  defaultGhostFit,
   fitGhost,
   framingAdvice,
   ghostTransform,
@@ -45,11 +43,6 @@ describe("ghost fitting", () => {
     }
   });
 
-  it("the default ghost is the usual size, centered", () => {
-    const fit = defaultGhostFit(W, H);
-    expect(fit.scale * STANDING_HEIGHT_RATIO * stickScale).toBeCloseTo(H * DEFAULT_HEIGHT_FRACTION);
-    expect(fit.groundX).toBe(W / 2);
-  });
 
   it("estimates the ground from the hips when the feet are out of view", () => {
     const p = person(0.6).map((l, i) => (i >= LANDMARK.leftKnee ? { ...l, visibility: 0.1 } : l));
@@ -81,5 +74,26 @@ describe("framing advice", () => {
     expect(framingAdvice(person(0.95), W, H)).toBe("further");
     expect(framingAdvice(person(0.7, W / 2, H * 1.1), W, H)).toBe("further"); // feet below the frame
     expect(framingAdvice(person(0.7, W / 2, H * 0.6), W, H)).toBe("further"); // head above it
+    expect(framingAdvice(person(0.7, W / 2, H - 1), W, H)).toBe("further"); // feet on the bottom edge
   });
+
+  it("asks to move toward the middle when some of them is at a side of the picture", () => {
+    // Shifted so their nearest point is just inside a side: in the picture, but at its edge.
+    const at = (edgeX: number, side: "left" | "right") => {
+      const p = person(0.7);
+      const xs = p.filter((l) => l.visibility >= 0.5).map((l) => l.x);
+      const dx = side === "left" ? edgeX - Math.min(...xs) : edgeX - Math.max(...xs);
+      return p.map((l) => ({ ...l, x: l.x + dx }));
+    };
+    expect(framingAdvice(at(5, "left"), W, H)).toBe("center");
+    expect(framingAdvice(at(W - 5, "right"), W, H)).toBe("center");
+    expect(framingAdvice(at(200, "left"), W, H)).toBe("ok");
+    expect(framingAdvice(person(0.7, W / 2), W, H)).toBe("ok");
+    // A lunge reaches further than standing: the same spot can be fine standing and too near the side lunging.
+    const lungeX = 300;
+    expect(framingAdvice(person(0.7, lungeX), W, H)).toBe("ok");
+    const lunging = person(0.7, lungeX).map((l, i) => (i === LANDMARK.rightWrist || i === LANDMARK.rightIndex ? { ...l, x: 20 } : l));
+    expect(framingAdvice(lunging, W, H)).toBe("center");
+  });
+
 });

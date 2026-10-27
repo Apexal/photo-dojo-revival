@@ -131,6 +131,51 @@ describe("pose tweener", () => {
     }
   });
 
+  it("backs a single capture with the other's torso and head only, even where the legs don't move enough to be cut loose", () => {
+    // Stance → punch: the legs barely move, so they stay part of the body mesh.
+    const punch = buildStickFigureLandmarks("punch");
+    const [backing] = tweener.layers({ from: ref("idle"), to: ref("punch"), t: 0.3 }, undefined, true)!;
+    expect(backing.frame).toEqual(ref("punch"));
+    const start = relative(punch, "punch");
+    const rest = restPositions(backing.uvs, "punch");
+    const torso = dist(start[L.leftShoulder], start[L.leftHip]);
+    expect(backing.triangles.length).toBeGreaterThan(0);
+    for (let k = 0; k < backing.triangles.length; k += 3) {
+      const [p, q, r] = [0, 1, 2].map((j) => rest[backing.triangles[k + j]]);
+      const centre = { x: (p.x + q.x + r.x) / 3, y: (p.y + q.y + r.y) / 3 };
+      for (const joint of [L.leftKnee, L.rightKnee, L.leftAnkle, L.rightAnkle]) expect(dist(centre, start[joint])).toBeGreaterThan(0.15 * torso);
+    }
+  });
+
+  it("draws just one capture's limbs at a time when asked (the walk): no doubled legs", () => {
+    const walk = buildStickFigureLandmarks("walk");
+    for (const [t, poseId] of [[0.3, "idle"], [0.49, "idle"], [0.5, "walk"], [0.8, "walk"]] as const) {
+      const [backing, ...layers] = tweener.layers({ from: ref("idle"), to: ref("walk"), t }, undefined, true)!;
+      expect(layers.map((l) => [l.frame.poseId, l.alpha])).toEqual([[poseId, 1]]);
+      // Under it, only the other capture's torso and head, to fill any hole a moved limb leaves:
+      // no leg (or arm) of its own, cut loose or not, so it can't show a second pair of legs.
+      const other = poseId === "idle" ? "walk" : "idle";
+      expect(backing).toMatchObject({ frame: ref(other), alpha: 1 });
+      const otherStart = relative(other === "idle" ? idle : walk, other);
+      const otherRest = restPositions(backing.uvs, other);
+      const torso = dist(otherStart[L.leftShoulder], otherStart[L.leftHip]);
+      for (let k = 0; k < backing.triangles.length; k += 3) {
+        const [p, q, r] = [0, 1, 2].map((j) => otherRest[backing.triangles[k + j]]);
+        const centre = { x: (p.x + q.x + r.x) / 3, y: (p.y + q.y + r.y) / 3 };
+        for (const joint of [L.leftKnee, L.rightKnee, L.leftAnkle, L.rightAnkle, L.leftFootIndex, L.rightFootIndex]) {
+          expect(dist(centre, otherStart[joint])).toBeGreaterThan(0.15 * torso);
+        }
+      }
+      // Warped onto the same in-between skeleton the cross-fade would use.
+      const between = interpolateLandmarks(relative(idle, "idle"), relative(walk, "walk"), t);
+      const start = relative(poseId === "idle" ? idle : walk, poseId);
+      const rest = restPositions(layers[0].uvs, poseId);
+      let nearest = 0;
+      for (let i = 0; i < rest.length; i++) if (dist(rest[i], start[L.rightAnkle]) < dist(rest[nearest], start[L.rightAnkle])) nearest = i;
+      expect(dist({ x: layers[0].positions[2 * nearest], y: layers[0].positions[2 * nearest + 1] }, between[L.rightAnkle])).toBeLessThan(dist(rest[nearest], start[L.rightAnkle]) + 3);
+    }
+  });
+
   it("starts from the leaving capture as drawn", () => {
     const [backing, from, to] = tweener.layers({ from: ref("idle"), to: ref("punch"), t: 1e-6 })!;
     expect(backing).toMatchObject({ frame: ref("punch"), alpha: 1 });

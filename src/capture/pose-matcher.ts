@@ -1,14 +1,9 @@
-import type { LimbSide, NormalizedLandmark } from "../shared/fighter-model";
-import { evaluatePose, type JointError, type PoseEvaluation, type PoseTarget } from "../shared/pose-geometry";
+import { LANDMARK, type NormalizedLandmark } from "../shared/fighter-model";
+import { REQUIRED_VISIBILITY_THRESHOLD, estimateBodyScale, evaluatePose, type JointError, type PoseTarget } from "../shared/pose-geometry";
 
 export interface MatcherOptions {
-  /** Continuous match time before auto-capture. */
+  /** Continuous, steady match time before auto-capture. */
   holdMs: number;
-  /** Time without a capture before tolerances widen. */
-  widenAfterMs: number;
-  widenFactor: number;
-  /** Time before "Tap to capture anyway" appears. */
-  manualAfterMs: number;
   /**
    * Buffer between poses: matches don't count until this long after the pose
    * starts (time to hear the prompt)...
@@ -23,20 +18,31 @@ export interface MatcherOptions {
 
 export const DEFAULT_MATCHER_OPTIONS: MatcherOptions = {
   holdMs: 500,
-  widenAfterMs: 5000,
-  widenFactor: 1.5,
-  manualAfterMs: 10000,
   armAfterMs: 1500,
   requireBreak: true,
 };
 
-export type MatcherEvent = "holdStarted" | "holdBroken" | "captured" | "tolerancesWidened" | "manualAvailable" | "armed"
+/**
+ * How far (torso lengths) any clearly seen body point may drift from where it
+ * was when the hold began: further, and the hold starts over from there. The
+ * photo is taken at the end of the hold, so a sway or a limb still settling
+ * would blur it (and move the landmarks away from the matte).
+ */
+export const STEADY_RADIUS = 0.2;
+const STEADY_POINTS = [
+  LANDMARK.nose, LANDMARK.leftShoulder, LANDMARK.rightShoulder, LANDMARK.leftElbow, LANDMARK.rightElbow,
+  LANDMARK.leftWrist, LANDMARK.rightWrist, LANDMARK.leftHip, LANDMARK.rightHip, LANDMARK.leftKnee, LANDMARK.rightKnee,
+  LANDMARK.leftAnkle, LANDMARK.rightAnkle,
+];
+
+export type MatcherEvent = "holdStarted" | "holdBroken" | "captured" | "armed"
+  /** In the pose but moving: the hold starts over. */
+  | "moved"
   /** The buffer is over but they've been in the pose the whole time: ask them to reset and pose again. */
   | "breakNeeded";
 
 export interface MatcherUpdate {
   score: number;
-  side: LimbSide;
   /** Per-joint errors behind the score (empty when nobody's detected): drives the coaching. */
   joints: JointError[];
   /** In the pose and armed (see `armed`); drives the green ghost, the hold tone and the capture. */
@@ -47,28 +53,33 @@ export interface MatcherUpdate {
   awaitingBreak: boolean;
   /** 0..1, fills the progress ring. */
   holdProgress: number;
-  toleranceScale: number;
-  manualCaptureAvailable: boolean;
   captured: boolean;
   events: MatcherEvent[];
 }
 
+/** Moved further than `STEADY_RADIUS` since `from` (both in frame pixels). */
+function moved(from: NormalizedLandmark[], to: NormalizedLandmark[]): boolean {
+  const limit = STEADY_RADIUS * estimateBodyScale(from);
+  return STEADY_POINTS.some((i) => {
+    const a = from[i], b = to[i];
+    return a.visibility >= REQUIRED_VISIBILITY_THRESHOLD && b.visibility >= REQUIRED_VISIBILITY_THRESHOLD && Math.hypot(a.x - b.x, a.y - b.y) > limit;
+  });
+}
+
 /**
- * Live scoring against one target pose with a hold timer.
- * Pure: time comes in as an argument so it's testable.
+ * Live scoring against one target pose with a hold timer: captures once the
+ * pose has been held, steady, for `holdMs`.
+ * Pure: time comes in as an argument so it's testable. Landmarks are frame pixels.
  */
 export class PoseMatcher {
   private readonly options: MatcherOptions;
   private startedAt = 0;
-  private holdStartedAt: number | null = null;
+  /** When the current hold began, and the landmarks then (the steadiness reference). */
+  private hold: { since: number; at: NormalizedLandmark[] } | null = null;
   private armed = false;
   private sawBreak = false;
   private askedForBreak = false;
-  private awaitingBreak = false;
-  private widened = false;
-  private manualAvailable = false;
-  private capturedSide: LimbSide | null = null;
-  private lastSide: LimbSide = "right";
+  private capturedFlag = false;
 
   constructor(private readonly target: PoseTarget, options: Partial<MatcherOptions> = {}) {
     this.options = { ...DEFAULT_MATCHER_OPTIONS, ...options };
@@ -76,63 +87,26 @@ export class PoseMatcher {
 
   start(nowMs: number): void {
     this.startedAt = nowMs;
-    this.holdStartedAt = null;
+    this.hold = null;
     this.sawBreak = !this.options.requireBreak;
     this.armed = this.sawBreak && this.options.armAfterMs <= 0;
     this.askedForBreak = false;
-    this.awaitingBreak = false;
-    this.widened = false;
-    this.manualAvailable = false;
-    this.capturedSide = null;
-  }
-
-  get toleranceScale(): number {
-    return this.widened ? this.options.widenFactor : 1;
+    this.capturedFlag = false;
   }
 
   get captured(): boolean {
-    return this.capturedSide !== null;
+    return this.capturedFlag;
   }
 
-  /** The limb used for the captured attack pose. */
-  get side(): LimbSide {
-    return this.capturedSide ?? this.lastSide;
-  }
-
-  update(landmarks: NormalizedLandmark[] | null, nowMs: number): MatcherUpdate {
-    // Advance the clock first so a widening that kicks in this frame applies to this frame's score.
-    const events = this.captured ? [] : this.advanceClock(nowMs);
-    const evaluation = landmarks ? evaluatePose(landmarks, this.target, this.toleranceScale) : null;
-    const result = this.updateWithEvaluation(evaluation, nowMs);
-    return { ...result, events: [...events, ...result.events] };
-  }
-
-  private advanceClock(nowMs: number): MatcherEvent[] {
-    const events: MatcherEvent[] = [];
-    const elapsed = nowMs - this.startedAt;
-    if (!this.widened && elapsed >= this.options.widenAfterMs) {
-      this.widened = true;
-      events.push("tolerancesWidened");
-    }
-    if (!this.manualAvailable && elapsed >= this.options.manualAfterMs) {
-      this.manualAvailable = true;
-      events.push("manualAvailable");
-    }
-    return events;
-  }
-
-  /** Core timer logic, given an already-computed score (null = no person detected). */
-  updateWithEvaluation(evaluation: PoseEvaluation | null, nowMs: number): MatcherUpdate {
-    const events: MatcherEvent[] = [];
+  /** `px`: the person's landmarks in frame pixels, or null when nobody (usable) is in view. */
+  update(px: NormalizedLandmark[] | null, nowMs: number): MatcherUpdate {
+    const evaluation = px ? evaluatePose(px, this.target) : null;
     const score = evaluation?.score ?? Infinity;
     const joints = evaluation?.joints ?? [];
-    if (evaluation) this.lastSide = evaluation.side;
-
-    if (this.captured) {
-      return this.snapshot(score, joints, false, 1, events);
-    }
-
-    events.push(...this.advanceClock(nowMs));
+    const events: MatcherEvent[] = [];
+    const result = (matching: boolean, holdProgress: number, awaitingBreak = false): MatcherUpdate =>
+      ({ score, joints, matching, armed: this.armed, awaitingBreak, holdProgress, captured: this.capturedFlag, events });
+    if (this.capturedFlag) return result(false, 1);
 
     const inPose = score <= 1;
     if (!inPose) this.sawBreak = true;
@@ -141,49 +115,28 @@ export class PoseMatcher {
       this.armed = true;
       events.push("armed");
     }
-    this.awaitingBreak = !this.sawBreak && bufferOver;
-    if (this.awaitingBreak && !this.askedForBreak) {
+    const awaitingBreak = !this.sawBreak && bufferOver;
+    if (awaitingBreak && !this.askedForBreak) {
       this.askedForBreak = true;
       events.push("breakNeeded");
     }
-    const matching = inPose && this.armed;
-    let progress = 0;
-    if (matching) {
-      if (this.holdStartedAt === null) {
-        this.holdStartedAt = nowMs;
-        events.push("holdStarted");
-      }
-      const held = nowMs - this.holdStartedAt;
-      progress = Math.min(1, held / this.options.holdMs);
-      if (held >= this.options.holdMs) {
-        this.capturedSide = this.lastSide;
-        events.push("captured");
-      }
-    } else if (this.holdStartedAt !== null) {
-      this.holdStartedAt = null;
-      events.push("holdBroken");
+    if (!(inPose && this.armed)) {
+      if (this.hold) events.push("holdBroken");
+      this.hold = null;
+      return result(false, 0, awaitingBreak);
     }
-    return this.snapshot(score, joints, matching, progress, events);
-  }
-
-  /** "Tap to capture anyway". */
-  forceCapture(): void {
-    this.capturedSide = this.lastSide;
-  }
-
-  private snapshot(score: number, joints: JointError[], matching: boolean, holdProgress: number, events: MatcherEvent[]): MatcherUpdate {
-    return {
-      score,
-      side: this.side,
-      joints,
-      matching,
-      armed: this.armed,
-      awaitingBreak: this.awaitingBreak,
-      holdProgress,
-      toleranceScale: this.toleranceScale,
-      manualCaptureAvailable: this.manualAvailable,
-      captured: this.captured,
-      events,
-    };
+    if (!this.hold) {
+      this.hold = { since: nowMs, at: px! };
+      events.push("holdStarted");
+    } else if (moved(this.hold.at, px!)) {
+      this.hold = { since: nowMs, at: px! };
+      events.push("moved");
+    }
+    const held = nowMs - this.hold.since;
+    if (held >= this.options.holdMs) {
+      this.capturedFlag = true;
+      events.push("captured");
+    }
+    return result(true, Math.min(1, held / this.options.holdMs));
   }
 }

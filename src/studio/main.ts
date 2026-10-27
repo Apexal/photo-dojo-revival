@@ -15,26 +15,24 @@ import {
   type SoundId,
 } from "../shared/fighter-model";
 import { clearDraft, loadDraft, onDbBlocked, saveDraft, saveFighter, saveFighterWithSources } from "../shared/fighter-storage";
-import { CAPTURE_TARGET_COUNT, captureTargetsFor } from "../shared/pose-definitions";
+import { CAPTURE_TARGET_COUNT, captureTargetsFor, type PoseDefinition } from "../shared/pose-definitions";
+import { compareStep, stepAdvice } from "../shared/walk-step";
 import type { ArchetypeId } from "../shared/archetypes";
 import { captureUrl } from "../shared/room-code";
-import { normalizeRect } from "../shared/canvas";
+import { canvasToPng, context2d, createCanvas, normalizeRect } from "../shared/canvas";
 import { gateStudio, isTablet } from "../game/device-gate";
 import { BackgroundRemover, type MatteDebug } from "../capture/background-remover";
-import { assessCutout, describeCutoutIssues, type CutoutQuality } from "../capture/cutout-quality";
+import { assessCutout, cutoutAdvice, describeCutoutIssues, type CutoutQuality } from "../capture/cutout-quality";
 import { GhostFitter, framingAdvice, type FramingAdvice } from "../capture/framing";
 import { GhostOverlay } from "../capture/ghost-overlay";
 import { HoldSound } from "../capture/hold-sound";
 import { personCropRect } from "../capture/matting";
 import { DEFAULT_MATCHER_OPTIONS, PoseMatcher, type MatcherUpdate } from "../capture/pose-matcher";
-import { PoseCoach, correctionArrows, type Correction, type CorrectionArrow } from "../capture/pose-coaching";
+import { PoseCoach, checkStillPose, correctionArrows, type Correction, type CorrectionArrow } from "../capture/pose-coaching";
 import { PoseTracker } from "../capture/pose-tracker";
 import { BURST_FRAMES } from "../capture/sharpness";
 import { SoundRecorder, playClip } from "../capture/sound-recorder";
 import {
-  canvasToPng,
-  context2d,
-  createCanvas,
   cutoutFromCrop,
   makeThumbnail,
   planFighterSprites,
@@ -62,6 +60,7 @@ import { RemoteCamera } from "./remote-camera";
 import { asEditOf, editParam, loadEditSession, sessionPoses, sessionSounds } from "./edit-session";
 import { GRACE_MS, initialStudioFlow, isLiveScreen, studioFlowReducer, targetAt, type StudioEvent, type StudioFlowState, type StudioScreen } from "./studio-flow";
 import { downloadBlob } from "./ui/dom";
+import { introPanel } from "./ui/intro";
 import { cameraStatusText, loadStatusText, renderScreen, type CameraPanelEnv, type ScreenActions, type StudioSessionData } from "./ui/screens";
 
 /**
@@ -85,10 +84,28 @@ interface SessionData extends StudioSessionData {
 const FRAMING_HINTS: Record<Exclude<FramingAdvice, "ok">, string> = {
   closer: "Come a bit closer",
   further: "Step a bit further back",
+  center: "Move toward the middle of the picture",
 };
 /** Still in the pose when the buffer between poses ends: they have to reset first, so the capture is deliberate. */
 const BREAK_PROMPT = "Relax for a second, then strike the pose";
 const FRAMING_VOICE = { settleMs: 1500, repeatMs: 5000 } as const;
+/** "Hold still" when the hold starts over because they moved, at most this often. */
+const HOLD_STILL_REPEAT_MS = 4000;
+/** The photo can't be kept (out of the pose, or a rough cut-out): the pose again. `message` is shown, `spoken` said. */
+class RetakeNeeded extends Error {
+  constructor(message: string, readonly spoken: string) {
+    super(message);
+  }
+}
+
+/** Remembers that "How it works" was seen (this browser only; without storage it just shows again). */
+const INTRO_SEEN_KEY = "photoDojo.studioIntroSeen";
+function introSeen(): boolean {
+  try { return localStorage.getItem(INTRO_SEEN_KEY) === "1"; } catch { return false; }
+}
+function markIntroSeen(): void {
+  try { localStorage.setItem(INTRO_SEEN_KEY, "1"); } catch { /* shows again next time */ }
+}
 
 /** `?debug=1`: keep raw frames and the matting stages so they can be exported for tuning. */
 const DEBUG_MATTING = new URLSearchParams(location.search).has("debug");
@@ -109,7 +126,6 @@ interface SetAsideSignature {
   capture?: StoredCapture;
   rendered?: { from: StoredCapture; scale: number };
   debug?: DebugCapture;
-  roughTries?: number;
   pose?: CapturedPose;
   preview?: string;
 }
@@ -171,14 +187,15 @@ class StudioApp {
   private capturing = false;
   /** A phone still is on its way: the person keeps holding the pose. */
   private awaitingStill = false;
+  /** Exposure and white balance are held for this fighter (after its first photo). */
+  private exposureLocked = false;
+  /** "How it works", in place of setup: the first visit (not when opening a fighter to edit), or asked for. */
+  private intro: HTMLElement | null = null;
   private readonly ghostFitter = new GhostFitter();
+  private holdStillSaidAt = -Infinity;
   private readonly coach = new PoseCoach();
   /** "A bit closer" / "further" is spoken once it's been true for a moment, and not too often. */
   private framingVoice: { advice: FramingAdvice; since: number; spokenAt: number } = { advice: "ok", since: 0, spokenAt: -Infinity };
-  /** Why the last capture came out rough, for the retake prompt. */
-  private roughReason = "";
-  /** Rough captures per target, so solo mode auto-retakes only once. */
-  private readonly roughTries = new Map<string, number>();
   /** Model download progress, 0..1, for the loading screen. */
   private loadProgress = 0;
   private switchingCamera = false;
@@ -213,6 +230,7 @@ class StudioApp {
     });
     const editId = editParam(location.search);
     this.openingEdit = editId !== null;
+    if (!editId && !introSeen()) this.intro = this.createIntro();
     this.render();
     void this.checkDraft();
     if (editId) void this.openEdit(editId);
@@ -269,6 +287,8 @@ class StudioApp {
   }
 
   private retryCamera(): void {
+    // A new track meters afresh: the next photo locks it again.
+    this.exposureLocked = false;
     if (this.source instanceof LocalCamera) void this.source.start();
   }
 
@@ -276,6 +296,7 @@ class StudioApp {
   private replaceSource(next: CameraSource | null): void {
     const old = this.source;
     if (old === next) return;
+    this.exposureLocked = false;
     this.offSourceStatus?.();
     this.offSourceStatus = null;
     this.stopFrames?.();
@@ -365,7 +386,7 @@ class StudioApp {
       case "pose":
         return `Pose ${s.poseIndex + 1}/${CAPTURE_TARGET_COUNT} — ${targetAt(s.poseIndex, this.flow.archetype).definition.label}`;
       case "captured":
-        return s.rough ? "That one came out rough" : this.awaitingStill ? "Hold it…" : "Got it!";
+        return this.awaitingStill ? "Hold it…" : "Got it!";
       case "archetype":
         return "Pick a fighting style on the studio screen";
       case "saved":
@@ -591,6 +612,7 @@ class StudioApp {
       tabletWarning: isTablet(),
       editing: this.editing !== null,
       openingEdit: this.openingEdit,
+      intro: this.intro,
     });
     if (isLiveScreen(this.flow.screen)) this.renderHud();
   }
@@ -603,17 +625,9 @@ class StudioApp {
     const step = this.root.querySelector<HTMLElement>("[data-hud=step]");
     const label = this.root.querySelector<HTMLElement>("[data-hud=label]");
     const hint = this.root.querySelector<HTMLElement>("[data-hud=hint]");
-    const manual = this.root.querySelector<HTMLButtonElement>("[data-hud=manual]");
     if (step) step.textContent = `${s.poseIndex + 1} / ${CAPTURE_TARGET_COUNT}${s.retake ? " · retake" : ""}`;
     if (label) label.textContent = def.label;
-    const rough = s.name === "captured" && s.rough;
-    if (hint) {
-      hint.textContent = rough ? `That one came out rough — retake? (${this.roughReason})`
-        : s.name === "captured" ? (this.awaitingStill ? "Hold it… taking the photo" : "Got it!")
-        : this.hintText();
-    }
-    if (manual) manual.hidden = !(s.name === "pose" && this.live.update?.manualCaptureAvailable);
-    for (const el of this.root.querySelectorAll<HTMLElement>("[data-hud=rough-retake], [data-hud=rough-keep]")) el.hidden = !rough;
+    if (hint) hint.textContent = s.name === "captured" ? (this.awaitingStill ? "Hold it… taking the photo" : "Got it!") : this.hintText();
     const cutout = this.root.querySelector<HTMLImageElement>("[data-hud=cutout]");
     const url = this.data.previews[target.key];
     if (cutout) {
@@ -633,11 +647,13 @@ class StudioApp {
     if (!landmarks) return "Step into the frame";
     const inFrame = update !== null && update.score !== Infinity;
     if (!inFrame) {
-      return framing === "closer" ? "A bit closer — whole body in frame" : framing === "further" ? "A bit further back — head to feet in frame" : "Whole body in frame, please";
+      return framing === "closer" ? "A bit closer — whole body in frame"
+        : framing === "further" ? "A bit further back — head to feet in frame"
+        : framing === "center" ? "Move toward the middle — all of you in the picture"
+        : "Whole body in frame, please";
     }
     if (update.matching) return "Hold it…";
     if (update.awaitingBreak) return BREAK_PROMPT;
-    if (framing && framing !== "ok") return FRAMING_HINTS[framing];
     // The pose's own instruction first, while it's being read out; then what to fix.
     return (update.armed && this.live.correction?.text) || def.voicePrompt;
   }
@@ -667,13 +683,7 @@ class StudioApp {
       if (this.flow.screen.name === "camera" && this.flow.screen.previousArchetype) this.restoreSignature();
       this.dispatch({ type: "cancelCamera" });
     },
-    manualCapture: () => {
-      this.matcher?.forceCapture();
-      void this.capture();
-    },
     switchCamera: () => void this.switchCamera(),
-    retakeRough: () => this.dispatch({ type: "retakeRough" }),
-    keepRough: () => this.dispatch({ type: "keepRough" }),
     retake: (targetKey) => this.dispatch({ type: "retake", targetKey }),
     pickArchetype: (archetype) => this.pickArchetype(archetype),
     changeArchetype: () => this.dispatch({ type: "changeArchetype" }),
@@ -720,7 +730,24 @@ class StudioApp {
       this.dispatch({ type: "restart" });
     },
     recaptureAll: () => this.recaptureAll(),
+    openIntro: () => this.openIntro(),
   };
+
+  /** Created once and re-attached on each render, so redraws don't restart it. */
+  private createIntro(): HTMLElement {
+    return introPanel({ base: import.meta.env.BASE_URL, onDone: () => this.closeIntro() });
+  }
+
+  private openIntro(): void {
+    this.intro = this.createIntro();
+    this.render();
+  }
+
+  private closeIntro(): void {
+    markIntroSeen();
+    this.intro = null;
+    this.render();
+  }
 
   /**
    * A different archetype means a different signature pose: the one captured
@@ -734,7 +761,7 @@ class StudioApp {
       if (!this.setAsideSignature) {
         this.setAsideSignature = {
           capture: this.captures.get(key), rendered: this.renderedScale.get(key), debug: this.debugCaptures.get(key),
-          roughTries: this.roughTries.get(key), pose: this.data.poses.signature, preview: this.data.previews[key],
+          pose: this.data.poses.signature, preview: this.data.previews[key],
         };
       } else {
         const url = this.data.previews[key];
@@ -743,7 +770,6 @@ class StudioApp {
       this.captures.delete(key);
       this.renderedScale.delete(key);
       this.debugCaptures.delete(key);
-      this.roughTries.delete(key);
       delete this.data.poses.signature;
       delete this.data.previews[key];
     }
@@ -762,7 +788,6 @@ class StudioApp {
     if (kept.capture) this.captures.set(key, kept.capture);
     if (kept.rendered) this.renderedScale.set(key, kept.rendered);
     if (kept.debug) this.debugCaptures.set(key, kept.debug);
-    if (kept.roughTries !== undefined) this.roughTries.set(key, kept.roughTries);
     if (kept.pose) this.data.poses.signature = kept.pose;
     if (kept.preview) this.data.previews[key] = kept.preview;
     this.saveDraftSoon();
@@ -790,7 +815,10 @@ class StudioApp {
     this.captures.clear();
     this.renderedScale.clear();
     this.debugCaptures.clear();
-    this.roughTries.clear();
+    if (this.exposureLocked) {
+      this.exposureLocked = false;
+      void this.source?.unlockExposure();
+    }
   }
 
   // --- models + live tracking ----------------------------------------------------------
@@ -853,23 +881,24 @@ class StudioApp {
     const s = this.flow.screen;
     const source = this.source;
     if (!source || !this.tracker || !this.overlay || this.switchingCamera || !source.width || !isLiveScreen(s)) return;
-    // A phone's camera switch shows up in its camera-info, not as a new source.
-    this.root.querySelector(".live")?.classList.toggle("mirrored", source.mirrored);
     const W = source.width;
     const H = source.height;
     this.overlay.resize(W, H);
     const target = targetAt(s.poseIndex, this.flow.archetype);
     const def = target.definition;
     if (s.name === "pose" && this.matcher && !this.capturing && this.tracker.shouldDetect(now)) {
+      // A phone's camera switch shows up in its camera-info, not as a new source.
+      this.root.querySelector(".live")?.classList.toggle("mirrored", source.mirrored);
       const landmarks = this.tracker.detectLive(source.video, now);
       // Score in pixel space so angles aren't distorted by the frame's aspect ratio.
       const px = landmarks ? toPixelLandmarks(landmarks, W, H) : null;
-      const update = this.matcher.update(px, now);
       const framing = px ? framingAdvice(px, W, H) : null;
+      // Framed so the photo would cut them off or be too small: the pose doesn't count (no hold, no "Got it" for a photo that can't pass).
+      const update = this.matcher.update(framing === "ok" ? px : null, now);
       // The jump lifts the feet; keep the ghost on the floor.
       this.ghostFitter.update(px, W, H, now, { holdVertical: target.poseId === "jump" });
-      // Coach only when the joints are the problem: not while framing advice, the break prompt or the hold is up.
-      const coachable = !update.matching && !update.awaitingBreak && update.score !== Infinity && (framing ?? "ok") === "ok";
+      // Coach only when the joints are the problem: not while framing advice (no score then), the break prompt or the hold is up.
+      const coachable = !update.matching && !update.awaitingBreak && update.score !== Infinity;
       const coaching = this.coach.update(coachable ? update.joints : [], now);
       // Shown once the pose's own prompt has had its turn, like the hint.
       const fix = update.armed && coaching.correction && px ? update.joints.find((j) => j.joint === coaching.correction!.joint) : undefined;
@@ -881,8 +910,14 @@ class StudioApp {
         this.holdSound.start(DEFAULT_MATCHER_OPTIONS.holdMs);
         this.voice.say("Hold it");
       }
+      if (update.events.includes("moved")) {
+        this.holdSound.start(DEFAULT_MATCHER_OPTIONS.holdMs);
+        if (now - this.holdStillSaidAt >= HOLD_STILL_REPEAT_MS) {
+          this.holdStillSaidAt = now;
+          this.voice.say("Hold still");
+        }
+      }
       if (update.events.includes("holdBroken")) this.holdSound.cancel();
-      if (update.events.includes("tolerancesWidened")) this.voice.say("Close enough works too");
       if (update.events.includes("breakNeeded")) this.voice.say(BREAK_PROMPT);
       if (update.events.includes("captured")) void this.capture();
       if (!update.matching) this.speakFraming(framing, now);
@@ -920,6 +955,7 @@ class StudioApp {
     this.switchingCamera = true;
     try {
       await source.switchCamera();
+      this.exposureLocked = false;
     } catch (err) {
       console.warn("[camera] switch failed", err);
       this.toast("Couldn't switch camera");
@@ -936,8 +972,10 @@ class StudioApp {
 
   /**
    * Grab the sharpest of a short burst at the camera's full resolution,
-   * re-detect on the still, segment, normalize, store. A phone's still comes
-   * over the data channel, so the person holds the pose until it's here.
+   * re-detect on the still, check it's in the pose, segment, check the cut-out,
+   * normalize, store. Only a photo that passes both checks is kept: otherwise
+   * the pose again, saying why. The person holds the pose until the photo is in
+   * and in the pose ("Hold it…"), then hears "Got it".
    */
   private async capture(): Promise<void> {
     const s = this.flow.screen;
@@ -946,14 +984,8 @@ class StudioApp {
     this.capturing = true;
     const remote = source.kind === "phone";
     const target = targetAt(s.poseIndex, this.flow.archetype);
-    const side = this.matcher?.side ?? "right";
     const liveLandmarks = this.live.landmarks;
-    const gotIt = () => {
-      this.holdSound.complete();
-      this.voice.say("Got it");
-    };
-    if (remote) this.awaitingStill = true;
-    else gotIt();
+    this.awaitingStill = true;
     this.dispatch({ type: "poseCaptured" });
     let graceDone = remote ? null : new Promise((r) => setTimeout(r, GRACE_MS[this.flow.mode]));
     try {
@@ -961,26 +993,29 @@ class StudioApp {
       const { width: liveW, height: liveH } = source;
       const region = liveLandmarks ? normalizeRect(personCropRect(toPixelLandmarks(liveLandmarks, liveW, liveH), liveW, liveH), liveW, liveH) : null;
       const still = await source.grabStill(region, BURST_FRAMES).finally(() => {
-        if (!remote) return;
-        // The grace before the next pose starts once the photo is in.
-        this.awaitingStill = false;
-        graceDone = new Promise((r) => setTimeout(r, GRACE_MS[this.flow.mode]));
+        // From a phone, the grace before the next pose starts once the photo is in.
+        if (remote) graceDone = new Promise((r) => setTimeout(r, GRACE_MS[this.flow.mode]));
       });
-      if (remote) {
-        gotIt();
-        this.sendPhoneStatus();
-        this.renderHud();
-      }
       const { frame, sharpness } = still;
       const W = frame.width;
       const H = frame.height;
-      // A phone's still is from a later moment than the live frame: no falling back to the live landmarks.
-      const landmarks = (await this.tracker.detectStill(frame)) ?? (remote ? null : liveLandmarks);
-      if (!landmarks) throw new Error("No one in the picture");
+      // Hitboxes, the matte and the sprite all come from the photo's own landmarks, never the live ones (another moment).
+      const landmarks = this.tracker.detectStill(frame);
+      if (!landmarks) throw new RetakeNeeded("Lost you in the photo: strike the pose again", "Let's try that again");
+      const px = toPixelLandmarks(landmarks, W, H);
+      const side = this.checkStillPose(target.key, px, target.definition);
+      this.checkWalkPair(target.key, px, W);
+      // The photo's in and in the pose: they can relax while it's cut out.
+      this.awaitingStill = false;
+      this.holdSound.complete();
+      this.voice.say("Got it");
+      if (remote) this.sendPhoneStatus();
+      this.renderHud();
       const { foreground, debug } = await this.remover.cutout(frame, landmarks);
       console.info(`[capture] matting took ${debug.inferenceMs} ms on ${debug.backend} (${W}×${H} still)`);
-      const quality = assessCutout({ alpha: debug.alpha, rect: debug.rect, frameWidth: W, frameHeight: H, landmarks: toPixelLandmarks(landmarks, W, H) });
+      const quality = assessCutout({ alpha: debug.alpha, rect: debug.rect, frameWidth: W, frameHeight: H, landmarks: px });
       if (DEBUG_MATTING) this.debugCaptures.set(target.key, { frame, landmarks, debug, quality, sharpness });
+      this.checkCutout(target.key, quality);
       this.captures.set(target.key, {
         cut: cutoutFromCrop(foreground, debug.rect),
         geometry: { poseId: target.poseId, landmarks, frameWidth: W, frameHeight: H },
@@ -988,47 +1023,71 @@ class StudioApp {
         ...(target.definition.attackLimb ? { attackSide: side } : {}),
       });
       if (target.key === "signature") this.dropSetAsideSignature();
+      if (!this.exposureLocked) void this.lockExposure(source);
       const plans = await this.renderSprites();
       this.saveDraftSoon();
       this.renderHud();
       if (plans[target.key]?.flipped) this.toast("Flipped so you face right");
-      const autoRetake = this.checkQuality(target.key, quality);
       await graceDone;
       this.capturing = false;
-      this.dispatch({ type: autoRetake ? "retakeRough" : "graceElapsed" });
+      this.dispatch({ type: "graceElapsed" });
     } catch (err) {
-      console.warn("[capture] failed", err);
       this.capturing = false;
       this.awaitingStill = false;
       this.holdSound.cancel();
-      this.toast(`Didn't work (${(err as Error).message}). Try again.`);
-      this.voice.say("Let's try that again");
+      if (err instanceof RetakeNeeded) {
+        this.toast(err.message);
+        this.voice.say(err.spoken);
+      } else {
+        console.warn("[capture] failed", err);
+        this.toast(`Didn't work (${(err as Error).message}). Try again.`);
+        this.voice.say("Let's try that again");
+      }
       await graceDone;
       this.dispatch({ type: "captureFailed" });
     }
   }
 
+  /** The photo has to be in the pose: hitboxes come from its landmarks. Returns the limb it attacks with. */
+  private checkStillPose(key: string, px: NormalizedLandmark[], def: PoseDefinition): LimbSide {
+    const check = checkStillPose(px, def);
+    if (check.ok) return check.side;
+    console.info(`[capture] ${key}: photo out of the pose (score ${check.score.toFixed(2)})`);
+    const fix = check.correction ?? "Strike the pose again";
+    throw new RetakeNeeded(`Not quite in the photo: ${fix.toLowerCase()}`, `Not quite. ${fix}.`);
+  }
+
   /**
-   * Flag a rough cut-out right away. With someone helping it asks "retake?";
-   * on your own (nobody near the screen) it retakes once by itself, then keeps
-   * what it gets. Returns true when the pose should be retaken automatically.
+   * The walk is drawn from the stance and the step together (walk-gait.ts):
+   * taking either, it's compared with the other one if that's in. Same front
+   * foot, and the step clearly wider (compareStep).
    */
-  private checkQuality(key: string, quality: CutoutQuality): boolean {
-    if (!quality.issues.length) {
-      this.roughTries.delete(key);
-      return false;
-    }
+  private checkWalkPair(key: string, px: NormalizedLandmark[], width: number): void {
+    if (key !== "idle" && key !== "walk") return;
+    const other = this.captures.get(key === "idle" ? "walk" : "idle")?.geometry;
+    if (!other) return;
+    const fresh = { landmarks: px, width };
+    const stored = { landmarks: toPixelLandmarks(other.landmarks, other.frameWidth, other.frameHeight), width: other.frameWidth };
+    const issue = key === "walk" ? compareStep(stored, fresh) : compareStep(fresh, stored);
+    if (!issue) return;
+    console.info(`[capture] ${key}: doesn't make a walk with the ${key === "walk" ? "stance" : "step"} (${issue})`);
+    const advice = stepAdvice(issue, key === "walk" ? "step" : "stance");
+    throw new RetakeNeeded(advice.shown, advice.spoken);
+  }
+
+  /** The cut-out has to be clean: a rough one is never kept. */
+  private checkCutout(key: string, quality: CutoutQuality): void {
+    if (!quality.issues.length) return;
     console.info("[capture] rough cut-out", key, quality);
-    const tries = (this.roughTries.get(key) ?? 0) + 1;
-    this.roughTries.set(key, tries);
-    this.roughReason = describeCutoutIssues(quality.issues);
-    if (this.flow.mode === "solo" && tries > 1) {
-      this.toast("Still a bit rough — kept it. You can retake it from the review.");
-      return false;
-    }
-    this.dispatch({ type: "captureRough" });
-    this.voice.say(this.flow.mode === "solo" ? "That one came out rough. Let's go again." : "That one came out rough. Retake?");
-    return this.flow.mode === "solo";
+    const advice = cutoutAdvice(quality);
+    throw new RetakeNeeded(`Didn't cut out cleanly (${describeCutoutIssues(quality.issues)}). ${advice}`, `That one didn't cut out cleanly. ${advice}`);
+  }
+
+  /** After the fighter's first photo: hold the exposure and white balance from now on. */
+  private async lockExposure(source: CameraSource): Promise<void> {
+    this.exposureLocked = true;
+    const locked = await source.lockExposure();
+    console.info(locked.length ? `[camera] locked ${locked.join(", ")} for this fighter` : "[camera] this camera can't lock exposure or white balance");
   }
 
   /**

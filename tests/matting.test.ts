@@ -3,11 +3,9 @@ import { describe, expect, it, vi } from "vitest";
 import {
   MODEL_SIZE,
   REGION_ALPHA,
-  applyAlpha,
   keepConnected,
   keepPerson,
   personCropRect,
-  resampleFloat,
   skeletonPrior,
   stretchToUnit,
   toModelInput,
@@ -82,10 +80,6 @@ describe("keeping the person", () => {
     expect(keepPerson(alpha, W, H, idle)[at(10, 10)]).toBe(255);
   });
 
-  it("puts the alpha into the crop's colours", () => {
-    const rgba = Uint8ClampedArray.from([10, 20, 30, 255, 40, 50, 60, 255]);
-    expect(Array.from(applyAlpha(rgba, Uint8ClampedArray.from([0, 200])))).toEqual([10, 20, 30, 0, 40, 50, 60, 200]);
-  });
 });
 
 describe("model input and output", () => {
@@ -105,10 +99,6 @@ describe("model input and output", () => {
     expect(Array.from(stretchToUnit([0.3, 0.3]))).toEqual([0, 0]);
   });
 
-  it("resamples float masks bilinearly", () => {
-    const up = resampleFloat(Float32Array.from([0, 1]), 2, 1, 4, 1);
-    expect(Array.from(up)).toEqual([0, 0.25, 0.75, 1]);
-  });
 
   it("loads the ONNX Runtime binary matching the installed onnxruntime-web", async () => {
     const { ORT_VERSION, ORT_WASM_URL } = await import("../src/capture/vision-runtime");

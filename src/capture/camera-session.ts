@@ -137,12 +137,6 @@ export class CameraSession {
     return !/back|rear|environment/i.test(track.label);
   }
 
-  grabFrame(): HTMLCanvasElement | OffscreenCanvas {
-    const canvas = createCanvas(this.width, this.height);
-    context2d(canvas).drawImage(this.video, 0, 0, this.width, this.height);
-    return canvas;
-  }
-
   /**
    * The sharpest of the next `count` video frames, judged in `region` (the
    * person, normalized 0..1 to the frame, so a region found on a smaller live
@@ -181,23 +175,36 @@ export class CameraSession {
     });
   }
 
-  /** Calls back on each presented video frame (requestVideoFrameCallback, or rAF fallback). */
-  onFrame(callback: (nowMs: number) => void): () => void {
-    let active = true;
-    const video = this.video as HTMLVideoElement & {
-      requestVideoFrameCallback?: (cb: (now: number) => void) => number;
-    };
-    const loop = (now: number) => {
-      if (!active) return;
-      callback(now);
-      schedule();
-    };
-    const schedule = () => {
-      if (video.requestVideoFrameCallback) video.requestVideoFrameCallback(loop);
-      else requestAnimationFrame(loop);
-    };
-    schedule();
-    return () => { active = false; };
+  /**
+   * Hold the current exposure and white balance, so a fighter's sixteen photos
+   * don't drift brighter, darker or bluer as the camera re-meters. Only what
+   * this camera supports (Image Capture constraints; many webcams, not Safari).
+   * Returns what was locked.
+   */
+  async lockExposure(): Promise<string[]> {
+    const track = this.track;
+    if (!track?.getCapabilities) return [];
+    const locked: string[] = [];
+    for (const set of exposureLockConstraints(track.getCapabilities() as CameraControls, track.getSettings() as CameraControls)) {
+      try {
+        await track.applyConstraints({ advanced: [set as MediaTrackConstraintSet] });
+        locked.push(Object.keys(set)[0]);
+      } catch (err) {
+        console.info("[camera] couldn't lock", set, err);
+      }
+    }
+    return locked;
+  }
+
+  /** Back to automatic exposure and white balance (a new fighter, a new room). */
+  async unlockExposure(): Promise<void> {
+    const track = this.track;
+    if (!track?.getCapabilities) return;
+    const caps = track.getCapabilities() as CameraControls;
+    for (const key of ["exposureMode", "whiteBalanceMode"] as const) {
+      if (!caps[key]?.includes("continuous")) continue;
+      await track.applyConstraints({ advanced: [{ [key]: "continuous" } as MediaTrackConstraintSet] }).catch(() => {});
+    }
   }
 
   stop(): void {
@@ -208,4 +215,28 @@ export class CameraSession {
     this.stream = null;
     this.video.srcObject = null;
   }
+}
+
+/** The Image Capture camera controls (not in TypeScript's DOM types), as capabilities or settings. */
+export interface CameraControls {
+  exposureMode?: string | string[];
+  exposureTime?: number | { min: number; max: number };
+  whiteBalanceMode?: string | string[];
+  colorTemperature?: number | { min: number; max: number };
+}
+
+/**
+ * Constraint sets that hold the current exposure and white balance, one per
+ * control, for the controls this camera can set by hand. Pure.
+ */
+export function exposureLockConstraints(capabilities: CameraControls, settings: CameraControls): CameraControls[] {
+  const manual = (modes: CameraControls["exposureMode"]) => Array.isArray(modes) && modes.includes("manual");
+  const sets: CameraControls[] = [];
+  if (manual(capabilities.exposureMode) && typeof settings.exposureTime === "number") {
+    sets.push({ exposureMode: "manual", exposureTime: settings.exposureTime });
+  }
+  if (manual(capabilities.whiteBalanceMode) && typeof settings.colorTemperature === "number") {
+    sets.push({ whiteBalanceMode: "manual", colorTemperature: settings.colorTemperature });
+  }
+  return sets;
 }

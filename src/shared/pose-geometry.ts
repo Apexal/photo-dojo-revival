@@ -41,6 +41,7 @@ export interface JointError {
 }
 
 export interface PoseEvaluation {
+  /** The worst joint's error (see `jointErrors`); Infinity when a required landmark isn't clearly seen. */
   score: number;
   side: LimbSide;
   /** Each target angle for the chosen side (joint names already mirrored), for coaching. */
@@ -125,14 +126,9 @@ export function computeJointAngles(landmarks: NormalizedLandmark[]): JointAngles
 }
 
 /**
- * Worst normalized error across the target's angles:
- * 0 = perfect, 1 = at the tolerance edge, >1 = out. Missing angles score Infinity.
+ * Each target angle's signed and normalized error: 0 = perfect, 1 = at the
+ * tolerance edge, >1 = out; Infinity when the joint isn't visible.
  */
-export function scorePoseMatch(angles: JointAngles, target: Pick<PoseTarget, "angleTargets">, toleranceScale = 1): number {
-  return Math.max(0, ...jointErrors(angles, target, toleranceScale).map((j) => j.error));
-}
-
-/** Each target angle's signed and normalized error (see `scorePoseMatch`). */
 export function jointErrors(angles: JointAngles, target: Pick<PoseTarget, "angleTargets">, toleranceScale = 1): JointError[] {
   return target.angleTargets.map(({ joint, degrees, tolerance }) => {
     const actual = angles[joint];

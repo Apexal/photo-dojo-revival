@@ -17,9 +17,6 @@ import {
 } from "../shared/pose-geometry";
 import { canvasToPng, createCanvas, context2d, type AnyCanvas } from "../shared/canvas";
 
-// Moved to src/shared/canvas.ts; re-exported so callers don't churn.
-export { canvasToPng, createCanvas, context2d };
-
 export interface SpritePlan {
   transform: NormalizationTransform;
   /** Landmarks in sprite-canvas pixels. */

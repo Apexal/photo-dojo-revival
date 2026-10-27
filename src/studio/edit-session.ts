@@ -6,7 +6,7 @@ import { FIGHTER_SOURCES_VERSION, type FighterSources } from "./capture-draft";
 /**
  * Editing a saved fighter (`/studio?edit=<fighterId>`, docs/character-studio.md
  * §6): the fighter and, for one the studio built, the cut-outs it was made
- * from. Without sources (imported, or from the old phone capture) single
+ * from. Without sources (imported from a file) single
  * retakes can't be re-planned at the fighter's scale, so only renaming, the
  * sounds, or capturing every pose again are offered.
  */

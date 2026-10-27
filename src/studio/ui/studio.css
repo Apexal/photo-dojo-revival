@@ -118,3 +118,17 @@ ul.tips { margin: 0; padding-left: 1.2em; display: grid; gap: 10px; font-size: 1
 #phone-gate h1 span { display: block; color: var(--bad); font-size: 18px; letter-spacing: 0.2em; margin-top: 4px; }
 #phone-gate .muted { color: var(--muted); font-size: 15px; }
 #phone-gate a.button { padding: 14px 18px; }
+
+/* "How it works" before setup (ui/intro.ts). */
+.intro { max-width: 1000px; margin: auto; }
+.intro-head { display: flex; justify-content: space-between; align-items: center; }
+/* As wide as fits while the caption and buttons stay on screen. */
+.intro-canvas { width: min(100%, calc((100vh - 400px) * 16 / 9)); min-width: min(100%, 480px); height: auto; aspect-ratio: 16 / 9; align-self: center; border-radius: 14px; background: #191522; }
+.intro h2 { margin: 0; color: var(--accent); }
+.intro-caption { margin: 0; font-size: 20px; min-height: 3em; }
+.intro-controls { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.intro-dots { display: flex; gap: 10px; }
+.intro-dot { width: 14px; height: 14px; min-height: 0; padding: 0; border-radius: 50%; background: var(--line); border: none; }
+.intro-dot.on { background: var(--accent); }
+.intro-needs { margin: 0; }
+button.link { background: none; border: none; padding: 4px 0; color: var(--accent); text-decoration: underline; min-height: 0; }

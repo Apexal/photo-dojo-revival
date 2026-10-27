@@ -1,5 +1,6 @@
 import { LANDMARK, LANDMARK_COUNT, type NormalizedLandmark, type PoseId } from "../../shared/fighter-model";
 import { midHip, midShoulder, torsoLength } from "../../shared/pose-geometry";
+import { sidesFlipped, swapSides } from "../../shared/side-flips";
 import type { FrameTween } from "../../simulation/fight-simulation";
 import { ArapDeformer, triangulateMask, type AlphaMask, type Point, type TriangleMesh } from "./arap";
 
@@ -41,6 +42,9 @@ export interface TweenLayer {
   positions: Float64Array;
   alpha: number;
 }
+
+/** Changes an in-between skeleton before the captures are warped onto it (the walk's mid-step lift). */
+export type SkeletonAdjust = (skeleton: NormalizedLandmark[]) => NormalizedLandmark[];
 
 /** Landmarks this unreliable in either capture don't pull the mesh. */
 export const TWEEN_HANDLE_VISIBILITY = 0.5;
@@ -150,39 +154,8 @@ const relativeTo = (l: readonly NormalizedLandmark[], anchor: Point): Normalized
 const frameKey = (f: FrameRef) => `${f.poseId}#${f.variant}`;
 const trustedIn = (l: readonly NormalizedLandmark[], ...indices: number[]) => indices.every((i) => l[i].visibility >= TWEEN_HANDLE_VISIBILITY);
 
-// --- left/right label flips -----------------------------------------------------
-
-/** Each landmark's mirror-side counterpart (MediaPipe numbering; the nose is its own). */
-const MIRROR: readonly number[] = (() => {
-  const m = Array.from({ length: LANDMARK_COUNT }, (_, i) => i);
-  const pairs = [[1, 4], [2, 5], [3, 6], [7, 8], [9, 10]];
-  for (let i = LANDMARK.leftShoulder; i < LANDMARK_COUNT; i += 2) pairs.push([i, i + 1]);
-  for (const [a, b] of pairs) { m[a] = b; m[b] = a; }
-  return m;
-})();
-
-/** The same landmarks with every left/right label swapped. */
-export function swapSides(l: readonly NormalizedLandmark[]): NormalizedLandmark[] {
-  return l.map((_, i) => ({ ...l[MIRROR[i]] }));
-}
-
-/** How much better the swapped pairing has to fit, for both shoulders and hips, to count as a flip. */
-const FLIP_MARGIN = 0.6;
-
-/**
- * MediaPipe sometimes labels a side-on body with left and right swapped. Its
- * signature is the whole torso fitting the other capture better swapped:
- * shoulders and hips both. One arm fitting better swapped is not a flip; a
- * cross (rear hand punching past the lead hand) does that for real.
- */
-export function sidesFlipped(a: readonly NormalizedLandmark[], b: readonly NormalizedLandmark[]): boolean {
-  const flippedPair = (left: number, right: number) => {
-    const straight = dist(a[left], b[left]) + dist(a[right], b[right]);
-    const swapped = dist(a[left], b[right]) + dist(a[right], b[left]);
-    return swapped < FLIP_MARGIN * straight;
-  };
-  return flippedPair(LANDMARK.leftShoulder, LANDMARK.rightShoulder) && flippedPair(LANDMARK.leftHip, LANDMARK.rightHip);
-}
+// Left/right label flips live in src/shared/side-flips.ts (the studio checks them too); re-exported here.
+export { sidesFlipped, swapSides };
 
 const dist = (p: Point, q: Point) => Math.hypot(p.x - q.x, p.y - q.y);
 
@@ -260,6 +233,32 @@ function distanceToLine(p: Point, line: Point[]): number {
     best = Math.min(best, Math.hypot(p.x - a.x - t * dx, p.y - a.y - t * dy));
   }
   return best;
+}
+
+/**
+ * The triangles nearer the torso or head than any arm or leg, every limb
+ * counted whether it's cut loose or not (the top of each upper arm and thigh
+ * hinges with the body, so it stays). The single-capture backing (the walk) is
+ * drawn from these: a backing with a leg in it shows that leg beside the one
+ * on top, the doubled legs it's there to avoid.
+ */
+function coreTriangles(positions: ArrayLike<number>, triangles: Uint32Array, landmarks: readonly NormalizedLandmark[]): Uint32Array {
+  const bones = boneLines(landmarks, LIMBS);
+  const core: number[] = [];
+  for (let t = 0; t < triangles.length; t += 3) {
+    const centre = { x: 0, y: 0 };
+    for (let k = 0; k < 3; k++) {
+      centre.x += positions[2 * triangles[t + k]] / 3;
+      centre.y += positions[2 * triangles[t + k] + 1] / 3;
+    }
+    let nearest = 0, best = Infinity;
+    for (const bone of bones) {
+      const d = distanceToLine(centre, bone.line);
+      if (d < best) { best = d; nearest = bone.group; }
+    }
+    if (nearest === 0) core.push(triangles[t], triangles[t + 1], triangles[t + 2]);
+  }
+  return Uint32Array.from(core);
 }
 
 /**
@@ -360,6 +359,8 @@ interface DeformerEntry {
   uvs: Float32Array;
   /** The deformer's triangles minus the cut-loose limbs. */
   bodyTriangles: Uint32Array;
+  /** Only the torso and head: no arm or leg, cut loose or not (`coreTriangles`). */
+  coreTriangles: Uint32Array;
 }
 
 /** Fewer bound handles than this and the warp is guesswork: show a hard cut instead. */
@@ -388,20 +389,27 @@ export class PoseTweener {
    * limbs, opaque), the leaving capture, the arriving one. Between a capture and
    * its own stand-in, or between two stand-ins for the same capture, just the
    * one capture, warped. Null for a hard cut.
+   *
+   * `single`: no cross-dissolve, just the nearer capture (the leaving one up to
+   * halfway, then the arriving one) warped onto the in-between skeleton, over
+   * the other capture's torso and head as the backing. Two warps never line up
+   * exactly, so a long or constant blend (the walk) shows both captures' legs
+   * at once; one capture's limbs at a time can't. The backing has no arms or
+   * legs at all (`coreTriangles`), so it only shows where a limb moved off the
+   * body and left a hole.
    */
-  layers(tween: FrameTween): TweenLayer[] | null {
+  layers(tween: FrameTween, adjust?: SkeletonAdjust, single = false): TweenLayer[] | null {
     const standIn = (f: FrameRef) => this.meshFor(f)?.standIn ?? false;
     if (standIn(tween.from) || standIn(tween.to)) {
       // A stand-in has no photo: its pose's main capture is what's drawn.
       const real = (f: FrameRef): FrameRef => (standIn(f) ? { poseId: f.poseId, variant: 0 } : f);
       const from = real(tween.from), to = real(tween.to);
-      if (frameKey(from) !== frameKey(to)) return this.layers({ ...tween, from, to });
-      return this.warpOnly(tween, from);
+      if (frameKey(from) !== frameKey(to)) return this.layers({ ...tween, from, to }, adjust);
+      return this.warpOnly(tween, from, adjust);
     }
     const from = this.deformerFor(tween.from, tween.to), to = this.deformerFor(tween.to, tween.from);
     if (!from || !to) return null;
-    const [a, b] = this.pairLandmarks(tween.from, tween.to)!;
-    const skeleton = interpolateLandmarks(a, b, tween.t);
+    const skeleton = this.skeleton(tween, adjust)!;
     const targets = from.handles.map((h) => handlePoint(skeleton, h));
     const fromPositions = from.deformer.deform(targets), toPositions = to.deformer.deform(targets);
     const layer = (frame: FrameRef, entry: DeformerEntry, other: FrameRef, positions: Float64Array, alpha: number): TweenLayer => ({
@@ -412,6 +420,12 @@ export class PoseTweener {
       positions,
       alpha,
     });
+    if (single) {
+      const [near, nearEntry, far, farEntry] = tween.t < 0.5 ? [tween.from, from, tween.to, to] : [tween.to, to, tween.from, from];
+      const shown = layer(near, nearEntry, far, nearEntry === from ? fromPositions : toPositions, 1);
+      const backing = layer(far, farEntry, near, farEntry === from ? fromPositions : toPositions, 1);
+      return [{ ...backing, id: `${backing.id}:core`, triangles: farEntry.coreTriangles }, shown];
+    }
     // The arriving capture fades in on top; the leaving one fades out under it from halfway,
     // so the body never turns see-through.
     const leaving = layer(tween.from, from, tween.to, fromPositions, Math.min(1, 2 * (1 - tween.t)));
@@ -424,12 +438,11 @@ export class PoseTweener {
   }
 
   /** One capture (`real`, the photo behind both ends) warped along the tween: toward its stand-in, or from one stand-in to another. */
-  private warpOnly(tween: FrameTween, real: FrameRef): TweenLayer[] | null {
+  private warpOnly(tween: FrameTween, real: FrameRef, adjust?: SkeletonAdjust): TweenLayer[] | null {
     const other = frameKey(real) === frameKey(tween.to) ? tween.from : tween.to;
     const entry = this.deformerFor(real, other);
     if (!entry) return null;
-    const [a, b] = this.pairLandmarks(tween.from, tween.to)!;
-    const skeleton = interpolateLandmarks(a, b, tween.t);
+    const skeleton = this.skeleton(tween, adjust)!;
     const targets = entry.handles.map((h) => handlePoint(skeleton, h));
     return [{
       frame: real,
@@ -439,6 +452,18 @@ export class PoseTweener {
       positions: entry.deformer.deform(targets),
       alpha: 1,
     }];
+  }
+
+  /**
+   * The skeleton a tween draws at its t (relative to the feet anchor, facing
+   * right, sides labelled as the pair agrees), after `adjust` if given. Null
+   * when either capture is missing.
+   */
+  skeleton(tween: FrameTween, adjust?: SkeletonAdjust): NormalizedLandmark[] | null {
+    const pair = this.pairLandmarks(tween.from, tween.to);
+    if (!pair) return null;
+    const skeleton = interpolateLandmarks(pair[0], pair[1], tween.t);
+    return adjust ? adjust(skeleton) : skeleton;
   }
 
   /**
@@ -491,7 +516,9 @@ export class PoseTweener {
         try {
           const deformer = new ArapDeformer(mesh, handles.map((h) => handlePoint(mine, h)), {}, handles.map((h) => handleGroup(h, cut)));
           const body = Array.from(deformer.triangles).filter((_, k) => deformer.groups[Math.floor(k / 3)] === 0);
-          if (deformer.bound.filter(Boolean).length >= MIN_BOUND_HANDLES) entry = { deformer, handles, uvs, bodyTriangles: Uint32Array.from(body) };
+          if (deformer.bound.filter(Boolean).length >= MIN_BOUND_HANDLES) {
+            entry = { deformer, handles, uvs, bodyTriangles: Uint32Array.from(body), coreTriangles: coreTriangles(mesh.positions, deformer.triangles, mine) };
+          }
         } catch (err) {
           console.warn(`[tween] can't warp ${key}, using a hard cut`, err);
         }
