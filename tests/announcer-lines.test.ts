@@ -43,6 +43,7 @@ describe("announcer lines", () => {
     expect(streak(7)).toBeNull();
     expect(calloutLine({ type: "firstBlood", player: 1 })).toBe("first-blood");
     expect(calloutLine({ type: "perfect", player: 1 })).toBe("perfect");
+    expect(calloutLine({ type: "snub", player: 0 })).toBe("disrespectful");
   });
 
   it("names stages that have a line, and tournament rounds", () => {

@@ -2,19 +2,20 @@ import type { FightState } from "./fight-simulation";
 import { HitStreak } from "./match-stats";
 import { MAX_HEALTH, type PlayerIndex, type RoundPhase } from "./round-rules";
 
-/** An announcer callout for one player: the round's first hit, a hit streak as it grows, a round won untouched. */
+/** An announcer callout for one player: a refused handshake, the round's first hit, a hit streak as it grows, a round won untouched. */
 export type Callout =
+  | { type: "snub"; player: PlayerIndex }
   | { type: "firstBlood"; player: PlayerIndex }
   | { type: "streak"; player: PlayerIndex; hits: number }
   | { type: "perfect"; player: PlayerIndex };
 
 export const calloutText = (c: Callout): string =>
-  c.type === "firstBlood" ? "FIRST BLOOD" : c.type === "streak" ? `${c.hits} HIT STREAK` : "PERFECT";
+  c.type === "snub" ? "NO HANDSHAKE" : c.type === "firstBlood" ? "FIRST BLOOD" : c.type === "streak" ? `${c.hits} HIT STREAK` : "PERFECT";
 
 /**
  * Picks out callouts as the fight is played: feed it every state the
  * simulation steps to (not replays), in order. `firstBlood` and `perfect`
- * are for matches; practice only gets streaks.
+ * are for matches; practice only gets streaks and snubs.
  */
 export class CalloutTracker {
   private readonly streak = new HitStreak();
@@ -36,6 +37,9 @@ export class CalloutTracker {
           break;
         case "throw":
           this.firstBlood(ev.attacker, out);
+          break;
+        case "snub":
+          out.push({ type: "snub", player: ev.player });
           break;
       }
     }

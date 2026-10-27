@@ -22,6 +22,8 @@ export interface PlayerStats {
   /** Times they put the opponent on the floor. */
   knockdowns: number;
   taunts: number;
+  /** Round-intro handshakes they refused. */
+  snubs: number;
   /** Most clean hits in a row (HitStreak). */
   longestStreak: number;
   /** The attack they landed most often (null if none landed). */
@@ -55,7 +57,7 @@ export interface MatchStats {
 
 const emptyStats = (): PlayerStats => ({
   roundsWon: 0, perfectRounds: 0, damageDealt: 0, attacks: 0, hits: 0, blockedByOpponent: 0, blocks: 0,
-  throws: 0, throwTechs: 0, knockdowns: 0, taunts: 0, longestStreak: 0, favoriteMove: null, movesLanded: {},
+  throws: 0, throwTechs: 0, knockdowns: 0, taunts: 0, snubs: 0, longestStreak: 0, favoriteMove: null, movesLanded: {},
 });
 
 /**
@@ -159,6 +161,10 @@ export class MatchStatsTracker {
           break;
         case "taunt":
           this.both(ev.player, (s) => s.taunts++);
+          break;
+        case "snub":
+          // In the intro, which round numbers don't count: the match's only.
+          this.players[ev.player].snubs++;
           break;
         case "ko":
           this.finisher = finishingMove(state, ev.player);

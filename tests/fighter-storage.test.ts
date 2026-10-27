@@ -147,7 +147,7 @@ describe("fighter records", () => {
   };
   const stats = (over: Partial<PlayerStats> = {}): PlayerStats => ({
     roundsWon: 0, perfectRounds: 0, damageDealt: 0, attacks: 0, hits: 0, blockedByOpponent: 0, blocks: 0,
-    throws: 0, throwTechs: 0, knockdowns: 0, taunts: 0, longestStreak: 0, favoriteMove: null, movesLanded: {}, ...over,
+    throws: 0, throwTechs: 0, knockdowns: 0, taunts: 0, snubs: 0, longestStreak: 0, favoriteMove: null, movesLanded: {}, ...over,
   });
 
   it("adds a match up: result from the fighter's side, totals summed, best hit streak kept", () => {

@@ -82,6 +82,8 @@ export type FightEvent =
   /** `player` parried `attacker`'s strike; `at`: where it would have landed. */
   | { type: "parry"; player: PlayerIndex; attacker: PlayerIndex; attack: AttackId; at: { x: number; y: number } }
   | { type: "taunt"; player: PlayerIndex }
+  /** The round intro: `player` held back and refused the handshake. */
+  | { type: "snub"; player: PlayerIndex }
   | { type: "ko"; player: PlayerIndex }
   /** Sent flying by a throw or a hit in the air; `landed` when they (or a KO'd fighter) hit the floor. */
   | { type: "knockdown"; player: PlayerIndex }
@@ -179,22 +181,42 @@ export function handshakeShakeOf(state: FighterState, offeredAt: number): FrameT
  * (`along` goes 0 → 1, from where the round starts to where the hands meet),
  * a pause, the handshake (player 1 offers first, player 2 takes it a moment
  * later), walking back, then standing ready.
+ *
+ * `snubbed`: who refused the handshake (snubDueFrame). A snubber turns their
+ * back (`turnedAway`) where they'd have held out a hand, until they've walked
+ * back; the other one's hand is left hanging out, never shaken.
  */
-export function introStep(phaseFrame: number, player: PlayerIndex): { action: "walk" | "handshake" | "idle"; actionFrame: number; along: number } {
+export function introStep(
+  phaseFrame: number,
+  player: PlayerIndex,
+  snubbed: readonly [boolean, boolean] = [false, false],
+): { action: "walk" | "handshake" | "idle"; actionFrame: number; along: number; turnedAway: boolean } {
   let f = phaseFrame;
-  if (f < INTRO.walkIn) return { action: "walk", actionFrame: f, along: (f + 1) / INTRO.walkIn };
+  if (f < INTRO.walkIn) return { action: "walk", actionFrame: f, along: (f + 1) / INTRO.walkIn, turnedAway: false };
   f -= INTRO.walkIn;
-  if (f < INTRO.pause) return { action: "idle", actionFrame: f, along: 1 };
+  if (f < INTRO.pause) return { action: "idle", actionFrame: f, along: 1, turnedAway: false };
   f -= INTRO.pause;
+  const offered = player === 0 ? 0 : SECOND_HAND_FRAMES;
+  const snubbing = snubbed[player];
   if (f < INTRO.shake) {
     // Player 2 stands there a moment before taking the offered hand.
-    const offered = player === 0 ? 0 : SECOND_HAND_FRAMES;
-    if (f < offered) return { action: "idle", actionFrame: INTRO.pause + f, along: 1 };
-    return { action: "handshake", actionFrame: f - offered, along: 1 };
+    if (f < offered) return { action: "idle", actionFrame: INTRO.pause + f, along: 1, turnedAway: false };
+    if (snubbing) return { action: "idle", actionFrame: INTRO.pause + f, along: 1, turnedAway: true };
+    // Left hanging: the hand stays out, held still just short of the shake.
+    const hold = snubbed[1 - player] ? SHAKE_START_FRAME - offered - 1 : Infinity;
+    return { action: "handshake", actionFrame: Math.min(f - offered, hold), along: 1, turnedAway: false };
   }
   f -= INTRO.shake;
-  if (f < INTRO.walkOut) return { action: "walk", actionFrame: f, along: 1 - (f + 1) / INTRO.walkOut };
-  return { action: "idle", actionFrame: f - INTRO.walkOut, along: 0 };
+  if (f < INTRO.walkOut) return { action: "walk", actionFrame: f, along: 1 - (f + 1) / INTRO.walkOut, turnedAway: snubbing };
+  return { action: "idle", actionFrame: f - INTRO.walkOut, along: 0, turnedAway: false };
+}
+
+/**
+ * The last intro frame on which holding back refuses the handshake: the one
+ * before this player would hold out a hand. Any frame of the walk-in counts.
+ */
+export function snubDueFrame(player: PlayerIndex): number {
+  return INTRO.walkIn + INTRO.pause + (player === 0 ? 0 : SECOND_HAND_FRAMES) - 1;
 }
 
 export function currentGeometry(geometry: FighterGeometry, state: FighterState): PoseGeometry {
@@ -320,6 +342,8 @@ export class FightSimulation {
   private winsAtRoundStart: [number, number] = [0, 0];
   /** Each fighter's handshake, aimed so the hands meet (the round intro). */
   readonly grips: [HandshakeGrip, HandshakeGrip];
+  /** Who has refused this round's handshake (held back during the intro). */
+  private snubbed: [boolean, boolean] = [false, false];
 
   constructor(
     private readonly geometry: [FighterGeometry, FighterGeometry],
@@ -383,6 +407,7 @@ export class FightSimulation {
     this.buffers = [{ punch: 0, kick: 0 }, { punch: 0, kick: 0 }];
     this.guardHistory = [{ back: 99, down: 99 }, { back: 99, down: 99 }];
     this.calmFrames = [0, 0];
+    this.snubbed = [false, false];
     this.state = { frame: this.state.frame, fighters: this.freshFighters(round.roundNumber), round, events: [{ type: "roundStart", round: round.roundNumber }] };
     return this.state;
   }
@@ -422,7 +447,7 @@ export class FightSimulation {
     const controllable = phase === "fighting";
     const pressed = (i: number): Presses =>
       controllable ? { punch: this.buffers[i].punch > 0, kick: this.buffers[i].kick > 0 } : { punch: false, kick: false };
-    let fighters = phase === "intro" ? this.introFighters(prev) : [0, 1].map((i) =>
+    let fighters = phase === "intro" ? this.introFighters(prev, inputs, events) : [0, 1].map((i) =>
       stepFighter(prev.fighters[i], {
         input: controllable ? inputs[i] : EMPTY_INPUT,
         pressed: pressed(i),
@@ -474,17 +499,30 @@ export class FightSimulation {
     return this.state;
   }
 
-  /** The round intro: both fighters walk in, shake hands and walk back to where the round starts. Input is ignored. */
-  private introFighters(prev: FightState): [FighterState, FighterState] {
-    const start = this.freshFighters(prev.round.roundNumber).map((f) => f.position.x);
+  /**
+   * The round intro: both fighters walk in, shake hands and walk back to where
+   * the round starts. The only input that counts is holding back on the way
+   * in, which refuses the handshake.
+   */
+  private introFighters(prev: FightState, inputs: [InputFrame, InputFrame], events: FightEvent[]): [FighterState, FighterState] {
+    const start = this.freshFighters(prev.round.roundNumber);
     const meet = this.handshakePositions(prev.round.roundNumber);
+    const phaseFrame = prev.round.phaseFrame;
+    for (const i of [0, 1] as const) {
+      const due = snubDueFrame(i);
+      const back = start[i].facing === 1 ? inputs[i].left : inputs[i].right;
+      if (back && phaseFrame <= due) this.snubbed[i] = true;
+      // Announced as they turn their back, when the hand would have come out.
+      if (this.snubbed[i] && phaseFrame === due + 1) events.push({ type: "snub", player: i });
+    }
     return prev.fighters.map((f, i): FighterState => {
-      const step = introStep(prev.round.phaseFrame, i as PlayerIndex);
+      const step = introStep(phaseFrame, i as PlayerIndex, this.snubbed);
       return {
         ...f,
         action: step.action,
         actionFrame: step.actionFrame,
-        position: { x: start[i] + (meet[i] - start[i]) * step.along, y: FLOOR_Y },
+        position: { x: start[i].position.x + (meet[i] - start[i].position.x) * step.along, y: FLOOR_Y },
+        facing: step.turnedAway ? (-start[i].facing as 1 | -1) : start[i].facing,
         velocity: { x: 0, y: 0 },
         crouching: false,
       };

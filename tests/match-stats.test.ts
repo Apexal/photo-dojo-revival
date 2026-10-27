@@ -42,6 +42,13 @@ describe("MatchStatsTracker", () => {
     expect(stats.result.players[1].hits).toBe(0);
   });
 
+  it("counts refused handshakes for the match, not the round", () => {
+    const sim = new FightSimulation([geo, geo]);
+    const stats = new MatchStatsTracker();
+    for (let i = 0; i < ROUND_INTRO_FRAMES; i++) stats.record(sim.step([idle, input({ right: true })]));
+    expect(stats.result.players.map((p) => p.snubs)).toEqual([0, 1]);
+  });
+
   it("counts a whiff as an attack, not a hit", () => {
     const { stats, step } = tracked(900);
     punch(step);

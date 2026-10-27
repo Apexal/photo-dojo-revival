@@ -26,6 +26,7 @@ export const ANNOUNCER_LINES = {
   "streak-huge": "Unstoppable!",
   parry: "Parry!",
   "throw-break": "Break!",
+  disrespectful: "Disrespectful!",
   "p1-wins": "Player one wins!",
   "p2-wins": "Player two wins!",
   "draw-game": "Draw game!",
@@ -81,6 +82,7 @@ export function matchWinnerLine(winner: RoundOutcome, cpu: PlayerIndex | null = 
 /** A callout's line, or null: hit streaks are only called from three hits, and once past five just the once. */
 export function calloutLine(c: Callout): AnnouncerLineId | null {
   switch (c.type) {
+    case "snub": return "disrespectful";
     case "firstBlood": return "first-blood";
     case "perfect": return "perfect";
     case "streak":

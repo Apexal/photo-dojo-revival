@@ -22,6 +22,8 @@ export interface FighterRecord {
   blocks: number;
   throws: number;
   knockdowns: number;
+  /** Round-intro handshakes refused. Not shown until there's one. */
+  snubs: number;
   /** Best over all matches. */
   longestStreak: number;
   /** Clean hits by attack, over all matches. */
@@ -43,7 +45,7 @@ const REGISTRY_KEY = "fighterRecords";
 
 export const emptyRecord = (): FighterRecord => ({
   matches: 0, wins: 0, losses: 0, draws: 0, roundsWon: 0, perfectRounds: 0, damageDealt: 0,
-  attacks: 0, hits: 0, blocks: 0, throws: 0, knockdowns: 0, longestStreak: 0, movesLanded: {}, versus: {},
+  attacks: 0, hits: 0, blocks: 0, throws: 0, knockdowns: 0, snubs: 0, longestStreak: 0, movesLanded: {}, versus: {},
 });
 
 type CountField = Exclude<keyof FighterRecord, "movesLanded" | "versus">;
@@ -101,6 +103,7 @@ export function addMatch(record: FighterRecord, stats: PlayerStats, side: Player
     blocks: record.blocks + stats.blocks,
     throws: record.throws + stats.throws,
     knockdowns: record.knockdowns + stats.knockdowns,
+    snubs: record.snubs + stats.snubs,
     longestStreak: Math.max(record.longestStreak, stats.longestStreak),
     movesLanded: addCounts(record.movesLanded, stats.movesLanded),
     versus,

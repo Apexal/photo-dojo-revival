@@ -29,6 +29,15 @@ function punch(step: (p1?: InputFrame, p2?: InputFrame) => FightState, frames = 
 }
 
 describe("CalloutTracker", () => {
+  it("calls a refused handshake, in practice too", () => {
+    const sim = new FightSimulation([geo, geo], { practice: true });
+    const callouts = new CalloutTracker({ match: false });
+    const seen: Callout[] = [];
+    for (let i = 0; i < ROUND_INTRO_FRAMES; i++) seen.push(...callouts.record(sim.step([input({ left: true }), idle])));
+    expect(seen).toEqual([{ type: "snub", player: 0 }]);
+    expect(calloutText(seen[0])).toBe("NO HANDSHAKE");
+  });
+
   it("calls the round's first clean hit, once", () => {
     const { seen, step } = tracked();
     punch(step, 60);

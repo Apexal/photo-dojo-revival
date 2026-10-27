@@ -4,7 +4,7 @@ import { LANDMARK } from "../src/shared/fighter-model";
 import { groundAnchorFor, type FighterGeometry } from "../src/shared/frame-data";
 import { REACH_FRAMES, SECOND_HAND_FRAMES, SHAKE_PERIOD_FRAMES, SHAKE_PX, SHAKE_START_FRAME, SHAKES, handOf, handshakeGrips, shakeAt, shakenGrip, turnArm } from "../src/shared/handshake";
 import { buildStickFigureLandmarks, stickFigureGeometry } from "../src/shared/stick-figure";
-import { FightSimulation, handshakeShakeOf, introStep } from "../src/simulation/fight-simulation";
+import { FightSimulation, handshakeShakeOf, introStep, snubDueFrame, type FightEvent, type FightState } from "../src/simulation/fight-simulation";
 import { input } from "../src/simulation/input-frame";
 import { INTRO, ROUND_INTRO_FRAMES } from "../src/simulation/round-rules";
 
@@ -76,7 +76,7 @@ describe("round intro", () => {
     const offered: number[] = [];
     let closest = Infinity;
     for (let i = 0; i < ROUND_INTRO_FRAMES - 1; i++) {
-      const state = sim.step([input({ punch: true }), input({ right: true })]); // input is ignored
+      const state = sim.step([input({ punch: true, right: true }), input({ kick: true, left: true })]); // only holding back counts (a snub)
       state.fighters.forEach((f, p) => {
         if (seen[p][seen[p].length - 1] !== f.action) seen[p].push(f.action);
         if (f.action === "handshake" && offered[p] === undefined) offered[p] = i;
@@ -129,6 +129,57 @@ describe("round intro", () => {
     }
     expect(tween(offer + SHAKE_START_FRAME + 4, 0)!.t).toBeGreaterThan(0.6);
     expect(tween(offer + INTRO.shake, 0)).toBeNull();
+  });
+
+  /** Runs a whole intro with player 2 holding back (away from player 1) for the first `holdFrames` frames. */
+  function snubbedIntro(holdFrames: number) {
+    const sim = new FightSimulation([geo, geo]);
+    const states: FightState[] = [];
+    for (let i = 0; i < ROUND_INTRO_FRAMES; i++) states.push(sim.step([idle, i < holdFrames ? input({ right: true }) : idle]));
+    return { sim, states, events: states.flatMap((s) => s.events) };
+  }
+
+  it("refuses the handshake when a fighter holds back on the way in", () => {
+    const { sim, states, events } = snubbedIntro(10);
+    const offer = INTRO.walkIn + INTRO.pause;
+    expect(events.filter((e) => e.type === "snub")).toEqual([{ type: "snub", player: 1 }]);
+    // Announced as player 2 turns their back, where they'd have taken the hand.
+    const at = states.findIndex((s) => s.events.some((e) => e.type === "snub"));
+    expect(at).toBe(snubDueFrame(1) + 1);
+    expect(states[at].fighters[1]).toMatchObject({ action: "idle", facing: 1 });
+    expect(states[at - 1].fighters[1].facing).toBe(-1);
+    // Player 2 never shakes; player 1's hand stays out, never pumped.
+    expect(states.some((s) => s.fighters[1].action === "handshake")).toBe(false);
+    const p1 = states.slice(offer, offer + INTRO.shake).map((s) => s.fighters[0]);
+    expect(p1.every((f) => f.action === "handshake")).toBe(true);
+    for (const f of p1) expect(handshakeShakeOf(f, sim.grips[0].offeredAt)?.t ?? 0.5).toBe(0.5);
+    // Walks back with their back turned, then faces up for the fight.
+    expect(states[offer + INTRO.shake + 10].fighters[1]).toMatchObject({ action: "walk", facing: 1 });
+    expect(sim.current.fighters[1].facing).toBe(-1);
+    expect(sim.current.round.phase).toBe("fighting");
+  });
+
+  it("only counts holding back before the hand is due, and starts over each round", () => {
+    expect(snubbedIntro(snubDueFrame(1) + 1).events.some((e) => e.type === "snub")).toBe(true);
+    const late = new FightSimulation([geo, geo]);
+    const lateEvents: FightEvent[] = [];
+    for (let i = 0; i < ROUND_INTRO_FRAMES; i++) lateEvents.push(...late.step([idle, i > snubDueFrame(1) ? input({ right: true }) : idle]).events);
+    expect(lateEvents.some((e) => e.type === "snub")).toBe(false);
+
+    const { sim } = snubbedIntro(10);
+    sim.restartRound();
+    const again: FightEvent[] = [];
+    for (let i = 0; i < ROUND_INTRO_FRAMES; i++) again.push(...sim.step([idle, idle]).events);
+    expect(again.some((e) => e.type === "snub")).toBe(false);
+  });
+
+  it("leaves both turned away when both refuse", () => {
+    const sim = new FightSimulation([geo, geo]);
+    const events: FightEvent[] = [];
+    for (let i = 0; i < ROUND_INTRO_FRAMES; i++) events.push(...sim.step([input({ left: true }), input({ right: true })]).events);
+    expect(events.filter((e) => e.type === "snub").map((e) => e.type === "snub" && e.player).sort()).toEqual([0, 1]);
+    expect(introStep(INTRO.walkIn + INTRO.pause + SECOND_HAND_FRAMES, 0, [true, true])).toMatchObject({ action: "idle", turnedAway: true });
+    expect(introStep(INTRO.walkIn + INTRO.pause + SECOND_HAND_FRAMES, 1, [true, true])).toMatchObject({ action: "idle", turnedAway: true });
   });
 
   it("warps the one handshake photo between two made-up hands", () => {

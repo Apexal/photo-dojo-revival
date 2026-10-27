@@ -761,6 +761,8 @@ export class FightScene extends Phaser.Scene {
           announce(this, "throw-break");
           break;
         case "taunt": this.play(ev.player, "win", 0.9); break;
+        // The callout and "Disrespectful!" come from CalloutTracker; then the snubber's own voice.
+        case "snub": this.time.delayedCall(700, () => this.play(ev.player, "win", 0.9)); break;
         case "ko":
           if (!options.replay) this.banner("K.O.", 2000);
           break;
