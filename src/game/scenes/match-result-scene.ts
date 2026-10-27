@@ -10,6 +10,8 @@ import { MOVE_NAMES } from "../move-names";
 import { createInputSource, isPlayerInput, type InputDescriptor } from "../input/input-descriptor";
 import type { InputSource } from "../input/input-source";
 import { textureKey } from "../render/fighter-sprite-view";
+import { damageInRounds, scarCount, scarsOn } from "../render/battle-damage";
+import { BattleDamageView } from "../render/battle-damage-view";
 import { GAME_WIDTH, PLAYER_COLORS } from "../render/stage";
 import { MIRROR_TINT } from "./controls-scene";
 import { REGISTRY } from "./boot-scene";
@@ -40,6 +42,9 @@ const clock = (frames: number) => {
 };
 
 /** One table row: a label, how to show a player's value, and whether more is better (null: no highlight). */
+/** The fighters' size on the page. */
+const FIGHTER_SCALE = 0.62;
+
 interface Row { label: string; value: (s: PlayerStats) => number; show?: (v: number, s: PlayerStats) => string; higherWins?: boolean | null }
 
 const ROWS: Row[] = [
@@ -111,11 +116,21 @@ export class MatchResultScene extends Phaser.Scene {
     const feetY = 470;
     const key = textureKey(prefixes[i], pose);
     if (this.textures.exists(key)) {
-      const anchor = groundAnchorFor(geometryOf(entries[i].fighter), pose);
+      const geometry = geometryOf(entries[i].fighter);
+      const anchor = groundAnchorFor(geometry, pose);
       const sprite = this.add.image(x, feetY, key).setOrigin(anchor.x / SPRITE_CANVAS_SIZE, anchor.y / SPRITE_CANVAS_SIZE)
-        .setScale(0.62).setFlipX(i === 1);
+        .setScale(FIGHTER_SCALE).setFlipX(i === 1);
       if (i === 1 && entries[0].fighter.fighterId === entries[1].fighter.fighterId) sprite.setTint(MIRROR_TINT);
       if (winner !== "draw" && winner !== i) sprite.setAlpha(0.75);
+      // The scars they came out of the fight with.
+      const count = scarCount(damageInRounds(this.result.stats.rounds, i));
+      if (count > 0) {
+        const facing = i === 0 ? 1 : -1;
+        new BattleDamageView(this, 0, 1.5).setAlpha(sprite.alpha).render(scarsOn(geometry[pose].landmarks, count), (p) => ({
+          x: x + facing * FIGHTER_SCALE * (p.x - anchor.x),
+          y: feetY + FIGHTER_SCALE * (p.y - anchor.y),
+        }), 0, false);
+      }
     }
     this.add.ellipse(x, feetY + 4, 160, 18, HEX.ink, 0.5).setDepth(-1);
     if (winner === i) {

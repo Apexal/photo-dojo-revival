@@ -23,6 +23,8 @@ import { announce } from "../announcer";
 import { calloutLine, roundEndLine, roundStartLine } from "../announcer-lines";
 import { getOptions, setOption } from "../options";
 import { HitboxDebugView } from "../render/hitbox-debug-view";
+import { BattleDamageView } from "../render/battle-damage-view";
+import { damageInRounds, scarCount, scarsOn } from "../render/battle-damage";
 import { LOW_HEALTH, clockCue, clockTicked, lowHealthPulse } from "../render/hud-cues";
 import { GAME_HEIGHT, GAME_WIDTH, PLAYER_COLORS, worldToScreen } from "../render/stage";
 import { stageFor, type StageDefinition, type StageEffects } from "../stages/stages";
@@ -86,6 +88,7 @@ export class FightScene extends Phaser.Scene {
   private replayDone = false;
   private replayUi: Phaser.GameObjects.GameObject[] = [];
   private views: FighterSpriteView[] = [];
+  private scars: BattleDamageView[] = [];
   /** For the end-of-match stats page. */
   private stats = new MatchStatsTracker();
   /** FIRST BLOOD, N HIT STREAK, PERFECT. */
@@ -176,6 +179,7 @@ export class FightScene extends Phaser.Scene {
     const mirrorMatch = a.fighter.fighterId === b.fighter.fighterId;
     this.views = [0, 1].map((i) => new FighterSpriteView(this, PREFIXES[i], this.geometry[i], i === 1 && mirrorMatch ? MIRROR_TINT : undefined, this.sim.grips[i]));
     this.views.forEach((v, i) => v.setDepth(10 + i));
+    this.scars = this.views.map((_, i) => new BattleDamageView(this, 10 + i + 0.5));
     this.motion = this.add.graphics().setDepth(20);
     this.markers = new HitMarkers(this.add.graphics().setDepth(25));
     this.hud = this.add.graphics().setDepth(100);
@@ -790,6 +794,7 @@ export class FightScene extends Phaser.Scene {
   private renderState(state: FightState): void {
     const tweening = getOptions(this.registry).poseTweening;
     state.fighters.forEach((f, i) => this.views[i]?.render(f, state.frame, tweening, state.fighters[1 - i]));
+    this.drawBattleDamage(state);
     this.stageEffects?.update(state.fighters.map((f, i) => ({ state: f, topEdge: () => this.views[i].topEdge() })));
     // The streaks stand in for the motion a hard cut skips; when the poses morph, the motion is shown.
     this.drawMotionLines(state.fighters, (i) => !(tweening && this.views[i]?.canTween));
@@ -799,6 +804,21 @@ export class FightScene extends Phaser.Scene {
     this.drawHud(state);
     this.drawTutorial(state);
     if (performance.now() > this.bannerUntil) this.bannerText.setVisible(false);
+  }
+
+  /**
+   * Each fighter's scars for the health they've lost this match: the rounds
+   * already over (the stats' summaries, so a replay doesn't count its own round
+   * twice) and this one so far.
+   */
+  private drawBattleDamage(state: FightState): void {
+    const over = this.stats.result.rounds.filter((r) => r.round < state.round.roundNumber);
+    state.fighters.forEach((f, i) => {
+      const count = scarCount(damageInRounds(over, i as PlayerIndex) + MAX_HEALTH - f.health);
+      const drawn = this.views[i]?.drawnSkeleton();
+      if (drawn && count > 0) this.scars[i].render(scarsOn(drawn.landmarks, count), drawn.toScreen, this.time.now);
+      else this.scars[i]?.hide();
+    });
   }
 
   /** World position of a landmark of the given pose, placed where the fighter stands. */

@@ -101,7 +101,7 @@ export class FighterSpriteView {
   private readonly transitions = new PoseTransitions();
   private readonly meshes: TweenMeshes;
   /** The last solve: the display can refresh faster than the 60 Hz simulation. */
-  private lastTween: { tween: FrameTween; swing: LimbSide | null; single: boolean; layers: TweenLayer[] | null } | null = null;
+  private lastTween: { tween: FrameTween; swing: LimbSide | null; single: boolean; layers: TweenLayer[] | null; skeleton: NormalizedLandmark[] | null } | null = null;
   /** Undefined until the first render that can use it (walkGait). */
   private gait: WalkGait | null | undefined = undefined;
   private readonly torso: number;
@@ -112,6 +112,8 @@ export class FighterSpriteView {
   /** What was drawn last render, upright (null while tipped over): for topEdge. */
   private placed: { from: FrameRef; to: FrameRef; t: number; at: { x: number; y: number }; facing: 1 | -1 } | null = null;
   private readonly profiles = new Map<string, (number | null)[] | null>();
+  /** The skeleton last drawn (relative to the feet anchor, facing right) and how it was put on screen: what drawnSkeleton maps. */
+  private drawn: { landmarks: NormalizedLandmark[]; at: { x: number; y: number }; facing: 1 | -1; rotation: number } | null = null;
   /** KO'd: the capture they were hit in, going limp from where they stood (ragdoll.ts). */
   private ragdoll: { body: Ragdoll; frame: FrameRef; backing: FrameRef; origin: { x: number; y: number } } | null = null;
   /** The capture whose arms cover its torso least, with that cover (torsoCover): drawn under a ragdoll. Built on the first KO. */
@@ -176,6 +178,7 @@ export class FighterSpriteView {
       this.meshes.show(layers, state.facing, p, this.depth);
       this.lastShown = tween!.t < 0.5 ? tween!.from : tween!.to;
       this.placed = { from: tween!.from, to: tween!.to, t: tween!.t, at: p, facing: state.facing };
+      this.drawn = this.lastTween!.skeleton && { landmarks: this.lastTween!.skeleton, at: p, facing: state.facing, rotation: 0 };
     } else {
       this.meshes.hide();
       const shown = struck || frameOf(state);
@@ -188,6 +191,7 @@ export class FighterSpriteView {
       this.showSprite(shown, state.facing, p);
       if (!struck) this.lastShown = shown;
       this.placed = fall ? null : { from: shown, to: shown, t: 0, at: p, facing: state.facing };
+      this.drawn = { landmarks: this.relativeLandmarks(shown), at: p, facing: state.facing, rotation };
     }
     this.sprite.setRotation(rotation);
     this.sprite.setVisible(!layers);
@@ -233,6 +237,7 @@ export class FighterSpriteView {
     this.meshes.show(layers, state.facing, origin, this.depth);
     this.sprite.setVisible(false);
     this.placed = null;
+    this.drawn = { landmarks: skeleton, at: origin, facing: state.facing, rotation: 0 };
     // The shadow spreads under whatever of them is near the floor.
     const xs = skeleton.map((l) => origin.x + state.facing * l.x);
     const left = Math.min(...xs), right = Math.max(...xs);
@@ -253,6 +258,32 @@ export class FighterSpriteView {
       }
     }
     return this.clearestTorso!;
+  }
+
+  /**
+   * The landmarks of whatever was drawn last render (a photo, a morph's
+   * in-between skeleton, the ragdoll), relative to the feet anchor and facing
+   * right, with the mapping from that space onto the screen (mirrored, tipped
+   * over, placed): for things stuck to the fighter, like battle damage. Null
+   * before the first render.
+   */
+  drawnSkeleton(): { landmarks: NormalizedLandmark[]; toScreen: (p: { x: number; y: number }) => { x: number; y: number } } | null {
+    const drawn = this.drawn;
+    if (!drawn) return null;
+    const cos = Math.cos(drawn.rotation), sin = Math.sin(drawn.rotation);
+    return {
+      landmarks: drawn.landmarks,
+      toScreen: (p) => {
+        const x = drawn.facing * p.x;
+        return { x: drawn.at.x + x * cos - p.y * sin, y: drawn.at.y + x * sin + p.y * cos };
+      },
+    };
+  }
+
+  /** A capture's landmarks relative to its feet anchor. */
+  private relativeLandmarks(frame: FrameRef): NormalizedLandmark[] {
+    const anchor = groundAnchorFor(this.geometry, frame.poseId, frame.variant);
+    return frameGeometry(this.geometry, frame.poseId, frame.variant).landmarks.map((l) => ({ ...l, x: l.x - anchor.x, y: l.y - anchor.y }));
   }
 
   /**
@@ -358,7 +389,7 @@ export class FighterSpriteView {
     const same = last && last.tween.t === tween.t && last.swing === swing && last.single === single && sameFrame(last.tween.from, tween.from) && sameFrame(last.tween.to, tween.to);
     if (!same) {
       const adjust = swing ? (skeleton: NormalizedLandmark[]) => stepPose(skeleton, tween.t, swing, this.torso) : undefined;
-      this.lastTween = { tween, swing, single, layers: this.tweener!.layers(tween, adjust, single) };
+      this.lastTween = { tween, swing, single, layers: this.tweener!.layers(tween, adjust, single), skeleton: this.tweener!.skeleton(tween, adjust) };
     }
     return this.lastTween!.layers;
   }
