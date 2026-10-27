@@ -65,14 +65,17 @@ describe("stills over the camera channel", () => {
     const second = receiver.request(null, 4);
     expect(await firstResult).toBeInstanceOf(StillRequestError);
     expect((await firstResult).reason).toBe("superseded");
-    for (let i = 0; i < 500; i++) {
+    let done = false;
+    void second.then(() => { done = true; }, () => { done = true; });
+    for (let i = 0; i < 500 && !done; i++) {
       studio.flush();
       phone.flush(8);
       await tick();
     }
     const still = await second;
     expect(still.id).toBe(2);
-    expect(await blobBytes(still.blob)).toEqual(bytes(80 * STILL_CHUNK_PAYLOAD_BYTES, 2));
+    // Buffer.equals: toEqual walks a megabyte element by element, which took seconds on CI.
+    expect(Buffer.from(await blobBytes(still.blob)).equals(Buffer.from(bytes(80 * STILL_CHUNK_PAYLOAD_BYTES, 2)))).toBe(true);
     expect(await Promise.all(sends)).toEqual(["cancelled", "sent"]);
   });
 
