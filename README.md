@@ -52,6 +52,7 @@ Keyboard keys can be remapped in **Settings** (Tab or a pad's Select button on f
   - **Acrobat: Flying Knee.** An overhead from the ground: it hits a crouching guard, so block it standing.
 - **Knockdowns:** a throw, a bear hug, a shoulder charge, or an uppercut that catches someone in the air knocks them down. Nobody can touch them while they're down; get ready for when they stand up.
 - A press up to 5 frames early still counts, and a block still works if you let go of back within the last 3 frames. Blocked hits can't KO.
+- Before a match, the **versus intro**: both fighters leap in and show off their moves while the tale of the tape compares their height, reach and legs (measured from the photos, in torsos) and their styles and records. Both players press punch to skip it.
 - Players swap sides every round.
 - Gamepads rumble when you get hit (heavier for kicks and throws, a light tick when blocking, a long one on a KO) and buzz once when they join. Turn it off in Settings (or press R in the pause menu). Rumble uses the browser's Gamepad haptics (Chrome/Edge dual-rumble, Firefox pulse), and pads without it just don't rumble.
 - **Pause menu** (Esc / Start): Resume, Controls (each player's moves for their device), Settings, Restart round, Quit to fighter select. Any controller can drive it; kick, Esc or Start resumes.

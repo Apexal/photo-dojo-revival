@@ -133,9 +133,18 @@ try {
   const stagePicked = await game.evaluate(() => { const s = window.fotoFighter.scene.getScene("stage-select"); return s.options[s.index]; });
   await game.screenshot({ path: `${OUT}/03a-stage-select.png` });
   await game.keyboard.press("Comma");
-  await game.waitForFunction(() => window.fotoFighter.scene.isActive("controls"), null, { timeout: 10000 });
+  // The versus intro: one punch doesn't skip it, both do.
+  await game.waitForFunction(() => window.fotoFighter.scene.isActive("versus"), null, { timeout: 10000 });
+  await game.waitForTimeout(1500);
+  await game.screenshot({ path: `${OUT}/03a2-versus.png` });
+  await game.keyboard.press("j");
+  await game.waitForTimeout(100);
+  check(await game.evaluate(() => window.fotoFighter.scene.isActive("versus")), "one player's punch doesn't skip the versus intro");
+  await game.keyboard.press("Comma");
+  await game.waitForFunction(() => window.fotoFighter.scene.isActive("controls"), null, { timeout: 3000 });
   check((await game.evaluate(() => window.fotoFighter.scene.getScene("controls").setup.stageId)) === stagePicked, `the picked stage (${stagePicked}) goes into the match`);
   step(`stage select: picked ${stagePicked}`);
+  step("versus intro: skipped once both pressed punch");
   await game.waitForTimeout(1200); // let the move previews animate
   await game.screenshot({ path: `${OUT}/03b-controls.png` });
   const cards = await game.evaluate(() => window.fotoFighter.scene.getScene("controls").cards.length);
@@ -334,7 +343,9 @@ try {
   await stepTo("cpu pick", () => window.fotoFighter.scene.getScene("character-select").cpu?.picked === true);
   await press("d"); // level: easy → normal
   await stepTo("cpu match", () => window.fotoFighter.scene.isActive("stage-select"));
-  await stepTo("cpu stage", () => window.fotoFighter.scene.isActive("controls"));
+  await stepTo("cpu stage", () => window.fotoFighter.scene.isActive("versus"));
+  await game.waitForTimeout(400); // the versus intro ignores a press carried over from stage select
+  await stepTo("cpu skip", () => window.fotoFighter.scene.isActive("controls")); // the CPU always agrees to skip
   await game.waitForTimeout(600); // the controls screen ignores input at first
   await stepTo("cpu ready", () => window.fotoFighter.scene.isActive("fight"));
   await game.waitForFunction(() => window.fotoFighter.scene.getScene("fight").sim.current.round.phase === "fighting", null, { timeout: 8000 });

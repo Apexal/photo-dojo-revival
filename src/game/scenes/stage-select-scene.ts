@@ -19,8 +19,8 @@ const RANDOM = "random";
 const OVERLAY_DEPTH = 50;
 
 /**
- * After fighter select: pick a stage if there's a choice, then on to the
- * controls screen (or straight into practice).
+ * After fighter select: pick a stage if there's a choice, then the versus
+ * intro and the controls screen (or straight into practice).
  */
 export function startMatch(scene: Phaser.Scene, data: FightSceneData): void {
   if (STAGES.length > 1) scene.scene.start("stage-select", data);
@@ -28,7 +28,7 @@ export function startMatch(scene: Phaser.Scene, data: FightSceneData): void {
 }
 
 function startWithStage(scene: Phaser.Scene, data: FightSceneData): void {
-  scene.scene.start(data.practice ? "fight" : "controls", data);
+  scene.scene.start(data.practice ? "fight" : "versus", data);
 }
 
 /**

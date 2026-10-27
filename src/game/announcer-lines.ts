@@ -42,6 +42,7 @@ export const ANNOUNCER_LINES = {
   "choose-opponent": "Choose your opponent!",
   "new-challenger": "Here comes a new challenger!",
   "choose-stage": "Choose your stage!",
+  "tale-of-the-tape": "Here's the tale of the tape!",
   "stage-dusk-dojo": "Dusk Dojo",
   "stage-lunar-dojo": "Lunar Dojo",
   quarterfinals: "Quarterfinals!",
