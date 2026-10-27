@@ -141,7 +141,7 @@ export interface Fighter {
   facingDirection: "right";               // all captures face right; renderer flips for P2
   poses: Record<PoseId, CapturedPose>;
   poseVariants: Partial<Record<PoseId, CapturedPose[]>>; // second versions of idle, punch, kick, hurt, win
-  sounds: Record<SoundId, Blob | null>;   // webm/opus, ≤2 s each (victory line ≤5 s)
+  sounds: Record<SoundId, Blob | null>;   // webm/opus, ≤2 s each (victory line ≤5 s, taunt ≤3 s)
   soundVariants?: Partial<Record<SoundId, Blob[]>>;      // extra takes
   thumbnailBlob: Blob;                    // idle pose downscaled, for character select
 }
@@ -178,7 +178,7 @@ Superseded by [docs/character-studio.md](docs/character-studio.md): the pipeline
 - **Target poses** are joint-angle targets with tolerances, not silhouettes (`src/shared/pose-definitions.ts`; sixteen captures, `CAPTURE_TARGET_COUNT`, the signature pose depending on the archetype). `pose-geometry.ts` scores the live angles: 0 = perfect, 1 = at the tolerance edge, >1 = out. Either arm or leg may strike; the capture records which.
 - **Auto-capture** (`pose-matcher.ts`): a match held steady for 500 ms captures (moving starts the hold over); tolerances never widen. There's no capture without the pose: the photo has to be in it and cut out cleanly to count (`docs/character-studio.md`). Any pose can be retaken from the review.
 - **Segmentation and normalization**: ISNet on a crop around the skeleton, keeping only what's connected to it (`background-remover.ts`, `matting.ts`); then `sprite-normalizer.ts` scales every pose to `CANONICAL_TORSO_LENGTH_PX`, anchors the feet on `GROUND_LINE_Y` (pelvis for `jump`), flips left-facing captures so all face right, and exports the PNG.
-- **Sounds**: three clips (attack, hurt, win) recorded with `MediaRecorder`, now on the computer's mic, peak-normalized, skippable.
+- **Sounds**: four clips (attack, hurt, win, and an optional taunt that falls back to win) recorded with `MediaRecorder`, now on the computer's mic, peak-normalized, skippable.
 
 ---
 

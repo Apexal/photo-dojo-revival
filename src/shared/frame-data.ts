@@ -166,7 +166,7 @@ export function guardBlocks(level: HitLevel, crouching: boolean): boolean {
   return level === "mid" || (level === "low") === crouching;
 }
 
-/** Punch + kick from at least this far away taunts instead of throwing: win pose, voice line, wide open. */
+/** Punch + kick from at least this far away taunts instead of throwing: win pose, taunt line, wide open. */
 export const TAUNT = { frames: 50, minDistance: 300 } as const;
 /** Frames on the ground before a jump leaves it; the jump can still turn into a block during them. */
 export const JUMP_SQUAT_FRAMES = 3;

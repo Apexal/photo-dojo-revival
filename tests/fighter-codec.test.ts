@@ -40,7 +40,7 @@ describe("fighter codec", () => {
     const { manifest } = await encodeFighter(makeFighter());
     expect(manifest.parts.map((p) => p.partId)).toEqual([
       "pose:idle", "pose:walk", "pose:block", "pose:crouch", "pose:punch", "pose:kick", "pose:jump", "pose:hurt", "pose:win", "pose:signature", "pose:handshake",
-      "sound:attack", "sound:win", "thumbnail",
+      "sound:attack", "sound:win", "sound:taunt", "thumbnail",
       "pose:idle:1", "pose:punch:1", "pose:kick:1", "pose:hurt:1", "pose:win:1",
     ]);
     expect(manifest.landmarks.kick).toHaveLength(33);

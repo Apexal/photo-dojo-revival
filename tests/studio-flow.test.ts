@@ -46,7 +46,7 @@ describe("studio flow", () => {
     expect(s.archetype).toBe("guardian");
     s = run(s, { type: "reviewDone" });
     expect(s.screen).toEqual({ name: "sounds", soundIndex: 0 });
-    s = run(s, { type: "soundDone" }, { type: "skipSound" }, { type: "soundDone" });
+    s = run(s, { type: "soundDone" }, { type: "skipSound" }, { type: "soundDone" }, { type: "skipSound" });
     expect(s.screen).toEqual({ name: "preview" });
     s = run(s, { type: "finish" });
     expect(s.screen).toEqual({ name: "saving" });
@@ -187,7 +187,7 @@ describe("studio flow", () => {
     expect(canRetake(s)).toBe(false);
     expect(run(s, { type: "retake", targetKey: "idle" })).toBe(s);
     expect(run(s, { type: "changeArchetype" })).toBe(s);
-    const preview = run(s, { type: "reviewDone" }, { type: "soundDone" }, { type: "skipSound" }, { type: "skipSound" });
+    const preview = run(s, { type: "reviewDone" }, { type: "soundDone" }, { type: "skipSound" }, { type: "skipSound" }, { type: "skipSound" });
     expect(preview.screen).toEqual({ name: "preview" });
     expect(run(preview, { type: "retake", targetKey: "idle" })).toBe(preview);
     expect(run(preview, { type: "finish" }, { type: "saved" }).screen).toEqual({ name: "saved" });

@@ -97,6 +97,7 @@ const SOUND_PROMPTS: Record<SoundId, { title: string; hint: string }> = {
   attack: { title: "Battle cry", hint: "Plays when you punch or kick. “Hyah!”" },
   hurt: { title: "Ouch", hint: "Plays when you get hit." },
   win: { title: "Victory line", hint: "Plays when you win a round." },
+  taunt: { title: "Taunt (optional)", hint: "Plays when you taunt: punch + kick from far away. Skip it and you'll say your victory line instead." },
 };
 
 const panel = (cls: string, ...children: (Node | string | null | false)[]) => h("section", { class: `panel ${cls}` }, ...children);

@@ -8,11 +8,13 @@ export type PoseId =
   /** Reaching out to shake hands: the round intro (fight-simulation.ts). */
   | "handshake";
 
-export type SoundId = "attack" | "hurt" | "win";
+export type SoundId = "attack" | "hurt" | "win" | "taunt";
 
 /** Capture order: easy poses first so the user learns the mechanic. */
 export const POSE_IDS: readonly PoseId[] = ["idle", "walk", "block", "crouch", "punch", "kick", "jump", "hurt", "win", "signature", "handshake"];
-export const SOUND_IDS: readonly SoundId[] = ["attack", "hurt", "win"];
+export const SOUND_IDS: readonly SoundId[] = ["attack", "hurt", "win", "taunt"];
+/** Optional lines: without a take of their own, the game plays this one's instead (a taunt says the victory line). */
+export const SOUND_FALLBACK: Partial<Record<SoundId, SoundId>> = { taunt: "win" };
 
 /** Pixel coords in the sprite canvas (or in the source frame before normalization). */
 export interface NormalizedLandmark { x: number; y: number; visibility: number }
@@ -73,7 +75,7 @@ export const JUMP_ANCHOR_Y = 300;
 export const THUMBNAIL_SIZE = 128;
 export const LANDMARK_COUNT = 33;
 /** Recording limit per voice line: the victory line has room for a short speech. */
-export const MAX_SOUND_SECONDS: Record<SoundId, number> = { attack: 2, hurt: 2, win: 5 };
+export const MAX_SOUND_SECONDS: Record<SoundId, number> = { attack: 2, hurt: 2, win: 5, taunt: 3 };
 
 /** MediaPipe Pose landmark indices. */
 export const LANDMARK = {

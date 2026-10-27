@@ -1,7 +1,7 @@
 import Phaser from "phaser";
 import { trimLeadingSilence } from "../../shared/audio-trim";
 import { SOFT_CUTS, frameGeometry, groundAnchorFor, variantCount, type FighterGeometry } from "../../shared/frame-data";
-import { LANDMARK, POSE_IDS, SOUND_IDS, SPRITE_CANVAS_SIZE, soundTakes, type Fighter, type LimbSide, type NormalizedLandmark, type PoseId, type SoundId } from "../../shared/fighter-model";
+import { LANDMARK, POSE_IDS, SOUND_FALLBACK, SOUND_IDS, SPRITE_CANVAS_SIZE, soundTakes, type Fighter, type LimbSide, type NormalizedLandmark, type PoseId, type SoundId } from "../../shared/fighter-model";
 import { torsoLength } from "../../shared/pose-geometry";
 import { shakenGrip, type HandshakeGrip } from "../../shared/handshake";
 import { allTweens, frameOf, handshakeShakeOf, idleSwayOf, tweenOf, type FrameTween } from "../../simulation/fight-simulation";
@@ -16,7 +16,8 @@ import { TOP_EDGE_STEP, blendProfiles, topProfile, type TopEdge } from "./top-ed
 
 export const textureKey = (prefix: string, poseId: PoseId, variant = 0) => `${prefix}:pose:${poseId}${variant ? `#${variant}` : ""}`;
 export const soundKey = (prefix: string, soundId: SoundId, take = 0) => `${prefix}:sound:${soundId}${take ? `#${take}` : ""}`;
-export const fallbackSoundKey = (soundId: SoundId) => `fallback:${soundId}`;
+/** The bundled stand-in for a sound (an optional line uses its fallback's: SOUND_FALLBACK). */
+export const fallbackSoundKey = (soundId: SoundId) => `fallback:${SOUND_FALLBACK[soundId] ?? soundId}`;
 
 /** Every texture key preloadFighterTextures creates for a fighter (to clean up afterwards). */
 export function fighterTextureKeys(fighter: Fighter, prefix: string): string[] {
@@ -47,7 +48,8 @@ export function preloadFighterTextures(scene: Phaser.Scene, fighter: Fighter, pr
 
 /**
  * Decode the fighter's voice clips into Phaser's audio cache. Missing or
- * undecodable clips map to the bundled generic sounds.
+ * undecodable clips map to the bundled generic sounds; an optional line
+ * without takes (SOUND_FALLBACK) gets its fallback line's takes.
  */
 export async function loadFighterSounds(scene: Phaser.Scene, fighter: Fighter, prefix: string): Promise<Record<SoundId, string[]>> {
   const keys = Object.fromEntries(SOUND_IDS.map((id) => [id, [] as string[]])) as Record<SoundId, string[]>;
@@ -70,9 +72,10 @@ export async function loadFighterSounds(scene: Phaser.Scene, fighter: Fighter, p
       ),
     );
   }
+  for (const id of SOUND_IDS) keys[id] = keys[id].filter(Boolean);
   for (const id of SOUND_IDS) {
-    keys[id] = keys[id].filter(Boolean);
-    if (!keys[id].length) keys[id] = [fallbackSoundKey(id)];
+    const fallback = SOUND_FALLBACK[id];
+    if (!keys[id].length) keys[id] = fallback && keys[fallback].length ? keys[fallback] : [fallbackSoundKey(id)];
   }
   return keys;
 }

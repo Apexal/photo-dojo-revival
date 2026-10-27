@@ -166,7 +166,7 @@ These are standard in serious fighters, but they'd make Foto Fighter worse for i
 | Just-frame mechanics | Intimidating; fair only between experts. The guardian's parry has a 10-frame window for that reason (3.4). |
 
 **Optional fun that doesn't hurt fairness:**
-- **Taunt** (both buttons while far away): plays the win pose and voice line, with no gameplay effect except leaving the taunter open.
+- **Taunt** (both buttons while far away): plays the win pose and the taunt line (the victory line if none was recorded), with no gameplay effect except leaving the taunter open.
 - **Chip damage can't KO**, so a blocked kick never ends a round. Blocking should never feel like losing.
 - **A tiny comeback cushion:** the losing fighter's hitstun on the round's final hit is shown in slow motion. It's pure spectacle and changes nothing.
 

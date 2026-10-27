@@ -27,7 +27,7 @@ export const INTRO_SCENES: readonly IntroScene[] = [
   { id: "cutout", title: "You're cut out automatically", ms: 4500,
     caption: "Each photo is cut out of the room right here, on this computer. Nothing is uploaded." },
   { id: "sounds", title: `Record ${SOUND_IDS.length} battle cries`, ms: 4500,
-    caption: "A cry for your attacks, an ouch for when you're hit, and a victory line. Or skip them." },
+    caption: "A cry for your attacks, an ouch for when you're hit, a victory line and a taunt. Or skip them." },
   { id: "fight", title: "Then fight as yourself", ms: 5500,
     caption: "Your fighter is saved in this browser, waiting on fighter select. Take on a friend or the computer." },
 ];

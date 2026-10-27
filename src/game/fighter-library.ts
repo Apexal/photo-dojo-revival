@@ -57,7 +57,7 @@ export async function loadPlaceholderFighter(id: string, base = import.meta.env.
     facingDirection: "right",
     poses: Object.fromEntries(entries) as Record<PoseId, CapturedPose>,
     poseVariants,
-    sounds: { attack: null, hurt: null, win: null },
+    sounds: { attack: null, hurt: null, win: null, taunt: null },
     thumbnailBlob: await fetchBlob(dir + json.thumbnail),
   };
 }

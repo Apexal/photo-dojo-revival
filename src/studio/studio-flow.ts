@@ -116,7 +116,7 @@ export const soundIdAt = (index: number): SoundId => SOUND_IDS[index];
 
 /**
  * setup → archetype → tips → loading → pose 1..16, without a break (each:
- * pose → captured, or back to pose if the photo wasn't right) → review → sounds 1..3 → preview → saving → saved. A lost camera on a live
+ * pose → captured, or back to pose if the photo wasn't right) → review → sounds 1..4 → preview → saving → saved. A lost camera on a live
  * screen pauses on `cameraLost` until it's back; a retake without a camera
  * goes through the `camera` screen. Editing a saved fighter starts on the
  * review (`startEdit`). Pure; unknown events for the current screen leave the

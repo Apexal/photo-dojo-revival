@@ -12,7 +12,7 @@ import { createInputSource, isPlayerInput, sameInput, type InputDescriptor, type
 import { PAD_BUTTON } from "../input/gamepad-input-source";
 import type { InputSource } from "../input/input-source";
 import { layoutForKey } from "../input/key-bindings";
-import { FighterSpriteView, fighterTextureKeys, loadFighterSounds, preloadFighterTextures } from "../render/fighter-sprite-view";
+import { FighterSpriteView, fallbackSoundKey, fighterTextureKeys, loadFighterSounds, preloadFighterTextures } from "../render/fighter-sprite-view";
 import { FightCamera, FULL_VIEW, type CameraImpact } from "../render/fight-camera";
 import { HitMarkers } from "../render/hit-markers";
 import { REPLAY_SPEED, ReplayBuffer } from "../replay-buffer";
@@ -659,7 +659,7 @@ export class FightScene extends Phaser.Scene {
 
   /** A fighter's voice (their clip, or the bundled stand-in): the "Voice volume" setting. */
   private play(player: number, id: SoundId, volume = 0.8): void {
-    const takes = this.sounds[player]?.[id] ?? [`fallback:${id}`];
+    const takes = this.sounds[player]?.[id] ?? [fallbackSoundKey(id)];
     const key = pickTake(takes, this.lastTake.get(`${player}:${id}`));
     this.lastTake.set(`${player}:${id}`, key);
     const v = volume * getOptions(this.registry).voiceVolume;
@@ -763,7 +763,7 @@ export class FightScene extends Phaser.Scene {
           this.banner("BREAK!", 500);
           announce(this, "throw-break");
           break;
-        case "taunt": this.play(ev.player, "win", 0.9); break;
+        case "taunt": this.play(ev.player, "taunt", 0.9); break;
         // The callout and "Disrespectful!" come from CalloutTracker; then the snubber's own voice.
         case "snub": this.time.delayedCall(700, () => this.play(ev.player, "win", 0.9)); break;
         case "ko":
