@@ -76,6 +76,27 @@ export class HoldSound {
     active.stop(now + 0.05);
   }
 
+  /**
+   * One more part of the pose is right: a short blip that climbs with `fraction`
+   * (0..1 of the checked joints), on the same scale as the hold sweep, so
+   * "getting warmer" is audible from across the room.
+   */
+  progress(fraction: number): void {
+    const ctx = this.ctx;
+    if (!ctx || this.active) return; // the hold sweep is playing
+    const now = ctx.currentTime;
+    const osc = ctx.createOscillator();
+    osc.type = "triangle";
+    osc.frequency.value = holdToneFrequency(fraction * 0.8, HOLD_TONE.startHz * 2, HOLD_TONE.endHz * 2);
+    const gain = ctx.createGain();
+    gain.gain.setValueAtTime(0, now);
+    gain.gain.linearRampToValueAtTime(0.2, now + 0.01);
+    gain.gain.exponentialRampToValueAtTime(0.001, now + 0.18);
+    osc.connect(gain).connect(ctx.destination);
+    osc.start(now);
+    osc.stop(now + 0.2);
+  }
+
   /** Snapshot taken: end the sweep and ding. */
   complete(): void {
     this.cancel();

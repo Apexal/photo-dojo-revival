@@ -39,7 +39,7 @@ local <video> (full res) ◀── "camera" data channel ──▶     │    (l
 
 ### 3.1 Code layout
 
-- `src/capture/` keeps the **pipeline** modules, used by the studio: `pose-tracker`, `pose-matcher`, `framing`, `ghost-overlay`, `matting`, `background-remover`, `vision-runtime`, `sprite-normalizer`, `cutout-quality`, `sharpness`, `sound-recorder`, `voice-prompts`, `hold-sound`, `camera-session`. The phone capture app (`main.ts`, `capture-flow.ts`, `game-link.ts`, `ui/`) is retired in phase 4.
+- `src/capture/` keeps the **pipeline** modules, used by the studio: `pose-tracker`, `pose-matcher`, `pose-coaching`, `framing`, `ghost-overlay`, `matting`, `background-remover`, `vision-runtime`, `sprite-normalizer`, `cutout-quality`, `sharpness`, `sound-recorder`, `voice-prompts`, `hold-sound`, `camera-session`. The phone capture app (`main.ts`, `capture-flow.ts`, `game-link.ts`, `ui/`) is retired in phase 4.
 - `src/shared/canvas.ts` (new): `createCanvas`, `context2d`, `Rect`, moved out of `sprite-normalizer.ts`/`matting.ts` (re-exported there so callers don't churn), so the phone page can use `camera-session.ts` + `sharpness.ts` without pulling in matting or sprite code.
 - `src/studio/` (new): the laptop app.
   - `main.ts`: `StudioApp`. Its capture/matting/sprite/draft logic is **copied** from `CaptureApp` in phase 3 (the old app keeps running until phase 4 removes it).
@@ -131,7 +131,7 @@ Unknown or malformed messages are ignored (logged). Studio-side timeout per stil
 Derived from `capture-flow.ts` (pure, Node-tested):
 
 - **`setup` screen first**: mode ("On my own", default with a big screen: 3 s grace, bigger overlay; or "Someone's helping": short grace), camera choice ("Use a phone" → QR + code + "waiting for the phone…"; or a local camera from a device list), the resume-draft card, voice toggle. Models start downloading/building as soon as the studio opens, in parallel. `start` is enabled once the source is `ready`.
-- `tips` → `loading` (models; usually done already) → poses 1..16 as today (pose → captured / rough; archetype before the signature pose) → `review` → `sounds` → `preview` → `saving` → `saved` ("Back to the game" / "Build another").
+- `archetype` (picked first, so the poses then run without a break; a resumed draft without one asks here too) → `tips` → `loading` (models; usually done already) → poses 1..16 (pose → captured / rough) → `review` → `sounds` → `preview` → `saving` → `saved` ("Back to the game" / "Build another").
 - **`cameraLost`** on a live screen (`pose`, `captured`) or `archetype` → `cameraLost` screen (phone: QR again; local: "camera stopped — retry"); `cameraReady` → back to the same pose with its `retake` flag.
 - **Retakes when no camera is ready** (review/preview after a lost phone, or an edit session that hasn't opened a camera yet): `retake` goes to a `camera` screen (the camera half of `setup`), then the pose, then back to `review`.
 - **`startEdit`** (phase 5) from the initial state → `review` with the fighter's archetype and data.

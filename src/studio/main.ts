@@ -27,6 +27,7 @@ import { GhostOverlay } from "../capture/ghost-overlay";
 import { HoldSound } from "../capture/hold-sound";
 import { personCropRect } from "../capture/matting";
 import { DEFAULT_MATCHER_OPTIONS, PoseMatcher, type MatcherUpdate } from "../capture/pose-matcher";
+import { PoseCoach, correctionArrows, type Correction, type CorrectionArrow } from "../capture/pose-coaching";
 import { PoseTracker } from "../capture/pose-tracker";
 import { BURST_FRAMES } from "../capture/sharpness";
 import { SoundRecorder, playClip } from "../capture/sound-recorder";
@@ -117,6 +118,10 @@ interface LiveState {
   landmarks: ReturnType<PoseTracker["detectLive"]>;
   update: MatcherUpdate | null;
   framing: FramingAdvice | null;
+  /** The one joint to fix, shown and spoken instead of the pose's prompt. */
+  correction: Correction | null;
+  /** Which way to move for the correction (frame pixels). */
+  arrows: CorrectionArrow[];
 }
 
 interface DebugCapture {
@@ -162,11 +167,12 @@ class StudioApp {
   private matcher: PoseMatcher | null = null;
   private stopFrames: (() => void) | null = null;
   private overlay: GhostOverlay | null = null;
-  private live: LiveState = { landmarks: null, update: null, framing: null };
+  private live: LiveState = { landmarks: null, update: null, framing: null, correction: null, arrows: [] };
   private capturing = false;
   /** A phone still is on its way: the person keeps holding the pose. */
   private awaitingStill = false;
   private readonly ghostFitter = new GhostFitter();
+  private readonly coach = new PoseCoach();
   /** "A bit closer" / "further" is spoken once it's been true for a moment, and not too often. */
   private framingVoice: { advice: FramingAdvice; since: number; spokenAt: number } = { advice: "ok", since: 0, spokenAt: -Infinity };
   /** Why the last capture came out rough, for the retake prompt. */
@@ -632,7 +638,8 @@ class StudioApp {
     if (update.matching) return "Hold it…";
     if (update.awaitingBreak) return BREAK_PROMPT;
     if (framing && framing !== "ok") return FRAMING_HINTS[framing];
-    return def.voicePrompt;
+    // The pose's own instruction first, while it's being read out; then what to fix.
+    return (update.armed && this.live.correction?.text) || def.voicePrompt;
   }
 
   // --- actions from the UI ------------------------------------------------------
@@ -829,7 +836,8 @@ class StudioApp {
     const def = targetAt(index, this.flow.archetype).definition;
     this.matcher = new PoseMatcher(def);
     this.matcher.start(performance.now());
-    this.live = { landmarks: null, update: null, framing: null };
+    this.coach.start(performance.now());
+    this.live = { landmarks: null, update: null, framing: null, correction: null, arrows: [] };
     this.voice.say(def.voicePrompt);
     if (!this.tracker) this.ensureModels().then(() => this.render(), (err) => this.failModels(err));
     if (!this.stopFrames && this.source) this.stopFrames = this.source.onFrame((now) => this.onFrame(now));
@@ -860,7 +868,15 @@ class StudioApp {
       const framing = px ? framingAdvice(px, W, H) : null;
       // The jump lifts the feet; keep the ghost on the floor.
       this.ghostFitter.update(px, W, H, now, { holdVertical: target.poseId === "jump" });
-      this.live = { landmarks, update, framing };
+      // Coach only when the joints are the problem: not while framing advice, the break prompt or the hold is up.
+      const coachable = !update.matching && !update.awaitingBreak && update.score !== Infinity && (framing ?? "ok") === "ok";
+      const coaching = this.coach.update(coachable ? update.joints : [], now);
+      // Shown once the pose's own prompt has had its turn, like the hint.
+      const fix = update.armed && coaching.correction && px ? update.joints.find((j) => j.joint === coaching.correction!.joint) : undefined;
+      const arrows = fix?.delta != null && px ? correctionArrows(px, fix.joint, fix.delta) : [];
+      this.live = { landmarks, update, framing, correction: coaching.correction, arrows };
+      if (coaching.speak && coaching.correction) this.voice.say(coaching.correction.text, { interrupt: false });
+      if (coaching.progress !== null) this.holdSound.progress(coaching.progress);
       if (update.events.includes("holdStarted")) {
         this.holdSound.start(DEFAULT_MATCHER_OPTIONS.holdMs);
         this.voice.say("Hold it");
@@ -876,6 +892,8 @@ class StudioApp {
       ghostPath: def.ghostSvgPath,
       ghostFit: this.ghostFitter.peek(W, H),
       landmarks: s.name === "pose" ? this.live.landmarks : null,
+      joints: this.live.update?.joints ?? [],
+      arrows: s.name === "pose" ? this.live.arrows : [],
       holdProgress: s.name === "captured" ? 1 : this.live.update?.holdProgress ?? 0,
       matching: s.name === "captured" || (this.live.update?.matching ?? false),
       large: this.flow.mode === "solo",

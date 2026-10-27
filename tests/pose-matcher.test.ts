@@ -4,8 +4,8 @@ import { POSE_DEFINITIONS } from "../src/shared/pose-definitions";
 import { buildStickFigureLandmarks } from "../src/shared/stick-figure";
 
 const target = POSE_DEFINITIONS.punch;
-const hit = { score: 0.5, side: "right" as const };
-const miss = { score: 1.5, side: "right" as const };
+const hit = { score: 0.5, side: "right" as const, joints: [] };
+const miss = { score: 1.5, side: "right" as const, joints: [] };
 
 /** Hold-timing tests skip the between-poses buffer; it has its own tests below. */
 function matcher() {
@@ -80,8 +80,8 @@ describe("PoseMatcher", () => {
 
   it("score exactly 1.0 counts as a match", () => {
     const m = matcher();
-    m.updateWithEvaluation({ score: 1, side: "right" }, 0);
-    expect(m.updateWithEvaluation({ score: 1, side: "right" }, 500).captured).toBe(true);
+    m.updateWithEvaluation({ score: 1, side: "right", joints: [] }, 0);
+    expect(m.updateWithEvaluation({ score: 1, side: "right", joints: [] }, 500).captured).toBe(true);
   });
 
   it("resets the hold on a miss", () => {
@@ -140,8 +140,8 @@ describe("PoseMatcher", () => {
 
   it("records the limb that matched", () => {
     const m = matcher();
-    m.updateWithEvaluation({ score: 0.2, side: "left" }, 0);
-    m.updateWithEvaluation({ score: 0.2, side: "left" }, 500);
+    m.updateWithEvaluation({ score: 0.2, side: "left", joints: [] }, 0);
+    m.updateWithEvaluation({ score: 0.2, side: "left", joints: [] }, 500);
     expect(m.side).toBe("left");
   });
 

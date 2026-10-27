@@ -17,7 +17,10 @@ export type StudioScreen =
   | { name: "pose"; poseIndex: number; retake: boolean }
   /** `rough`: the cut-out failed the quality check and waits for "retake" or "keep". */
   | { name: "captured"; poseIndex: number; retake: boolean; rough: boolean }
-  /** Pick the archetype, just before its signature pose (`retake`: changing it from the review). */
+  /**
+   * Pick the archetype: first thing after setup, so the poses then run in one go
+   * (`retake`: changing it from the review, which retakes the signature pose).
+   */
   | { name: "archetype"; retake: boolean }
   /** The camera went away mid-capture: back to `back` once it's ready again. */
   | { name: "cameraLost"; back: { name: "pose"; poseIndex: number; retake: boolean } | { name: "archetype"; retake: boolean } }
@@ -79,7 +82,7 @@ export interface StudioFlowState {
   cameraReady: boolean;
   /** Where the pose sequence continues after loading (resumed drafts). */
   resumeAt?: ResumePoint | null;
-  /** Picked just before the signature pose; null until then. */
+  /** Picked right after setup (or from a resumed draft); null until then. */
   archetype: ArchetypeId | null;
   /**
    * Editing a saved fighter. Without its sources (`hasSources: false`) single
@@ -111,9 +114,8 @@ export const canRetake = (state: Pick<StudioFlowState, "edit">): boolean => !sta
 export const soundIdAt = (index: number): SoundId => SOUND_IDS[index];
 
 /**
- * setup → tips → loading → pose 1..16 (each: pose → captured, or back to pose
- * if it came out rough; the archetype is picked before the signature pose) →
- * review → sounds 1..3 → preview → saving → saved. A lost camera on a live
+ * setup → archetype → tips → loading → pose 1..16, without a break (each:
+ * pose → captured, or back to pose if it came out rough) → review → sounds 1..3 → preview → saving → saved. A lost camera on a live
  * screen pauses on `cameraLost` until it's back; a retake without a camera
  * goes through the `camera` screen. Editing a saved fighter starts on the
  * review (`startEdit`). Pure; unknown events for the current screen leave the
@@ -135,20 +137,20 @@ export function studioFlowReducer(state: StudioFlowState, event: StudioEvent): S
   if (event.type === "cameraReady") {
     if (state.cameraReady) return state;
     const ready = { ...state, cameraReady: true };
-    if (s.name === "cameraLost") return { ...ready, screen: s.back.name === "archetype" ? s.back : poseScreen(state, s.back.poseIndex, s.back.retake) };
-    if (s.name === "camera") return { ...ready, screen: poseScreen(state, s.next.poseIndex, s.next.retake) };
+    if (s.name === "cameraLost") return { ...ready, screen: s.back };
+    if (s.name === "camera") return { ...ready, screen: { name: "pose", ...s.next } };
     return ready;
   }
 
   switch (s.name) {
     case "setup":
       if (event.type === "selectMode") return { ...state, mode: event.mode };
-      if (event.type === "setupDone" && state.cameraReady) return to({ name: "tips" });
+      if (event.type === "setupDone" && state.cameraReady) return to(state.archetype ? { name: "tips" } : { name: "archetype", retake: false });
       if (event.type === "resume") {
         const resumed = { ...state, mode: event.mode, archetype: event.archetype };
-        return event.next === null
-          ? { ...resumed, screen: { name: "review" } }
-          : { ...resumed, resumeAt: event.next, screen: { name: "tips" } };
+        if (event.next === null) return { ...resumed, screen: { name: "review" } };
+        // A draft from before the style was picked first: pick it now, then carry on.
+        return { ...resumed, resumeAt: event.next, screen: event.archetype ? { name: "tips" } : { name: "archetype", retake: false } };
       }
       if (event.type === "startEdit") return { ...state, archetype: event.archetype, edit: { hasSources: event.hasSources }, screen: { name: "review" } };
       break;
@@ -179,6 +181,8 @@ export function studioFlowReducer(state: StudioFlowState, event: StudioEvent): S
     case "archetype":
       // Picking the style it already has, from the review, is how to back out of changing it.
       if (event.type === "pickArchetype" && s.retake && event.archetype === state.archetype) return to({ name: "review" });
+      // At the start: on to the tips, then every pose in a row.
+      if (event.type === "pickArchetype" && !s.retake) return { ...state, archetype: event.archetype, screen: { name: "tips" } };
       if (event.type === "pickArchetype") {
         const picked = { ...state, archetype: event.archetype };
         const screen = poseOrCamera(picked, { poseIndex: SIGNATURE_TARGET_INDEX, retake: s.retake });
@@ -220,17 +224,9 @@ export function studioFlowReducer(state: StudioFlowState, event: StudioEvent): S
   return state;
 }
 
-/** Capture a pose, or first pick the archetype if it's the signature pose and there's none yet. */
-function poseScreen(state: StudioFlowState, poseIndex: number, retake: boolean): StudioScreen {
-  return poseIndex === SIGNATURE_TARGET_INDEX && !state.archetype ? { name: "archetype", retake } : { name: "pose", poseIndex, retake };
-}
-
-/** The pose (or the archetype before it), or the camera screen first when no camera is ready. */
+/** The pose, or the camera screen first when no camera is ready. The archetype is always picked by now. */
 function poseOrCamera(state: StudioFlowState, at: PoseAt): StudioScreen {
-  const screen = poseScreen(state, at.poseIndex, at.retake);
-  // Picking a style needs no camera; the pose after it does, and asks then.
-  if (screen.name === "archetype" || state.cameraReady) return screen;
-  return { name: "camera", next: at };
+  return state.cameraReady ? { name: "pose", ...at } : { name: "camera", next: at };
 }
 
 /** Where to go after a pose is captured. */

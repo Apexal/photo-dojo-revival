@@ -124,7 +124,7 @@ The new bonus moves (uppercut, low kick, hit-in-the-face, flex) are picked **at 
 
 ### 3.4 Archetypes: one signature move each (implemented)
 
-Everyone sharing one move set kept fights fair but samey. So each fighter picks an **archetype** during capture (`src/shared/archetypes.ts`), just before the one extra pose it needs (the `signature` capture). It adds exactly one move, on the same input for everyone: **down + punch + kick**. Everything else stays the shared core, so the controls, the tutorial and the README still hold for every fighter, and the balance work is four moves, not four move sets.
+Everyone sharing one move set kept fights fair but samey. So each fighter picks an **archetype** at the start of capture (`src/shared/archetypes.ts`), which decides the one extra pose it needs (the `signature` capture). It adds exactly one move, on the same input for everyone: **down + punch + kick**. Everything else stays the shared core, so the controls, the tutorial and the README still hold for every fighter, and the balance work is four moves, not four move sets.
 
 | Archetype | Move | Frame data | Beats | Loses to |
 |---|---|---|---|---|

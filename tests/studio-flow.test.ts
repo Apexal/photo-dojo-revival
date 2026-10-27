@@ -7,14 +7,12 @@ const indexOf = (key: string) => captureTargetsFor("brawler").findIndex((t) => t
 const capture: StudioEvent[] = [{ type: "poseCaptured" }, { type: "graceElapsed" }];
 const ready: StudioEvent = { type: "cameraReady" };
 const lost: StudioEvent = { type: "cameraLost" };
+const guardian: StudioEvent = { type: "pickArchetype", archetype: "guardian" };
 
 function toReview() {
-  let s = run(initialStudioFlow(), ready, { type: "selectMode", mode: "helped" }, { type: "setupDone" }, { type: "start" }, { type: "modelsReady" });
+  let s = run(initialStudioFlow(), ready, { type: "selectMode", mode: "helped" }, { type: "setupDone" }, guardian, { type: "start" }, { type: "modelsReady" });
+  // Every pose in a row: the style was picked at the start.
   for (let i = 0; i < CAPTURE_TARGET_COUNT; i++) {
-    if (i === SIGNATURE_TARGET_INDEX) {
-      expect(s.screen).toEqual({ name: "archetype", retake: false });
-      s = run(s, { type: "pickArchetype", archetype: "guardian" });
-    }
     expect(s.screen).toEqual({ name: "pose", poseIndex: i, retake: false });
     s = run(s, ...capture);
   }
@@ -27,12 +25,21 @@ describe("studio flow", () => {
     expect(s).toMatchObject({ screen: { name: "setup" }, mode: "solo", cameraReady: false });
     expect(GRACE_MS.solo).toBeGreaterThan(GRACE_MS.helped);
     expect(run(s, { type: "setupDone" })).toBe(s);
-    expect(run(s, ready, { type: "setupDone" }).screen).toEqual({ name: "tips" });
+    expect(run(s, ready, { type: "setupDone" }).screen).toEqual({ name: "archetype", retake: false });
     // A camera that drops on the setup screen just disables "start" again.
     expect(run(s, ready, lost, { type: "setupDone" }).screen).toEqual({ name: "setup" });
   });
 
-  it("walks setup → tips → loading → all 16 poses (archetype before the signature) → review → sounds → preview → saved", () => {
+  it("picks the style first, then the tips", () => {
+    const s = run(initialStudioFlow(), ready, { type: "setupDone" }, { type: "pickArchetype", archetype: "acrobat" });
+    expect(s).toMatchObject({ archetype: "acrobat", screen: { name: "tips" } });
+    // The camera dropping while picking comes back to the picker.
+    const dropped = run(initialStudioFlow(), ready, { type: "setupDone" }, lost);
+    expect(dropped.screen).toEqual({ name: "cameraLost", back: { name: "archetype", retake: false } });
+    expect(run(dropped, ready).screen).toEqual({ name: "archetype", retake: false });
+  });
+
+  it("walks setup → archetype → tips → loading → all 16 poses → review → sounds → preview → saved", () => {
     let s = toReview();
     expect(s.mode).toBe("helped");
     expect(s.screen).toEqual({ name: "review" });
@@ -58,7 +65,7 @@ describe("studio flow", () => {
   });
 
   it("rough captures: retake or keep", () => {
-    const s = run(initialStudioFlow(), ready, { type: "setupDone" }, { type: "start" }, { type: "modelsReady" }, { type: "poseCaptured" }, { type: "captureRough" });
+    const s = run(initialStudioFlow(), ready, { type: "setupDone" }, guardian, { type: "start" }, { type: "modelsReady" }, { type: "poseCaptured" }, { type: "captureRough" });
     expect(s.screen).toEqual({ name: "captured", poseIndex: 0, retake: false, rough: true });
     expect(run(s, { type: "graceElapsed" })).toBe(s); // a rough one waits for the answer
     expect(run(s, { type: "retakeRough" }).screen).toEqual({ name: "pose", poseIndex: 0, retake: false });
@@ -67,7 +74,7 @@ describe("studio flow", () => {
   });
 
   it("a lost camera mid-pose pauses on cameraLost, and comes back to the same pose with its retake flag", () => {
-    let s = run(initialStudioFlow(), ready, { type: "setupDone" }, { type: "start" }, { type: "modelsReady" }, ...capture, ...capture, { type: "poseCaptured" });
+    let s = run(initialStudioFlow(), ready, { type: "setupDone" }, guardian, { type: "start" }, { type: "modelsReady" }, ...capture, ...capture, { type: "poseCaptured" });
     expect(s.screen).toEqual({ name: "captured", poseIndex: 2, retake: false, rough: false });
     s = run(s, lost);
     expect(s.screen).toEqual({ name: "cameraLost", back: { name: "pose", poseIndex: 2, retake: false } });
@@ -129,7 +136,7 @@ describe("studio flow", () => {
   });
 
   it("models ready but the camera gone meanwhile: the camera screen, then the first pose", () => {
-    const s = run(initialStudioFlow(), ready, { type: "setupDone" }, { type: "start" }, lost, { type: "modelsReady" });
+    const s = run(initialStudioFlow(), ready, { type: "setupDone" }, guardian, { type: "start" }, lost, { type: "modelsReady" });
     expect(s.screen).toEqual({ name: "camera", next: { poseIndex: 0, retake: false } });
     expect(run(s, ready).screen).toEqual({ name: "pose", poseIndex: 0, retake: false });
     // Not a retake: there's no review to go back to.
@@ -137,7 +144,7 @@ describe("studio flow", () => {
   });
 
   it("resumes a draft: from the first missing pose after loading, or straight to the review", () => {
-    let s = run(initialStudioFlow(), { type: "resume", mode: "helped", archetype: null, next: { poseIndex: 3, retake: false } });
+    let s = run(initialStudioFlow(), { type: "resume", mode: "helped", archetype: "brawler", next: { poseIndex: 3, retake: false } });
     expect(s).toMatchObject({ screen: { name: "tips" }, mode: "helped" });
     s = run(s, ready, { type: "start" }, { type: "modelsReady" });
     expect(s.screen).toEqual({ name: "pose", poseIndex: 3, retake: false });
@@ -147,6 +154,11 @@ describe("studio flow", () => {
     expect(done).toMatchObject({ screen: { name: "review" }, archetype: "grappler", cameraReady: false });
 
     // Resumed without a camera: loading ends on the camera screen at the resume point.
+    // A draft from before the style came first: pick it, then carry on where it stopped.
+    const old = run(initialStudioFlow(), { type: "resume", mode: "solo", archetype: null, next: { poseIndex: 3, retake: false } });
+    expect(old.screen).toEqual({ name: "archetype", retake: false });
+    expect(run(old, guardian, ready, { type: "start" }, { type: "modelsReady" })).toMatchObject({ archetype: "guardian", screen: { name: "pose", poseIndex: 3 } });
+
     const noCam = run(initialStudioFlow(), { type: "resume", mode: "solo", archetype: "brawler", next: { poseIndex: 5, retake: false } }, { type: "start" }, { type: "modelsReady" });
     expect(noCam.screen).toEqual({ name: "camera", next: { poseIndex: 5, retake: false } });
   });

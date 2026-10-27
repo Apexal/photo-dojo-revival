@@ -7,6 +7,7 @@ import {
   detectFacing,
   evaluatePose,
   flipLandmarksHorizontally,
+  jointErrors,
   mirrorJointName,
   scorePoseMatch,
   type JointAngles,
@@ -101,6 +102,14 @@ describe("pose scoring", () => {
   it("missing angles never match", () => {
     expect(scorePoseMatch(angles(null, 90), target)).toBe(Infinity);
   });
+
+  it("breaks the score down by joint, with the direction of each error", () => {
+    expect(jointErrors(angles(150, 105), target)).toEqual([
+      { joint: "rightElbow", delta: -25, error: 1 },
+      { joint: "leftKnee", delta: 15, error: 0.5 },
+    ]);
+    expect(jointErrors(angles(null, 90), target)[0]).toEqual({ joint: "rightElbow", delta: null, error: Infinity });
+  });
 });
 
 /** Every main pose, the signature one once per archetype: its name, canonical skeleton and definition. */
@@ -134,6 +143,9 @@ describe("pose definitions", () => {
     const leftEval = evaluatePose(left, POSE_DEFINITIONS.punch);
     expect(leftEval.side).toBe("left");
     expect(leftEval.score).toBeLessThan(1);
+    // The breakdown is for the side that won, under that side's joint names.
+    expect(leftEval.joints.map((j) => j.joint)).toEqual(["leftElbow", "leftShoulderElevation", "rightElbow"]);
+    expect(Math.max(...leftEval.joints.map((j) => j.error))).toBeCloseTo(leftEval.score);
     // Non-attack poses don't get mirrored.
     expect(POSE_DEFINITIONS.idle.attackLimb).toBeUndefined();
   });

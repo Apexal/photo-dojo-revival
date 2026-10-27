@@ -357,7 +357,7 @@ export function renderScreen(root: HTMLElement, flow: StudioFlowState, data: Stu
         h("h2", {}, "Pick your fighting style"),
         h("p", { class: "muted" }, s.retake
           ? "A new style means a new signature pose. Pick your current one to keep it."
-          : "It gives you one signature move (down + punch + kick), and it's your next pose."),
+          : "It gives you one signature move (down + punch + kick). You'll pose for it along with the rest, all in one go."),
         h("div", { class: "choices archetypes" },
           ...ARCHETYPE_IDS.map((id) =>
             h("button", { type: "button", class: id === flow.archetype ? "primary" : "", dataset: { archetype: id }, on: { click: () => a.pickArchetype(id) } },

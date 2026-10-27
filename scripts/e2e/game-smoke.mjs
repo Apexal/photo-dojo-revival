@@ -435,6 +435,7 @@ try {
   await studio.screenshot({ path: `${OUT}/13-studio-phone-ready.png` });
   await studio.click("[data-mode=helped]");
   await studio.click("[data-action=start]");
+  await studio.click("[data-archetype=guardian]"); // the style comes first
   await studio.getByText("Let's go").click();
   await studio.waitForFunction(() => window.photoDojoStudio.flow.screen.name === "pose", null, { timeout: 90000 });
   await phoneCam.waitForFunction(() => document.body.innerText.includes("Pose 1/16 — Fighting stance"), null, { timeout: 10000 });
@@ -467,6 +468,7 @@ try {
   await local.click("[data-camera=local]");
   await local.waitForFunction(() => { const s = window.photoDojoStudio.source; return s?.kind === "local" && s.status.kind === "ready"; }, null, { timeout: 15000 });
   await local.click("[data-action=start]");
+  await local.click("[data-archetype=guardian]");
   await local.getByText("Let's go").click();
   await local.waitForFunction(() => window.photoDojoStudio.flow.screen.name === "pose", null, { timeout: 90000 });
   await local.waitForTimeout(1000);

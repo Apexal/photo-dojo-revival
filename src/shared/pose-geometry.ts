@@ -31,7 +31,21 @@ export interface PoseTarget {
   attackLimb?: "arm" | "leg";
 }
 
-export interface PoseEvaluation { score: number; side: LimbSide }
+/** How far one targeted joint is from its target. */
+export interface JointError {
+  joint: JointName;
+  /** Actual minus target, in degrees (negative: not enough); null when the joint isn't visible. */
+  delta: number | null;
+  /** |delta| / tolerance: 0 = on target, 1 = at the tolerance edge, >1 = out; Infinity when not visible. */
+  error: number;
+}
+
+export interface PoseEvaluation {
+  score: number;
+  side: LimbSide;
+  /** Each target angle for the chosen side (joint names already mirrored), for coaching. */
+  joints: JointError[];
+}
 
 export const ANGLE_VISIBILITY_THRESHOLD = 0.3;
 export const REQUIRED_VISIBILITY_THRESHOLD = 0.5;
@@ -115,13 +129,17 @@ export function computeJointAngles(landmarks: NormalizedLandmark[]): JointAngles
  * 0 = perfect, 1 = at the tolerance edge, >1 = out. Missing angles score Infinity.
  */
 export function scorePoseMatch(angles: JointAngles, target: Pick<PoseTarget, "angleTargets">, toleranceScale = 1): number {
-  let worst = 0;
-  for (const { joint, degrees, tolerance } of target.angleTargets) {
+  return Math.max(0, ...jointErrors(angles, target, toleranceScale).map((j) => j.error));
+}
+
+/** Each target angle's signed and normalized error (see `scorePoseMatch`). */
+export function jointErrors(angles: JointAngles, target: Pick<PoseTarget, "angleTargets">, toleranceScale = 1): JointError[] {
+  return target.angleTargets.map(({ joint, degrees, tolerance }) => {
     const actual = angles[joint];
-    if (actual === null || actual === undefined) return Infinity;
-    worst = Math.max(worst, Math.abs(actual - degrees) / (tolerance * toleranceScale));
-  }
-  return worst;
+    if (actual === null || actual === undefined) return { joint, delta: null, error: Infinity };
+    const delta = actual - degrees;
+    return { joint, delta, error: Math.abs(delta) / (tolerance * toleranceScale) };
+  });
 }
 
 export function mirrorJointName(joint: JointName): JointName {
@@ -146,19 +164,20 @@ export function requiredLandmarksVisible(landmarks: NormalizedLandmark[], names:
  */
 export function evaluatePose(landmarks: NormalizedLandmark[], target: PoseTarget, toleranceScale = 1): PoseEvaluation {
   const angles = computeJointAngles(landmarks);
-  const scoreFor = (side: LimbSide): number => {
+  const evaluateSide = (side: LimbSide): PoseEvaluation => {
     const mirror = side === "left";
     const required = mirror ? target.requiredVisibleLandmarks.map(mirrorLandmarkName) : target.requiredVisibleLandmarks;
-    if (!requiredLandmarksVisible(landmarks, required)) return Infinity;
     const angleTargets = mirror
       ? target.angleTargets.map((t) => ({ ...t, joint: mirrorJointName(t.joint) }))
       : target.angleTargets;
-    return scorePoseMatch(angles, { angleTargets }, toleranceScale);
+    const joints = jointErrors(angles, { angleTargets }, toleranceScale);
+    const score = requiredLandmarksVisible(landmarks, required) ? Math.max(0, ...joints.map((j) => j.error)) : Infinity;
+    return { score, side, joints };
   };
-  const right = scoreFor("right");
-  if (!target.attackLimb) return { score: right, side: "right" };
-  const left = scoreFor("left");
-  return left < right ? { score: left, side: "left" } : { score: right, side: "right" };
+  const right = evaluateSide("right");
+  if (!target.attackLimb) return right;
+  const left = evaluateSide("left");
+  return left.score < right.score ? left : right;
 }
 
 /** In a side view, the nose is ahead of the ears in the facing direction. */

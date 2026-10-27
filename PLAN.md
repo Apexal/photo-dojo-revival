@@ -62,7 +62,8 @@ photo-dojo/
       sprite-normalizer.ts         # crop, scale to canonical torso length, anchor feet, emit PNG blob
       sound-recorder.ts            # MediaRecorder for the 3 voice clips
       capture-flow.ts              # state machine: intro → pose 1..8 → sounds → preview → send
-      ghost-overlay.ts             # draws target silhouette + progress ring over the video
+      ghost-overlay.ts             # draws target silhouette, live skeleton (bones coloured per joint) + progress ring
+      pose-coaching.ts             # per-joint error → one spoken/written correction ("Raise your arm higher")
       voice-prompts.ts             # speechSynthesis cues ("punch... hold it... got it")
       ui/                          # minimal DOM screens, no framework
     transfer/
@@ -146,7 +147,7 @@ export interface Fighter {
 }
 ```
 
-Every fighter has every pose and second version: sixteen captures. The archetype is picked during capture, right before its signature pose. Archetypes add one move each on down + punch + kick to a shared core moveset; frame data and the reasoning are in `docs/fighting-mechanics.md` §3.4.
+Every fighter has every pose and second version: sixteen captures. The archetype is picked at the start of capture, so the poses run in one go. Archetypes add one move each on down + punch + kick to a shared core moveset; frame data and the reasoning are in `docs/fighting-mechanics.md` §3.4.
 
 Constants (in `fighter-model.ts`):
 

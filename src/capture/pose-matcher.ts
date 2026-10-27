@@ -1,5 +1,5 @@
 import type { LimbSide, NormalizedLandmark } from "../shared/fighter-model";
-import { evaluatePose, type PoseEvaluation, type PoseTarget } from "../shared/pose-geometry";
+import { evaluatePose, type JointError, type PoseEvaluation, type PoseTarget } from "../shared/pose-geometry";
 
 export interface MatcherOptions {
   /** Continuous match time before auto-capture. */
@@ -37,6 +37,8 @@ export type MatcherEvent = "holdStarted" | "holdBroken" | "captured" | "toleranc
 export interface MatcherUpdate {
   score: number;
   side: LimbSide;
+  /** Per-joint errors behind the score (empty when nobody's detected): drives the coaching. */
+  joints: JointError[];
   /** In the pose and armed (see `armed`); drives the green ghost, the hold tone and the capture. */
   matching: boolean;
   /** The between-poses buffer is over: holding the pose now captures it. */
@@ -123,10 +125,11 @@ export class PoseMatcher {
   updateWithEvaluation(evaluation: PoseEvaluation | null, nowMs: number): MatcherUpdate {
     const events: MatcherEvent[] = [];
     const score = evaluation?.score ?? Infinity;
+    const joints = evaluation?.joints ?? [];
     if (evaluation) this.lastSide = evaluation.side;
 
     if (this.captured) {
-      return this.snapshot(score, false, 1, events);
+      return this.snapshot(score, joints, false, 1, events);
     }
 
     events.push(...this.advanceClock(nowMs));
@@ -160,7 +163,7 @@ export class PoseMatcher {
       this.holdStartedAt = null;
       events.push("holdBroken");
     }
-    return this.snapshot(score, matching, progress, events);
+    return this.snapshot(score, joints, matching, progress, events);
   }
 
   /** "Tap to capture anyway". */
@@ -168,10 +171,11 @@ export class PoseMatcher {
     this.capturedSide = this.lastSide;
   }
 
-  private snapshot(score: number, matching: boolean, holdProgress: number, events: MatcherEvent[]): MatcherUpdate {
+  private snapshot(score: number, joints: JointError[], matching: boolean, holdProgress: number, events: MatcherEvent[]): MatcherUpdate {
     return {
       score,
       side: this.side,
+      joints,
       matching,
       armed: this.armed,
       awaitingBreak: this.awaitingBreak,
