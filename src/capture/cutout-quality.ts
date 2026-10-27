@@ -1,5 +1,6 @@
 import { LANDMARK, type NormalizedLandmark } from "../shared/fighter-model";
 import { torsoLength } from "../shared/pose-geometry";
+import { STICK_SEGMENTS } from "../shared/stick-figure";
 import { CORE_SCALE, skeletonPrior, type Rect } from "./matting";
 
 /**
@@ -29,9 +30,17 @@ export interface CutoutQuality {
   cutOff: string[];
   /** Which borders of the photo the body runs into (for "edge"), as the camera sees it. */
   edges: PhotoEdge[];
+  /** With "holes": the part most of them are in (a leg lost against a wall of the same colour), for the advice. */
+  holesIn: BodyPart | null;
 }
 
 export type PhotoEdge = "left" | "right" | "top" | "bottom";
+/** No left or right: the preview may be mirrored. */
+export type BodyPart = "leg" | "arm" | "body";
+
+const LEG_JOINTS: readonly number[] = [LANDMARK.leftKnee, LANDMARK.rightKnee, LANDMARK.leftAnkle, LANDMARK.rightAnkle, LANDMARK.leftFootIndex, LANDMARK.rightFootIndex];
+const ARM_JOINTS: readonly number[] = [LANDMARK.leftElbow, LANDMARK.rightElbow, LANDMARK.leftWrist, LANDMARK.rightWrist];
+const partOf = ([, b]: readonly [number, number]): BodyPart => (LEG_JOINTS.includes(b) ? "leg" : ARM_JOINTS.includes(b) ? "arm" : "body");
 
 export const QUALITY_THRESHOLDS = { coreMissing: 0.08, marginFilled: 0.4, edgePixels: 0.15 } as const;
 
@@ -111,7 +120,31 @@ export function assessCutout(input: CutoutQualityInput): CutoutQuality {
   if (coreMissing > QUALITY_THRESHOLDS.coreMissing) issues.push("holes");
   if (marginFilled > QUALITY_THRESHOLDS.marginFilled) issues.push("background");
   if (cutOff.length) issues.push("cutOff");
-  return { issues, coreMissing, marginFilled, cutOff, edges };
+  return { issues, coreMissing, marginFilled, cutOff, edges, holesIn: issues.includes("holes") ? mostMissing(alpha, width, height, seen) : null };
+}
+
+/** The part whose clearly seen bones are most transparent along their length (crop landmarks; null without any). */
+function mostMissing(alpha: ArrayLike<number>, width: number, height: number, seen: NormalizedLandmark[]): BodyPart | null {
+  const total: Record<BodyPart, number> = { leg: 0, arm: 0, body: 0 };
+  const missing: Record<BodyPart, number> = { leg: 0, arm: 0, body: 0 };
+  for (const bone of STICK_SEGMENTS) {
+    const p = seen[bone[0]], q = seen[bone[1]];
+    if (p.visibility < CLEARLY_SEEN || q.visibility < CLEARLY_SEEN) continue;
+    const part = partOf(bone);
+    const steps = Math.max(1, Math.ceil(Math.hypot(q.x - p.x, q.y - p.y) / 3));
+    for (let s = 0; s <= steps; s++) {
+      const x = Math.round(p.x + ((q.x - p.x) * s) / steps), y = Math.round(p.y + ((q.y - p.y) * s) / steps);
+      if (x < 0 || y < 0 || x >= width || y >= height) continue;
+      total[part]++;
+      if (alpha[y * width + x] < OPAQUE) missing[part]++;
+    }
+  }
+  let worst: BodyPart | null = null, worstShare = 0;
+  for (const part of ["leg", "arm", "body"] as const) {
+    const share = total[part] ? missing[part] / total[part] : 0;
+    if (share > worstShare) [worst, worstShare] = [part, share];
+  }
+  return worst;
 }
 
 /** Opaque crop pixels lying on each of the frame's borders. */
@@ -127,30 +160,27 @@ function edgeOpaqueCounts(alpha: ArrayLike<number>, rect: Rect, frameWidth: numb
 }
 
 /**
- * What to change for the next try, for the first issue (spoken: the player may
- * be across the room). Running into the photo's border says which way to go:
- * no left or right, since the preview may be mirrored.
+ * What to change for the next try, for the first issue: shown (a few words, read
+ * from across the room) and spoken. Running into the photo's border says which
+ * way to go: no left or right, since the preview may be mirrored.
  */
-export function cutoutAdvice({ issues, cutOff, edges }: Pick<CutoutQuality, "issues" | "cutOff" | "edges">): string {
+export function cutoutAdvice({ issues, cutOff, edges, holesIn }: Pick<CutoutQuality, "issues" | "cutOff" | "edges" | "holesIn">): { shown: string; spoken: string } {
   if (issues[0] === "cutOff" && cutOff.includes("edge")) {
-    if (edges[0] === "bottom") return "Step back a little: your feet touch the bottom of the picture.";
-    if (edges[0] === "top") return "Step back a little: your head touches the top of the picture.";
-    if (edges[0]) return "Move toward the middle of the picture: you're running off its side.";
+    if (edges[0] === "bottom") return { shown: "Step back: feet cut off", spoken: "Step back a little: your feet touch the bottom of the picture." };
+    if (edges[0] === "top") return { shown: "Step back: head cut off", spoken: "Step back a little: your head touches the top of the picture." };
+    if (edges[0]) return { shown: "Move to the middle", spoken: "Move toward the middle of the picture: you're running off its side." };
   }
-  const advice: Record<CutoutIssue, string> = {
-    cutOff: "Keep all of you in the frame, hands and feet too.",
-    background: "Step away from furniture, in front of a plain wall.",
-    holes: "Get more light on you, in clothes that stand out from the wall.",
+  // A limb lost against the background: its colour, not the light (a pale leg held out across a white door).
+  if (issues[0] === "holes" && (holesIn === "leg" || holesIn === "arm")) {
+    return {
+      shown: `${holesIn === "leg" ? "Leg" : "Arm"} blends into the background`,
+      spoken: `Your ${holesIn} blended into the background. Strike the pose in front of something that stands out from your clothes.`,
+    };
+  }
+  const advice: Record<CutoutIssue, { shown: string; spoken: string }> = {
+    cutOff: { shown: "Get fully in view", spoken: "Keep all of you in the frame, hands and feet too." },
+    background: { shown: "Stand by a plain wall", spoken: "Step away from furniture, in front of a plain wall." },
+    holes: { shown: "More light on you", spoken: "Get more light on you, in clothes that stand out from the wall." },
   };
-  return issues.length ? advice[issues[0]] : "";
-}
-
-/** Short reason for the "didn't cut out cleanly" prompt. */
-export function describeCutoutIssues(issues: CutoutIssue[]): string {
-  const parts: Record<CutoutIssue, string> = {
-    holes: "bits of you are missing",
-    background: "some background came along",
-    cutOff: "part of you is cut off",
-  };
-  return issues.map((i) => parts[i]).join(", ");
+  return issues.length ? advice[issues[0]] : { shown: "", spoken: "" };
 }

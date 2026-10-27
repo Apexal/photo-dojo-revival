@@ -94,6 +94,9 @@ describe("framing advice", () => {
     expect(framingAdvice(person(0.7, lungeX), W, H)).toBe("ok");
     const lunging = person(0.7, lungeX).map((l, i) => (i === LANDMARK.rightWrist || i === LANDMARK.rightIndex ? { ...l, x: 20 } : l));
     expect(framingAdvice(lunging, W, H)).toBe("center");
+    // The hand's own points count, not just the wrist: fingers reach past it into the border.
+    const handOut = person(0.7, W / 2).map((l, k) => (k === LANDMARK.leftPinky ? { ...l, x: W - 10 } : l));
+    expect(framingAdvice(handOut, W, H)).toBe("center");
   });
 
 });

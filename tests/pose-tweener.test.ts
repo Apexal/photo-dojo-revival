@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { AlphaMask, Point } from "../src/game/render/arap";
-import { PoseTweener, breathingStance, interpolateLandmarks, sidesFlipped, swapSides, type FrameRef, type TweenSource } from "../src/game/render/pose-tweener";
+import { PoseTweener, breathingStance, interpolateLandmarks, type FrameRef, type TweenSource } from "../src/game/render/pose-tweener";
+import { sidesFlipped, swapSides } from "../src/shared/side-flips";
 import { LANDMARK, SPRITE_CANVAS_SIZE, type NormalizedLandmark, type PoseId } from "../src/shared/fighter-model";
 import { ATTACKS, poseForAction, tweenAtFrame } from "../src/shared/frame-data";
 import { anchorTargetFor } from "../src/shared/pose-geometry";
@@ -253,5 +254,17 @@ describe("stand-in second stance", () => {
   it("leaves from the real stance", () => {
     const layers = tweener.layers({ from: ref("idle", 1), to: ref("block"), t: 0.3 })!;
     expect(layers.map((l) => l.frame)).toEqual([ref("block"), ref("idle"), ref("block")]);
+  });
+
+  it("starts a cut out of the stand-in where the stand-in had it, not back on the photo", () => {
+    const anchor = anchorTargetFor("idle");
+    const [, from] = tweener.layers({ from: ref("idle", 1), to: ref("block"), t: 1e-6 })!;
+    const hip = { x: idle[L.leftHip].x - anchor.x, y: idle[L.leftHip].y - anchor.y };
+    const rest = Array.from({ length: from.uvs.length / 2 }, (_, i) =>
+      ({ x: from.uvs[2 * i] * SPRITE_CANVAS_SIZE - anchor.x, y: from.uvs[2 * i + 1] * SPRITE_CANVAS_SIZE - anchor.y }));
+    let nearest = 0;
+    for (let i = 0; i < rest.length; i++) if (dist(rest[i], hip) < dist(rest[nearest], hip)) nearest = i;
+    const sink = breathingStance(idle)[L.leftHip].y - idle[L.leftHip].y;
+    expect(from.positions[2 * nearest + 1] - rest[nearest].y).toBeCloseTo(sink, 0);
   });
 });

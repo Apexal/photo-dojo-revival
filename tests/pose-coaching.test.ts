@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { PoseCoach, STILL_TOLERANCE_SLACK, checkStillPose, correctionArrows, correctionFor, segmentBands } from "../src/capture/pose-coaching";
+import { PoseCoach, STILL_TOLERANCE_SLACK, checkStillPose, correctionArrows, correctionFor, segmentBands, unseenText } from "../src/capture/pose-coaching";
 import { LANDMARK } from "../src/shared/fighter-model";
 import { POSE_DEFINITIONS } from "../src/shared/pose-definitions";
 import { computeJointAngles, evaluatePose, type JointError, type JointName } from "../src/shared/pose-geometry";
@@ -204,5 +204,20 @@ describe("checking the photo itself", () => {
     const base = computeJointAngles(lm).torsoLean!;
     expect(checkStillPose(lean(11 - base), target).ok).toBe(true);
     expect(checkStillPose(lean(10 * STILL_TOLERANCE_SLACK + 2 - base), target).ok).toBe(false);
+  });
+});
+
+describe("unseen landmarks", () => {
+  it("names the body part, never left or right", () => {
+    expect(unseenText([])).toBeNull();
+    expect(unseenText(["leftAnkle"])).toBe("Can't see your feet");
+    expect(unseenText(["rightAnkle", "leftAnkle", "nose"])).toBe("Can't see your feet or head");
+    expect(unseenText(["nose", "leftWrist", "rightHip"])).toBe("Can't see you clearly");
+  });
+
+  it("a photo with a required point unclear asks for that, not a joint fix", () => {
+    const lm = buildStickFigureLandmarks("idle");
+    lm[LANDMARK.rightAnkle].visibility = 0.4;
+    expect(checkStillPose(lm, POSE_DEFINITIONS.idle)).toMatchObject({ ok: false, correction: "Can't see your feet" });
   });
 });

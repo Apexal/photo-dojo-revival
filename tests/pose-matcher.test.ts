@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
+import { checkStillPose } from "../src/capture/pose-coaching";
 import { PoseMatcher, STEADY_RADIUS } from "../src/capture/pose-matcher";
-import { estimateBodyScale } from "../src/shared/pose-geometry";
+import { LANDMARK } from "../src/shared/fighter-model";
+import { REQUIRED_VISIBILITY_THRESHOLD, estimateBodyScale } from "../src/shared/pose-geometry";
 import { POSE_DEFINITIONS } from "../src/shared/pose-definitions";
 import { buildStickFigureLandmarks } from "../src/shared/stick-figure";
 
@@ -40,6 +42,19 @@ describe("PoseMatcher buffer between poses", () => {
     expect(m.update(null, 4100).events).toEqual(["armed"]);
     expect(m.update(hit, 4200).events).toEqual(["holdStarted"]);
     expect(m.update(hit, 4700).captured).toBe(true);
+  });
+});
+
+describe("PoseMatcher is stricter than the photo", () => {
+  it("a required point only just clear enough for the photo doesn't go green live", () => {
+    const stance = POSE_DEFINITIONS.idle;
+    const unsure = miss.map((l, i) => (i === LANDMARK.leftAnkle ? { ...l, visibility: REQUIRED_VISIBILITY_THRESHOLD + 0.05 } : l));
+    const m = new PoseMatcher(stance, { armAfterMs: 0, requireBreak: false });
+    m.start(0);
+    const u = m.update(unsure, 0);
+    expect(u.matching).toBe(false);
+    expect(u.unseen).toEqual(["leftAnkle"]);
+    expect(checkStillPose(unsure, stance).ok).toBe(true);
   });
 });
 

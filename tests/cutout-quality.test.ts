@@ -39,6 +39,23 @@ describe("cut-out quality check", () => {
     expect(assess(alpha).issues).toContain("holes");
   });
 
+  it("says which limb the holes are in: a kicking leg lost against a wall of its colour", () => {
+    const kick = buildStickFigureLandmarks("kick");
+    const kickBody = skeletonPrior(kick, S, S, { scale: 0.6, falloffScale: 0 }).map((v) => (v >= 1 ? 1 : 0));
+    const alpha = keepPerson(Float32Array.from(kickBody), S, S, kick);
+    // The model barely sees the raised leg below the knee.
+    const knee = kick[LANDMARK.rightKnee], ankle = kick[LANDMARK.rightAnkle];
+    for (let y = 0; y < S; y++) for (let x = 0; x < S; x++) {
+      const t = Math.max(0, Math.min(1, ((x - knee.x) * (ankle.x - knee.x) + (y - knee.y) * (ankle.y - knee.y)) / ((ankle.x - knee.x) ** 2 + (ankle.y - knee.y) ** 2)));
+      if (Math.hypot(x - (knee.x + t * (ankle.x - knee.x)), y - (knee.y + t * (ankle.y - knee.y))) < 40) alpha[y * S + x] = 0;
+    }
+    const q = assess(alpha, inFrame(kick));
+    expect(q.issues[0]).toBe("holes");
+    expect(q.holesIn).toBe("leg");
+    expect(cutoutAdvice(q).shown).toBe("Leg blends into the background");
+    expect(cutoutAdvice(q).spoken).not.toMatch(/\b(left|right)\b/);
+  });
+
   it("flags a hand missing from the cut-out", () => {
     const alpha = matte(Float32Array.from(body));
     const wrist = idle[LANDMARK.rightWrist];
@@ -97,7 +114,7 @@ describe("cut-out quality check", () => {
 
   it("says what to change for the next try, for the first issue", () => {
     const advice = (issues: ("holes" | "background" | "cutOff")[], cutOff: string[] = [], edges: ("left" | "right" | "top" | "bottom")[] = []) =>
-      cutoutAdvice({ issues, cutOff, edges });
+      cutoutAdvice({ issues, cutOff, edges, holesIn: null }).spoken;
     expect(advice(["background", "cutOff"])).toBe("Step away from furniture, in front of a plain wall.");
     expect(advice(["cutOff"], ["left foot"])).toMatch(/in the frame/);
     expect(advice(["holes"])).toMatch(/light/);
@@ -107,5 +124,10 @@ describe("cut-out quality check", () => {
     expect(advice(["cutOff"], ["edge"], ["top"])).toMatch(/Step back.*head.*top/);
     expect(advice(["cutOff"], ["edge"], ["right"])).toMatch(/middle of the picture/);
     expect(advice(["cutOff"], ["edge"], ["left", "bottom"])).not.toMatch(/\b(left|right)\b/);
+    // Shown: a few words, readable from across the room.
+    for (const issues of [["holes"], ["background"], ["cutOff"]] as const) {
+      expect(cutoutAdvice({ issues: [...issues], cutOff: [], edges: [], holesIn: null }).shown.split(" ").length).toBeLessThanOrEqual(5);
+    }
+    expect(cutoutAdvice({ issues: ["cutOff"], cutOff: ["edge"], edges: ["bottom"], holesIn: null }).shown).toBe("Step back: feet cut off");
   });
 });

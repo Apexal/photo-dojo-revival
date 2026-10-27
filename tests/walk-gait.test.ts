@@ -3,7 +3,8 @@ import { LANDMARK, type NormalizedLandmark } from "../src/shared/fighter-model";
 import { computeAnchor, torsoLength } from "../src/shared/pose-geometry";
 import { buildStickFigureLandmarks } from "../src/shared/stick-figure";
 import { interpolateLandmarks } from "../src/game/render/pose-tweener";
-import { GaitShape, STEP_LIFT, STRIDE_LIMITS, WalkGait, stepPose, type GaitFrame } from "../src/game/render/walk-gait";
+import { GaitShape, STEP_LIFT, WalkGait, stepPose, type GaitFrame } from "../src/game/render/walk-gait";
+import { STRIDE_LIMITS } from "../src/shared/walk-step";
 import { WALK_SPEED } from "../src/simulation/fighter-state-machine";
 
 /** Like the tweener: each capture relative to its own feet anchor. */

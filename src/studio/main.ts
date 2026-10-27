@@ -16,19 +16,19 @@ import {
 } from "../shared/fighter-model";
 import { clearDraft, loadDraft, onDbBlocked, saveDraft, saveFighter, saveFighterWithSources } from "../shared/fighter-storage";
 import { CAPTURE_TARGET_COUNT, captureTargetsFor, type PoseDefinition } from "../shared/pose-definitions";
-import { compareStep, stepAdvice } from "../shared/walk-step";
+import { LIVE_STRIDE_MARGIN, STRIDE_LIMITS, compareStep, stepAdvice, type StepIssue } from "../shared/walk-step";
 import type { ArchetypeId } from "../shared/archetypes";
 import { captureUrl } from "../shared/room-code";
 import { canvasToPng, context2d, createCanvas, normalizeRect } from "../shared/canvas";
 import { gateStudio, isTablet } from "../game/device-gate";
 import { BackgroundRemover, type MatteDebug } from "../capture/background-remover";
-import { assessCutout, cutoutAdvice, describeCutoutIssues, type CutoutQuality } from "../capture/cutout-quality";
+import { assessCutout, cutoutAdvice, type CutoutQuality } from "../capture/cutout-quality";
 import { GhostFitter, framingAdvice, type FramingAdvice } from "../capture/framing";
 import { GhostOverlay } from "../capture/ghost-overlay";
 import { HoldSound } from "../capture/hold-sound";
 import { personCropRect } from "../capture/matting";
 import { DEFAULT_MATCHER_OPTIONS, PoseMatcher, type MatcherUpdate } from "../capture/pose-matcher";
-import { PoseCoach, checkStillPose, correctionArrows, type Correction, type CorrectionArrow } from "../capture/pose-coaching";
+import { PoseCoach, checkStillPose, correctionArrows, unseenText, type Correction, type CorrectionArrow } from "../capture/pose-coaching";
 import { PoseTracker } from "../capture/pose-tracker";
 import { BURST_FRAMES } from "../capture/sharpness";
 import { SoundRecorder, playClip } from "../capture/sound-recorder";
@@ -86,12 +86,26 @@ const FRAMING_HINTS: Record<Exclude<FramingAdvice, "ok">, string> = {
   further: "Step a bit further back",
   center: "Move toward the middle of the picture",
 };
+/**
+ * What the HUD shows: a few words, huge, read from across the room (the voice
+ * says the longer version).
+ */
+const FRAMING_SHOWN: Record<Exclude<FramingAdvice, "ok">, string> = {
+  closer: "Come closer",
+  further: "Step back",
+  center: "Move to the middle",
+};
 /** Still in the pose when the buffer between poses ends: they have to reset first, so the capture is deliberate. */
 const BREAK_PROMPT = "Relax for a second, then strike the pose";
+const BREAK_SHOWN = "Relax, then pose again";
+/** How long a notice (a retake's reason, a failed camera switch) stays up in place of the hint. */
+const NOTICE_MS = 3500;
 const FRAMING_VOICE = { settleMs: 1500, repeatMs: 5000 } as const;
 /** "Hold still" when the hold starts over because they moved, at most this often. */
 const HOLD_STILL_REPEAT_MS = 4000;
-/** The photo can't be kept (out of the pose, or a rough cut-out): the pose again. `message` is shown, `spoken` said. */
+/** Which half of the walk a capture target is (only asked of "idle" and "walk"). */
+const walkRole = (key: string): "stance" | "step" => (key === "walk" ? "step" : "stance");
+/** The photo can't be kept (out of the pose, or a rough cut-out): the pose again. `message` is shown (a few words), `spoken` said. */
 class RetakeNeeded extends Error {
   constructor(message: string, readonly spoken: string) {
     super(message);
@@ -134,6 +148,8 @@ interface LiveState {
   landmarks: ReturnType<PoseTracker["detectLive"]>;
   update: MatcherUpdate | null;
   framing: FramingAdvice | null;
+  /** The stance or step doesn't make a walk with the other one already taken: the pose doesn't count. */
+  walkIssue: StepIssue | null;
   /** The one joint to fix, shown and spoken instead of the pose's prompt. */
   correction: Correction | null;
   /** Which way to move for the correction (frame pixels). */
@@ -183,19 +199,21 @@ class StudioApp {
   private matcher: PoseMatcher | null = null;
   private stopFrames: (() => void) | null = null;
   private overlay: GhostOverlay | null = null;
-  private live: LiveState = { landmarks: null, update: null, framing: null, correction: null, arrows: [] };
+  private live: LiveState = { landmarks: null, update: null, framing: null, walkIssue: null, correction: null, arrows: [] };
   private capturing = false;
   /** A phone still is on its way: the person keeps holding the pose. */
   private awaitingStill = false;
   /** Exposure and white balance are held for this fighter (after its first photo). */
   private exposureLocked = false;
+  /** A short message shown huge in place of the hint for a few seconds (see `notify`). */
+  private liveNotice: { text: string; timer: ReturnType<typeof setTimeout> } | null = null;
   /** "How it works", in place of setup: the first visit (not when opening a fighter to edit), or asked for. */
   private intro: HTMLElement | null = null;
   private readonly ghostFitter = new GhostFitter();
   private holdStillSaidAt = -Infinity;
   private readonly coach = new PoseCoach();
   /** "A bit closer" / "further" is spoken once it's been true for a moment, and not too often. */
-  private framingVoice: { advice: FramingAdvice; since: number; spokenAt: number } = { advice: "ok", since: 0, spokenAt: -Infinity };
+  private adviceVoice: { text: string | null; since: number; spokenAt: number } = { text: null, since: 0, spokenAt: -Infinity };
   /** Model download progress, 0..1, for the loading screen. */
   private loadProgress = 0;
   private switchingCamera = false;
@@ -627,7 +645,11 @@ class StudioApp {
     const hint = this.root.querySelector<HTMLElement>("[data-hud=hint]");
     if (step) step.textContent = `${s.poseIndex + 1} / ${CAPTURE_TARGET_COUNT}${s.retake ? " · retake" : ""}`;
     if (label) label.textContent = def.label;
-    if (hint) hint.textContent = s.name === "captured" ? (this.awaitingStill ? "Hold it… taking the photo" : "Got it!") : this.hintText();
+    if (hint) {
+      hint.textContent = this.liveNotice?.text ?? (s.name === "captured" ? (this.awaitingStill ? "Hold it…" : "Got it!") : this.hintText());
+      hint.classList.toggle("notice", !!this.liveNotice);
+      hint.hidden = !hint.textContent;
+    }
     const cutout = this.root.querySelector<HTMLImageElement>("[data-hud=cutout]");
     const url = this.data.previews[target.key];
     if (cutout) {
@@ -642,20 +664,18 @@ class StudioApp {
   private hintText(): string {
     const s = this.flow.screen;
     if (s.name !== "pose") return "";
-    const def = targetAt(s.poseIndex, this.flow.archetype).definition;
     const { landmarks, update, framing } = this.live;
-    if (!landmarks) return "Step into the frame";
-    const inFrame = update !== null && update.score !== Infinity;
-    if (!inFrame) {
-      return framing === "closer" ? "A bit closer — whole body in frame"
-        : framing === "further" ? "A bit further back — head to feet in frame"
-        : framing === "center" ? "Move toward the middle — all of you in the picture"
-        : "Whole body in frame, please";
+    if (!landmarks || !update) return "Step into view";
+    if (update.score === Infinity) {
+      // Framing first (the pose isn't scored then); else a required point MediaPipe isn't sure of.
+      if (framing && framing !== "ok") return FRAMING_SHOWN[framing];
+      if (this.live.walkIssue) return stepAdvice(this.live.walkIssue, walkRole(targetAt(s.poseIndex, this.flow.archetype).key)).shown;
+      return unseenText(update.unseen) ?? "Step into view";
     }
     if (update.matching) return "Hold it…";
-    if (update.awaitingBreak) return BREAK_PROMPT;
-    // The pose's own instruction first, while it's being read out; then what to fix.
-    return (update.armed && this.live.correction?.text) || def.voicePrompt;
+    if (update.awaitingBreak) return BREAK_SHOWN;
+    // What to fix, once the pose's own prompt has been read out; the pose's name is above.
+    return (update.armed && this.live.correction?.text) || "";
   }
 
   // --- actions from the UI ------------------------------------------------------
@@ -865,7 +885,7 @@ class StudioApp {
     this.matcher = new PoseMatcher(def);
     this.matcher.start(performance.now());
     this.coach.start(performance.now());
-    this.live = { landmarks: null, update: null, framing: null, correction: null, arrows: [] };
+    this.live = { landmarks: null, update: null, framing: null, walkIssue: null, correction: null, arrows: [] };
     this.voice.say(def.voicePrompt);
     if (!this.tracker) this.ensureModels().then(() => this.render(), (err) => this.failModels(err));
     if (!this.stopFrames && this.source) this.stopFrames = this.source.onFrame((now) => this.onFrame(now));
@@ -893,8 +913,10 @@ class StudioApp {
       // Score in pixel space so angles aren't distorted by the frame's aspect ratio.
       const px = landmarks ? toPixelLandmarks(landmarks, W, H) : null;
       const framing = px ? framingAdvice(px, W, H) : null;
-      // Framed so the photo would cut them off or be too small: the pose doesn't count (no hold, no "Got it" for a photo that can't pass).
-      const update = this.matcher.update(framing === "ok" ? px : null, now);
+      // Framed so the photo would cut them off or be too small, or a step that doesn't go with the stance: the pose
+      // doesn't count (no hold, no "Got it" for a photo that can't pass).
+      const walkIssue = px && framing === "ok" ? this.walkPairIssue(target.key, px, W, STRIDE_LIMITS.min + LIVE_STRIDE_MARGIN) : null;
+      const update = this.matcher.update(framing === "ok" && !walkIssue ? px : null, now);
       // The jump lifts the feet; keep the ghost on the floor.
       this.ghostFitter.update(px, W, H, now, { holdVertical: target.poseId === "jump" });
       // Coach only when the joints are the problem: not while framing advice (no score then), the break prompt or the hold is up.
@@ -903,7 +925,7 @@ class StudioApp {
       // Shown once the pose's own prompt has had its turn, like the hint.
       const fix = update.armed && coaching.correction && px ? update.joints.find((j) => j.joint === coaching.correction!.joint) : undefined;
       const arrows = fix?.delta != null && px ? correctionArrows(px, fix.joint, fix.delta) : [];
-      this.live = { landmarks, update, framing, correction: coaching.correction, arrows };
+      this.live = { landmarks, update, framing, walkIssue, correction: coaching.correction, arrows };
       if (coaching.speak && coaching.correction) this.voice.say(coaching.correction.text, { interrupt: false });
       if (coaching.progress !== null) this.holdSound.progress(coaching.progress);
       if (update.events.includes("holdStarted")) {
@@ -920,7 +942,9 @@ class StudioApp {
       if (update.events.includes("holdBroken")) this.holdSound.cancel();
       if (update.events.includes("breakNeeded")) this.voice.say(BREAK_PROMPT);
       if (update.events.includes("captured")) void this.capture();
-      if (!update.matching) this.speakFraming(framing, now);
+      if (!update.matching) {
+        this.speakAdvice(framing && framing !== "ok" ? FRAMING_HINTS[framing] : walkIssue ? stepAdvice(walkIssue, walkRole(target.key)).spoken : null, now);
+      }
       this.renderHud();
     }
     this.overlay.draw({
@@ -935,18 +959,17 @@ class StudioApp {
     });
   }
 
-  /** Say "a bit closer" / "further back" once it's held for a moment, at most every few seconds. */
-  private speakFraming(advice: FramingAdvice | null, now: number): void {
-    const v = this.framingVoice;
-    const current = advice ?? "ok";
-    if (current !== v.advice) {
-      v.advice = current;
+  /** Say "a bit closer" / "bigger step" once it's held for a moment, at most every few seconds (null: nothing to say). */
+  private speakAdvice(text: string | null, now: number): void {
+    const v = this.adviceVoice;
+    if (text !== v.text) {
+      v.text = text;
       v.since = now;
       return;
     }
-    if (current === "ok" || now - v.since < FRAMING_VOICE.settleMs || now - v.spokenAt < FRAMING_VOICE.repeatMs) return;
+    if (text === null || now - v.since < FRAMING_VOICE.settleMs || now - v.spokenAt < FRAMING_VOICE.repeatMs) return;
     v.spokenAt = now;
-    this.voice.say(FRAMING_HINTS[current], { interrupt: false });
+    this.voice.say(text, { interrupt: false });
   }
 
   private async switchCamera(): Promise<void> {
@@ -958,7 +981,7 @@ class StudioApp {
       this.exposureLocked = false;
     } catch (err) {
       console.warn("[camera] switch failed", err);
-      this.toast("Couldn't switch camera");
+      this.notify("Couldn't switch camera");
     } finally {
       this.switchingCamera = false;
     }
@@ -1001,7 +1024,7 @@ class StudioApp {
       const H = frame.height;
       // Hitboxes, the matte and the sprite all come from the photo's own landmarks, never the live ones (another moment).
       const landmarks = this.tracker.detectStill(frame);
-      if (!landmarks) throw new RetakeNeeded("Lost you in the photo: strike the pose again", "Let's try that again");
+      if (!landmarks) throw new RetakeNeeded("Lost you — pose again", "Let's try that again");
       const px = toPixelLandmarks(landmarks, W, H);
       const side = this.checkStillPose(target.key, px, target.definition);
       this.checkWalkPair(target.key, px, W);
@@ -1027,7 +1050,7 @@ class StudioApp {
       const plans = await this.renderSprites();
       this.saveDraftSoon();
       this.renderHud();
-      if (plans[target.key]?.flipped) this.toast("Flipped so you face right");
+      if (plans[target.key]?.flipped) this.notify("Flipped to face right");
       await graceDone;
       this.capturing = false;
       this.dispatch({ type: "graceElapsed" });
@@ -1036,11 +1059,11 @@ class StudioApp {
       this.awaitingStill = false;
       this.holdSound.cancel();
       if (err instanceof RetakeNeeded) {
-        this.toast(err.message);
+        this.notify(err.message);
         this.voice.say(err.spoken);
       } else {
         console.warn("[capture] failed", err);
-        this.toast(`Didn't work (${(err as Error).message}). Try again.`);
+        this.notify("Didn't work — try again");
         this.voice.say("Let's try that again");
       }
       await graceDone;
@@ -1054,7 +1077,7 @@ class StudioApp {
     if (check.ok) return check.side;
     console.info(`[capture] ${key}: photo out of the pose (score ${check.score.toFixed(2)})`);
     const fix = check.correction ?? "Strike the pose again";
-    throw new RetakeNeeded(`Not quite in the photo: ${fix.toLowerCase()}`, `Not quite. ${fix}.`);
+    throw new RetakeNeeded(check.correction ?? "Not quite — pose again", `Not quite. ${fix}.`);
   }
 
   /**
@@ -1063,16 +1086,24 @@ class StudioApp {
    * foot, and the step clearly wider (compareStep).
    */
   private checkWalkPair(key: string, px: NormalizedLandmark[], width: number): void {
-    if (key !== "idle" && key !== "walk") return;
-    const other = this.captures.get(key === "idle" ? "walk" : "idle")?.geometry;
-    if (!other) return;
-    const fresh = { landmarks: px, width };
-    const stored = { landmarks: toPixelLandmarks(other.landmarks, other.frameWidth, other.frameHeight), width: other.frameWidth };
-    const issue = key === "walk" ? compareStep(stored, fresh) : compareStep(fresh, stored);
+    const issue = this.walkPairIssue(key, px, width);
     if (!issue) return;
     console.info(`[capture] ${key}: doesn't make a walk with the ${key === "walk" ? "stance" : "step"} (${issue})`);
-    const advice = stepAdvice(issue, key === "walk" ? "step" : "stance");
+    const advice = stepAdvice(issue, walkRole(key));
     throw new RetakeNeeded(advice.shown, advice.spoken);
+  }
+
+  /**
+   * Whether the stance or step in `px` (frame pixels) makes a walk with the other one, if that's taken; null when it
+   * does or isn't. `minGain`: the stride the step must add (more live: LIVE_STRIDE_MARGIN).
+   */
+  private walkPairIssue(key: string, px: NormalizedLandmark[], width: number, minGain?: number): StepIssue | null {
+    if (key !== "idle" && key !== "walk") return null;
+    const other = this.captures.get(key === "idle" ? "walk" : "idle")?.geometry;
+    if (!other) return null;
+    const fresh = { landmarks: px, width };
+    const stored = { landmarks: toPixelLandmarks(other.landmarks, other.frameWidth, other.frameHeight), width: other.frameWidth };
+    return key === "walk" ? compareStep(stored, fresh, minGain) : compareStep(fresh, stored, minGain);
   }
 
   /** The cut-out has to be clean: a rough one is never kept. */
@@ -1080,7 +1111,7 @@ class StudioApp {
     if (!quality.issues.length) return;
     console.info("[capture] rough cut-out", key, quality);
     const advice = cutoutAdvice(quality);
-    throw new RetakeNeeded(`Didn't cut out cleanly (${describeCutoutIssues(quality.issues)}). ${advice}`, `That one didn't cut out cleanly. ${advice}`);
+    throw new RetakeNeeded(advice.shown || "Didn't cut out — again", `That one didn't cut out cleanly. ${advice.spoken}`);
   }
 
   /** After the fighter's first photo: hold the exposure and white balance from now on. */
@@ -1120,13 +1151,17 @@ class StudioApp {
     return plans;
   }
 
-  private toast(text: string): void {
-    const host = this.root.querySelector(".viewport") ?? this.root;
-    const el = document.createElement("div");
-    el.className = "toast";
-    el.textContent = text;
-    host.append(el);
-    setTimeout(() => el.remove(), 2200);
+  /** Show a few words, huge, in place of the hint for a while (every caller is on the live screen). */
+  private notify(text: string): void {
+    if (this.liveNotice) clearTimeout(this.liveNotice.timer);
+    this.liveNotice = {
+      text,
+      timer: setTimeout(() => {
+        this.liveNotice = null;
+        this.renderHud();
+      }, NOTICE_MS),
+    };
+    this.renderHud();
   }
 
   // --- finish ------------------------------------------------------------------------
@@ -1190,7 +1225,10 @@ class StudioApp {
     }
   }
 
-  /** Zip of raw frames + the matting stages, for checking background removal on real rooms. */
+  /**
+   * Zip of raw frames + the matting stages, for checking background removal on
+   * real rooms: each pose's last photo, including one refused for its cut-out.
+   */
   private async downloadDebug(): Promise<void> {
     const files: Record<string, Uint8Array> = {};
     for (const [key, c] of this.debugCaptures) {

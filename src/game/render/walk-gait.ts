@@ -1,9 +1,7 @@
 import { LANDMARK, type LimbSide, type NormalizedLandmark } from "../../shared/fighter-model";
 import type { FrameTween } from "../../simulation/fight-simulation";
-import { STRIDE_LIMITS } from "../../shared/walk-step";
-
 // The studio holds every stance/step pair to the same minimum stride (compareStep), so it rarely slips.
-export { STRIDE_LIMITS };
+import { STRIDE_LIMITS } from "../../shared/walk-step";
 
 /**
  * Walking as a planted shuffle, from the two captures every fighter has: the

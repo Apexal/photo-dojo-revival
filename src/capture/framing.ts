@@ -69,7 +69,7 @@ export const EDGE_MARGIN = 0.15;
 const BOTTOM_MARGIN = 0.05;
 const EDGE_POINTS = [
   LANDMARK.nose, LANDMARK.leftShoulder, LANDMARK.rightShoulder, LANDMARK.leftElbow, LANDMARK.rightElbow,
-  LANDMARK.leftWrist, LANDMARK.rightWrist, LANDMARK.leftHip, LANDMARK.rightHip, LANDMARK.leftKnee, LANDMARK.rightKnee,
+  LANDMARK.leftWrist, LANDMARK.rightWrist, LANDMARK.leftIndex, LANDMARK.rightIndex, LANDMARK.leftPinky, LANDMARK.rightPinky, LANDMARK.leftHip, LANDMARK.rightHip, LANDMARK.leftKnee, LANDMARK.rightKnee,
   LANDMARK.leftAnkle, LANDMARK.rightAnkle, LANDMARK.leftHeel, LANDMARK.rightHeel, LANDMARK.leftFootIndex, LANDMARK.rightFootIndex,
 ];
 

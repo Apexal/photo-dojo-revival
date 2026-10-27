@@ -1,4 +1,4 @@
-import { LANDMARK, type LimbSide, type NormalizedLandmark } from "../shared/fighter-model";
+import { LANDMARK, type LandmarkName, type LimbSide, type NormalizedLandmark } from "../shared/fighter-model";
 import { computeJointAngles, estimateBodyScale, evaluatePose, midHip, type JointError, type JointName, type PoseTarget } from "../shared/pose-geometry";
 import { STICK_SEGMENTS } from "../shared/stick-figure";
 
@@ -35,6 +35,30 @@ export function correctionFor(joint: JointName, delta: number): string {
     case "headTilt":
       return tooSmall ? "Tilt your head more" : "Hold your head straighter";
   }
+}
+
+/** The body part each landmark belongs to, as said to the player (no left or right, for the same reason). */
+function bodyPart(name: LandmarkName): string {
+  const part = name.replace(/^(left|right)/, "");
+  switch (part) {
+    case "Ankle": case "Heel": case "FootIndex": return "feet";
+    case "Knee": return "knees";
+    case "Hip": return "hips";
+    case "Wrist": case "Pinky": case "Index": case "Thumb": return "hands";
+    case "Elbow": return "arms";
+    case "Shoulder": return "shoulders";
+    default: return "head";
+  }
+}
+
+/**
+ * Why a pose can't be scored when its required landmarks aren't clearly seen
+ * (the skeleton may still be drawn: it shows less certain points too). Null when all are seen.
+ */
+export function unseenText(unseen: LandmarkName[]): string | null {
+  if (!unseen.length) return null;
+  const parts = [...new Set(unseen.map(bodyPart))];
+  return parts.length > 2 ? "Can't see you clearly" : `Can't see your ${parts.join(" or ")}`;
 }
 
 type Bone = readonly [number, number];
@@ -307,8 +331,9 @@ export type StillPoseCheck = { ok: true; score: number; side: LimbSide } | { ok:
  * its landmarks (and the attack limb from its best side). `px` is in frame pixels.
  */
 export function checkStillPose(px: NormalizedLandmark[], target: PoseTarget): StillPoseCheck {
-  const { score, side, joints } = evaluatePose(px, target, STILL_TOLERANCE_SLACK);
+  const { score, side, joints, unseen } = evaluatePose(px, target, STILL_TOLERANCE_SLACK);
   if (score <= 1) return { ok: true, score, side };
+  if (unseen.length) return { ok: false, score, correction: unseenText(unseen) };
   const worst = joints.filter((j) => j.delta !== null).sort((a, b) => b.error - a.error)[0];
   return { ok: false, score, correction: worst && worst.error > 1 ? correctionFor(worst.joint, worst.delta!) : null };
 }

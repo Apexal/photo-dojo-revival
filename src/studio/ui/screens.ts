@@ -335,10 +335,13 @@ export function renderScreen(root: HTMLElement, flow: StudioFlowState, data: Stu
         h("div", { class: "viewport" },
           env.camera.video,
           overlay,
+          // Read from across the room: what to do now on top, in a few huge words; then the pose and how far along.
           h("div", { class: "hud" },
-            h("div", { class: "step", dataset: { hud: "step" } }),
-            h("div", { class: "label", dataset: { hud: "label" } }),
-            h("div", { class: "hint", dataset: { hud: "hint" } }),
+            h("div", { class: "hint", dataset: { hud: "hint" }, hidden: true }),
+            h("div", { class: "pose-line" },
+              h("div", { class: "label", dataset: { hud: "label" } }),
+              h("div", { class: "step", dataset: { hud: "step" } }),
+            ),
           ),
           h("img", { class: "cutout", dataset: { hud: "cutout" }, hidden: true, alt: "" }),
         ),
@@ -347,6 +350,8 @@ export function renderScreen(root: HTMLElement, flow: StudioFlowState, data: Stu
             env.canSwitchCamera
               ? h("button", { type: "button", class: "switch", title: "Switch camera", "aria-label": "Switch camera", dataset: { hud: "switch" }, on: { click: () => a.switchCamera() } }, "⇄ Camera")
               : null,
+            // The last photo of each pose, kept or refused (a rough cut-out can't reach the review to be exported).
+            env.debug ? h("button", { type: "button", on: { click: () => a.downloadDebug() } }, "Matting debug (zip)") : null,
           ),
           strip(data, flow.archetype, undefined, current),
           h("p", { class: "muted", dataset: { cameraStatus: "" } }, cameraStatusText(env.camera)),

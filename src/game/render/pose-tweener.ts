@@ -154,9 +154,6 @@ const relativeTo = (l: readonly NormalizedLandmark[], anchor: Point): Normalized
 const frameKey = (f: FrameRef) => `${f.poseId}#${f.variant}`;
 const trustedIn = (l: readonly NormalizedLandmark[], ...indices: number[]) => indices.every((i) => l[i].visibility >= TWEEN_HANDLE_VISIBILITY);
 
-// Left/right label flips live in src/shared/side-flips.ts (the studio checks them too); re-exported here.
-export { sidesFlipped, swapSides };
-
 const dist = (p: Point, q: Point) => Math.hypot(p.x - q.x, p.y - q.y);
 
 // --- limbs that move get their own piece of mesh ----------------------------------
@@ -386,9 +383,10 @@ export class PoseTweener {
 
   /**
    * Back to front: a backing (the fainter capture's body without its cut-loose
-   * limbs, opaque), the leaving capture, the arriving one. Between a capture and
-   * its own stand-in, or between two stand-ins for the same capture, just the
-   * one capture, warped. Null for a hard cut.
+   * limbs, opaque), the leaving capture, the arriving one. A stand-in end draws
+   * its pose's main capture, warped onto the stand-in's own landmarks; when both
+   * ends draw the same capture (a capture and its stand-in, or two stand-ins for
+   * it), it's just that one capture, warped. Null for a hard cut.
    *
    * `single`: no cross-dissolve, just the nearer capture (the leaving one up to
    * halfway, then the arriving one) warped onto the in-between skeleton, over
@@ -399,59 +397,32 @@ export class PoseTweener {
    * body and left a hole.
    */
   layers(tween: FrameTween, adjust?: SkeletonAdjust, single = false): TweenLayer[] | null {
-    const standIn = (f: FrameRef) => this.meshFor(f)?.standIn ?? false;
-    if (standIn(tween.from) || standIn(tween.to)) {
-      // A stand-in has no photo: its pose's main capture is what's drawn.
-      const real = (f: FrameRef): FrameRef => (standIn(f) ? { poseId: f.poseId, variant: 0 } : f);
-      const from = real(tween.from), to = real(tween.to);
-      if (frameKey(from) !== frameKey(to)) return this.layers({ ...tween, from, to }, adjust);
-      return this.warpOnly(tween, from, adjust);
-    }
-    const from = this.deformerFor(tween.from, tween.to), to = this.deformerFor(tween.to, tween.from);
-    if (!from || !to) return null;
-    const skeleton = this.skeleton(tween, adjust)!;
-    const targets = from.handles.map((h) => handlePoint(skeleton, h));
-    const fromPositions = from.deformer.deform(targets), toPositions = to.deformer.deform(targets);
-    const layer = (frame: FrameRef, entry: DeformerEntry, other: FrameRef, positions: Float64Array, alpha: number): TweenLayer => ({
-      frame,
-      id: `${frameKey(frame)}>${frameKey(other)}`,
-      triangles: entry.deformer.triangles,
-      uvs: entry.uvs,
-      positions,
-      alpha,
-    });
-    if (single) {
-      const [near, nearEntry, far, farEntry] = tween.t < 0.5 ? [tween.from, from, tween.to, to] : [tween.to, to, tween.from, from];
-      const shown = layer(near, nearEntry, far, nearEntry === from ? fromPositions : toPositions, 1);
-      const backing = layer(far, farEntry, near, farEntry === from ? fromPositions : toPositions, 1);
-      return [{ ...backing, id: `${backing.id}:core`, triangles: farEntry.coreTriangles }, shown];
+    const skeleton = this.skeleton(tween, adjust);
+    if (!skeleton) return null;
+    const photo = (f: FrameRef): FrameRef => (this.meshFor(f)?.standIn ? { poseId: f.poseId, variant: 0 } : f);
+    const from = photo(tween.from), to = photo(tween.to);
+    if (frameKey(from) === frameKey(to)) {
+      const warped = this.warp(from, frameKey(tween.from) === frameKey(from) ? tween.to : tween.from, skeleton, 1);
+      return warped && [warped.layer];
     }
     // The arriving capture fades in on top; the leaving one fades out under it from halfway,
     // so the body never turns see-through.
-    const leaving = layer(tween.from, from, tween.to, fromPositions, Math.min(1, 2 * (1 - tween.t)));
-    const arriving = layer(tween.to, to, tween.from, toPositions, Math.min(1, 2 * tween.t));
+    const leaving = this.warp(from, to, skeleton, Math.min(1, 2 * (1 - tween.t)));
+    const arriving = this.warp(to, from, skeleton, Math.min(1, 2 * tween.t));
+    if (!leaving || !arriving) return null;
+    const [near, far] = tween.t < 0.5 ? [leaving, arriving] : [arriving, leaving];
+    if (single) return [{ ...far.layer, id: `${far.layer.id}:core`, triangles: far.entry.coreTriangles, alpha: 1 }, { ...near.layer, alpha: 1 }];
     // Where a limb was cut loose and has moved off, its capture has a hole (a photo has
     // nothing behind an arm). The other capture's body, drawn solid underneath, fills it.
-    const [faint, entry] = tween.t < 0.5 ? [arriving, to] : [leaving, from];
-    const backing = { ...faint, id: `${faint.id}:body`, triangles: entry.bodyTriangles, alpha: 1 };
-    return [backing, leaving, arriving];
+    return [{ ...far.layer, id: `${far.layer.id}:body`, triangles: far.entry.bodyTriangles, alpha: 1 }, leaving.layer, arriving.layer];
   }
 
-  /** One capture (`real`, the photo behind both ends) warped along the tween: toward its stand-in, or from one stand-in to another. */
-  private warpOnly(tween: FrameTween, real: FrameRef, adjust?: SkeletonAdjust): TweenLayer[] | null {
-    const other = frameKey(real) === frameKey(tween.to) ? tween.from : tween.to;
-    const entry = this.deformerFor(real, other);
+  /** Capture `frame` (as paired with `other`) warped onto `skeleton`. */
+  private warp(frame: FrameRef, other: FrameRef, skeleton: NormalizedLandmark[], alpha: number): { layer: TweenLayer; entry: DeformerEntry } | null {
+    const entry = this.deformerFor(frame, other);
     if (!entry) return null;
-    const skeleton = this.skeleton(tween, adjust)!;
-    const targets = entry.handles.map((h) => handlePoint(skeleton, h));
-    return [{
-      frame: real,
-      id: `${frameKey(real)}>${frameKey(other)}`,
-      triangles: entry.deformer.triangles,
-      uvs: entry.uvs,
-      positions: entry.deformer.deform(targets),
-      alpha: 1,
-    }];
+    const positions = entry.deformer.deform(entry.handles.map((h) => handlePoint(skeleton, h)));
+    return { entry, layer: { frame, id: `${frameKey(frame)}>${frameKey(other)}`, triangles: entry.deformer.triangles, uvs: entry.uvs, positions, alpha } };
   }
 
   /**

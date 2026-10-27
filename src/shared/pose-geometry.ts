@@ -27,7 +27,7 @@ export interface AngleTarget { joint: JointName; degrees: number; tolerance: num
 export interface PoseTarget {
   angleTargets: AngleTarget[];
   requiredVisibleLandmarks: LandmarkName[];
-  /** Attack poses accept either limb; the matcher records which one was used. */
+  /** Attack poses: the limb that attacks, recorded from the side that matched (every pose accepts either side). */
   attackLimb?: "arm" | "leg";
 }
 
@@ -46,6 +46,8 @@ export interface PoseEvaluation {
   side: LimbSide;
   /** Each target angle for the chosen side (joint names already mirrored), for coaching. */
   joints: JointError[];
+  /** The side's required landmarks that aren't clearly seen (why the score is Infinity). */
+  unseen: LandmarkName[];
 }
 
 export const ANGLE_VISIBILITY_THRESHOLD = 0.3;
@@ -150,15 +152,20 @@ export function mirrorLandmarkName(name: LandmarkName): LandmarkName {
   return name;
 }
 
-export function requiredLandmarksVisible(landmarks: NormalizedLandmark[], names: LandmarkName[]): boolean {
-  return names.every((n) => (landmarks[LANDMARK[n]]?.visibility ?? 0) >= REQUIRED_VISIBILITY_THRESHOLD);
-}
-
 /**
- * Scores landmarks against a pose target. Attack poses are written for the right limb;
- * they are also tried mirrored and the better side wins.
+ * Scores landmarks against a pose target. Poses are written for the right side;
+ * every one is also tried mirrored and the better side wins, so either foot
+ * can lead: a fighter turned toward the camera bends the back knee toward the
+ * lens, where it looks straight, and a right-side-only target would make them
+ * lead with the right foot. `requiredVisibility`:
+ * how sure MediaPipe has to be of each required landmark.
  */
-export function evaluatePose(landmarks: NormalizedLandmark[], target: PoseTarget, toleranceScale = 1): PoseEvaluation {
+export function evaluatePose(
+  landmarks: NormalizedLandmark[],
+  target: PoseTarget,
+  toleranceScale = 1,
+  requiredVisibility = REQUIRED_VISIBILITY_THRESHOLD,
+): PoseEvaluation {
   const angles = computeJointAngles(landmarks);
   const evaluateSide = (side: LimbSide): PoseEvaluation => {
     const mirror = side === "left";
@@ -167,24 +174,35 @@ export function evaluatePose(landmarks: NormalizedLandmark[], target: PoseTarget
       ? target.angleTargets.map((t) => ({ ...t, joint: mirrorJointName(t.joint) }))
       : target.angleTargets;
     const joints = jointErrors(angles, { angleTargets }, toleranceScale);
-    const score = requiredLandmarksVisible(landmarks, required) ? Math.max(0, ...joints.map((j) => j.error)) : Infinity;
-    return { score, side, joints };
+    const unseen = required.filter((n) => (landmarks[LANDMARK[n]]?.visibility ?? 0) < requiredVisibility);
+    const score = unseen.length ? Infinity : Math.max(0, ...joints.map((j) => j.error));
+    return { score, side, joints, unseen };
   };
   const right = evaluateSide("right");
-  if (!target.attackLimb) return right;
   const left = evaluateSide("left");
+  if (left.score === Infinity && right.score === Infinity) return left.unseen.length < right.unseen.length ? left : right;
   return left.score < right.score ? left : right;
 }
 
-/** In a side view, the nose is ahead of the ears in the facing direction. */
+/**
+ * Which way the body faces in a side view: the toes point that way (heel →
+ * foot index) and the nose is ahead of the ears. Both count, by how far they
+ * reach: a fighter looking at the camera from a side-on stance has the nose
+ * almost between the ears, and the head alone would flip with every few pixels.
+ */
 export function detectFacing(landmarks: NormalizedLandmark[]): "left" | "right" {
+  const seen = (l: NormalizedLandmark) => l.visibility >= ANGLE_VISIBILITY_THRESHOLD;
   const nose = landmarks[LANDMARK.nose];
   const le = landmarks[LANDMARK.leftEar];
   const re = landmarks[LANDMARK.rightEar];
-  const ears = [le, re].filter((e) => e.visibility >= ANGLE_VISIBILITY_THRESHOLD);
+  const ears = [le, re].filter(seen);
   const reference =
     ears.length === 2 ? midpoint(le, re) : ears.length === 1 ? ears[0] : midShoulder(landmarks);
-  return nose.x >= reference.x ? "right" : "left";
+  let ahead = nose.x - reference.x;
+  for (const [heel, toe] of [[LANDMARK.leftHeel, LANDMARK.leftFootIndex], [LANDMARK.rightHeel, LANDMARK.rightFootIndex]]) {
+    if (seen(landmarks[heel]) && seen(landmarks[toe])) ahead += landmarks[toe].x - landmarks[heel].x;
+  }
+  return ahead >= 0 ? "right" : "left";
 }
 
 /** Mirror x around the frame width. Anatomical sides stay the same: the person's right arm is still their right arm. */

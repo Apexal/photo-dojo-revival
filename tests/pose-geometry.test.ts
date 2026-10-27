@@ -110,9 +110,8 @@ describe("pose definitions", () => {
     }
   });
 
-  it("attack poses accept either limb and record which", () => {
-    const right = buildStickFigureLandmarks("punch");
-    // Swap limb landmarks so the left arm is the extended one.
+  /** The same body with every left/right label swapped (the other limb doing each thing). */
+  const otherSide = (right: NormalizedLandmark[]) => {
     const left = right.map((l) => ({ ...l }));
     for (const name of Object.keys(LANDMARK) as LandmarkName[]) {
       if (!name.startsWith("left")) continue;
@@ -120,6 +119,12 @@ describe("pose definitions", () => {
       left[LANDMARK[name]] = right[LANDMARK[mirror]];
       left[LANDMARK[mirror]] = right[LANDMARK[name]];
     }
+    return left;
+  };
+
+  it("attack poses accept either limb and record which", () => {
+    const right = buildStickFigureLandmarks("punch");
+    const left = otherSide(right);
     expect(evaluatePose(right, POSE_DEFINITIONS.punch).side).toBe("right");
     const leftEval = evaluatePose(left, POSE_DEFINITIONS.punch);
     expect(leftEval.side).toBe("left");
@@ -127,14 +132,24 @@ describe("pose definitions", () => {
     // The breakdown is for the side that won, under that side's joint names.
     expect(leftEval.joints.map((j) => j.joint)).toEqual(["leftElbow", "leftShoulderElevation", "rightElbow"]);
     expect(Math.max(...leftEval.joints.map((j) => j.error))).toBeCloseTo(leftEval.score);
-    // Non-attack poses don't get mirrored.
-    expect(POSE_DEFINITIONS.idle.attackLimb).toBeUndefined();
+  });
+
+  it("every pose accepts either side: the left foot can lead", () => {
+    for (const pose of MAIN_POSES) {
+      const score = evaluatePose(otherSide(pose.landmarks), pose.def).score;
+      expect(score, pose.name).toBeLessThan(0.9);
+    }
   });
 
   it("requires the listed landmarks to be visible", () => {
     const lm = buildStickFigureLandmarks("idle");
     lm[LANDMARK.leftAnkle].visibility = 0.2;
     expect(evaluatePose(lm, POSE_DEFINITIONS.idle).score).toBe(Infinity);
+    // Drawn (≥ 0.3) but not sure enough to score: named, so the hint can say which.
+    lm[LANDMARK.leftAnkle].visibility = 0.4;
+    expect(evaluatePose(lm, POSE_DEFINITIONS.idle)).toMatchObject({ score: Infinity, unseen: ["leftAnkle"] });
+    lm[LANDMARK.leftAnkle].visibility = 0.9;
+    expect(evaluatePose(lm, POSE_DEFINITIONS.idle).unseen).toEqual([]);
   });
 
   it("has a ghost path and prompt for every pose", () => {
@@ -160,6 +175,13 @@ describe("pose definitions", () => {
 });
 
 describe("facing", () => {
+  it("goes by the feet too: a side-on fighter looking at the camera still faces forward", () => {
+    const lm = buildStickFigureLandmarks("idle");
+    lm[LANDMARK.nose].x = (lm[LANDMARK.leftEar].x + lm[LANDMARK.rightEar].x) / 2 - 5;
+    expect(detectFacing(lm)).toBe("right");
+    expect(detectFacing(flipLandmarksHorizontally(lm, 512))).toBe("left");
+  });
+
   it("detects facing from nose vs ears, and flipping reverses it", () => {
     const lm = buildStickFigureLandmarks("idle");
     expect(detectFacing(lm)).toBe("right");

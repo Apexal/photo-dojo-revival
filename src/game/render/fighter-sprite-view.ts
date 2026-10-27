@@ -98,7 +98,8 @@ export class FighterSpriteView {
   /** The last solve: the display can refresh faster than the 60 Hz simulation. */
   private lastTween: { tween: FrameTween; swing: LimbSide | null; single: boolean; layers: TweenLayer[] | null } | null = null;
   /** Undefined until the first render that can use it (walkGait). */
-  private gait: (WalkGait & { torso: number }) | null | undefined = undefined;
+  private gait: WalkGait | null | undefined = undefined;
+  private readonly torso: number;
   /** The capture on screen last frame (the nearer end of a morph): what a struck fighter holds. */
   private lastShown: FrameRef | null = null;
   private depth = 0;
@@ -115,6 +116,7 @@ export class FighterSpriteView {
     this.shadow = scene.add.ellipse(0, 0, 150, 22, 0x000000, 0.35);
     this.sprite = scene.add.image(0, 0, textureKey(prefix, "idle"));
     if (tint !== undefined) this.sprite.setTint(tint);
+    this.torso = torsoLength(geometry.idle.landmarks);
     this.meshes = new TweenMeshes(scene, (frame) => this.frameTexture(frame), tint);
     this.tweener = scene.renderer.type === Phaser.WEBGL ? new PoseTweener((frame) => this.tweenSource(frame)) : null;
     // Build every mesh now: a few ms per pose here beats a hitch on the first punch.
@@ -137,8 +139,12 @@ export class FighterSpriteView {
     if (tweening && this.tweener) {
       const gait = this.walkGait();
       const stride = gait?.update(frame, { walking: state.action === "walk", x: state.position.x, facing: state.facing }, state.action === "idle") ?? null;
-      tween = this.transitions.update(frame, frameOf(state), tweenOf(state) ?? (this.grip ? handshakeShakeOf(state, this.grip.offeredAt) : null), idleSwayOf(state), stride?.tween);
+      // Shaking hands, the arm is aimed at the other hand from the reach on (GRIP), not held as photographed.
+      const held = this.grip && state.action === "handshake" ? GRIP : frameOf(state);
+      tween = this.transitions.update(frame, held, tweenOf(state) ?? (this.grip ? handshakeShakeOf(state, this.grip.offeredAt) : null), idleSwayOf(state), stride?.tween);
       if (stride && tween === stride.tween) step = stride;
+      // GRIP has no photo of its own: even held still, it's the handshake capture warped.
+      if (!tween && held === GRIP) tween = { from: GRIP, to: GRIP, t: 0 };
     } else {
       this.transitions.reset();
       this.gait?.reset();
@@ -233,6 +239,7 @@ export class FighterSpriteView {
       ...allTweens(this.geometry.archetype),
       { from: { poseId: "idle", variant: 0 }, to: { poseId: "idle", variant: 1 } }, // the idle sway
       { from: { poseId: "handshake", variant: 1 }, to: { poseId: "handshake", variant: 2 } }, // the intro's shake
+      { from: GRIP, to: GRIP },
       ...SOFT_CUTS.flatMap((cut) => versions(cut.from).flatMap((from) => versions(cut.to).map((to) => ({ from, to })))),
     ];
   }
@@ -244,8 +251,7 @@ export class FighterSpriteView {
     const single = step !== null;
     const same = last && last.tween.t === tween.t && last.swing === swing && last.single === single && sameFrame(last.tween.from, tween.from) && sameFrame(last.tween.to, tween.to);
     if (!same) {
-      const torso = this.gait?.torso ?? 0;
-      const adjust = swing ? (skeleton: NormalizedLandmark[]) => stepPose(skeleton, tween.t, swing, torso) : undefined;
+      const adjust = swing ? (skeleton: NormalizedLandmark[]) => stepPose(skeleton, tween.t, swing, this.torso) : undefined;
       this.lastTween = { tween, swing, single, layers: this.tweener!.layers(tween, adjust, single) };
     }
     return this.lastTween!.layers;
@@ -256,11 +262,10 @@ export class FighterSpriteView {
    * when this fighter's stance and step can't make one (no WebGL, or a step no
    * wider than the stance): the walk cycle's soft cuts stand in.
    */
-  private walkGait(): (WalkGait & { torso: number }) | null {
+  private walkGait(): WalkGait | null {
     if (this.gait === undefined) {
-      const torso = torsoLength(this.geometry.idle.landmarks);
-      const shape = this.tweener && GaitShape.measure((w) => this.tweener!.skeleton({ from: STANCE, to: STEP, t: w }), torso);
-      this.gait = shape ? Object.assign(new WalkGait(shape), { torso }) : null;
+      const shape = this.tweener && GaitShape.measure((w) => this.tweener!.skeleton({ from: STANCE, to: STEP, t: w }), this.torso);
+      this.gait = shape ? new WalkGait(shape) : null;
     }
     return this.gait;
   }
@@ -273,13 +278,16 @@ export class FighterSpriteView {
   /**
    * A capture's landmarks, anchor and alpha mask (read back from its loaded
    * texture). The shaking hand is the handshake capture warped onto a raised
-   * (variant 1) and a lowered (variant 2) hand.
+   * (variant 1) and a lowered (variant 2) hand, and onto the aimed one between
+   * them (GRIP).
    */
   private tweenSource(frame: FrameRef): TweenSource | null {
     if (frame.poseId === "handshake" && frame.variant > 0) {
       const grip = this.grip;
       const capture = grip && this.tweenSource({ poseId: "handshake", variant: 0 });
-      return capture ? { ...capture, landmarks: shakenGrip(grip, frame.variant === 1 ? -1 : 1), standIn: true } : null;
+      if (!capture) return null;
+      const landmarks = frame.variant === GRIP.variant ? grip.landmarks : shakenGrip(grip, frame.variant === 1 ? -1 : 1);
+      return { ...capture, landmarks, standIn: true };
     }
     const mask = readAlpha(this.sprite.scene, this.frameTexture(frame));
     if (!mask) return null;
@@ -287,5 +295,8 @@ export class FighterSpriteView {
     return { mask, landmarks: frameGeometry(this.geometry, frame.poseId, frame.variant).landmarks, anchor };
   }
 }
+
+/** The handshake with the arm aimed at where the hands meet (HandshakeGrip.landmarks): a stand-in, like the shake's raised and lowered hands (variants 1 and 2). */
+const GRIP: FrameRef = { poseId: "handshake", variant: 3 };
 
 const sameFrame = (a: FrameRef, b: FrameRef) => a.poseId === b.poseId && a.variant === b.variant;
