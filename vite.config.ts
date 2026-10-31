@@ -4,10 +4,10 @@ import basicSsl from "@vitejs/plugin-basic-ssl";
 import { defaultClientConditions, type Connect, type Plugin } from "vite";
 import { defineConfig } from "vitest/config";
 
-/** Serve /capture, /studio and /about like Cloudflare Pages does (pretty URLs for their .html files). */
+/** Serve /capture, /studio and /about like Cloudflare Pages does (pretty URLs for their .html files), and /lab in dev. */
 function prettyUrls(): Plugin {
   const rewrite: Connect.NextHandleFunction = (req, _res, next) => {
-    const match = req.url?.match(/^\/(capture|studio|about)\/?(\?.*)?$/);
+    const match = req.url?.match(/^\/(capture|studio|about|lab)\/?(\?.*)?$/);
     if (match) req.url = `/${match[1]}.html${match[2] ?? ""}`;
     next();
   };

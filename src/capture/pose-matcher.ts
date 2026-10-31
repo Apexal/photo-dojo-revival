@@ -14,13 +14,11 @@ export interface MatcherOptions {
    * still holding the previous pose can't trigger the next one if they look alike.
    */
   requireBreak: boolean;
+  /** How sure MediaPipe must be of each required landmark (see LIVE_VISIBILITY_MARGIN). */
+  requiredVisibility: number;
+  /** Scales every target's tolerance (the lab tries looser or stricter matching). */
+  toleranceScale: number;
 }
-
-export const DEFAULT_MATCHER_OPTIONS: MatcherOptions = {
-  holdMs: 500,
-  armAfterMs: 1500,
-  requireBreak: true,
-};
 
 /**
  * Live, the required landmarks must be this much surer than the photo needs
@@ -30,6 +28,14 @@ export const DEFAULT_MATCHER_OPTIONS: MatcherOptions = {
  * LIVE_STRIDE_MARGIN, framing's EDGE_MARGIN), so what goes green passes as a photo.
  */
 export const LIVE_VISIBILITY_MARGIN = 0.1;
+
+export const DEFAULT_MATCHER_OPTIONS: MatcherOptions = {
+  holdMs: 500,
+  armAfterMs: 1500,
+  requireBreak: true,
+  requiredVisibility: REQUIRED_VISIBILITY_THRESHOLD + LIVE_VISIBILITY_MARGIN,
+  toleranceScale: 1,
+};
 
 /**
  * How far (torso lengths) any clearly seen body point may drift from where it
@@ -111,7 +117,7 @@ export class PoseMatcher {
 
   /** `px`: the person's landmarks in frame pixels, or null when nobody (usable) is in view. */
   update(px: NormalizedLandmark[] | null, nowMs: number): MatcherUpdate {
-    const evaluation = px ? evaluatePose(px, this.target, 1, REQUIRED_VISIBILITY_THRESHOLD + LIVE_VISIBILITY_MARGIN) : null;
+    const evaluation = px ? evaluatePose(px, this.target, this.options.toleranceScale, this.options.requiredVisibility) : null;
     const score = evaluation?.score ?? Infinity;
     const joints = evaluation?.joints ?? [];
     const unseen = evaluation?.unseen ?? [];

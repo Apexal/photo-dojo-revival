@@ -1,6 +1,6 @@
 import type { InferenceSession, Tensor } from "onnxruntime-web";
 import type { NormalizedLandmark } from "../shared/fighter-model";
-import { MODEL_SIZE, applyAlpha, keepPerson, personCropRect, resampleFloat, stretchToUnit, toModelInput, type Rect } from "./matting";
+import { CROP_MARGINS, MODEL_SIZE, applyAlpha, keepPerson, personCropRect, resampleFloat, stretchToUnit, toModelInput, type CropMargins, type Rect } from "./matting";
 import { createCanvas, context2d } from "../shared/canvas";
 import { toPixelLandmarks } from "./sprite-normalizer";
 import { MATTING_MODEL_FP16_URL, MATTING_MODEL_URL, ORT_RUNTIME_BASE, ORT_WASM_URL, loadModelBytes, type DownloadProgress } from "./vision-runtime";
@@ -35,15 +35,19 @@ async function gpuHasF16(): Promise<boolean> {
   }
 }
 
+/** The lab (/lab) can pin a backend or turn fp16 off; the studio picks for itself. */
+export interface MattingPreference { backend?: MattingBackend; fp16?: boolean }
+
 /**
  * Which model on which backend, in order of preference. The fp16 model needs about half the memory on
  * WebGPU (iPhones ran out of it with fp32), but on WASM it's several times slower than fp32, so WASM always gets fp32.
  */
-async function backendPlan(): Promise<{ backend: MattingBackend; url: string }[]> {
+async function backendPlan(prefer: MattingPreference = {}): Promise<{ backend: MattingBackend; url: string }[]> {
   const wasm = { backend: "wasm" as const, url: MATTING_MODEL_URL };
-  if (typeof navigator === "undefined" || !("gpu" in navigator)) return [wasm];
-  const fp16 = MATTING_MODEL_FP16_URL && (await gpuHasF16());
-  return [{ backend: "webgpu", url: fp16 ? MATTING_MODEL_FP16_URL : MATTING_MODEL_URL }, wasm];
+  if (prefer.backend === "wasm" || typeof navigator === "undefined" || !("gpu" in navigator)) return [wasm];
+  const fp16 = MATTING_MODEL_FP16_URL && prefer.fp16 !== false && (await gpuHasF16());
+  const webgpu = { backend: "webgpu" as const, url: fp16 ? MATTING_MODEL_FP16_URL : MATTING_MODEL_URL };
+  return prefer.backend === "webgpu" ? [webgpu] : [webgpu, wasm];
 }
 
 /**
@@ -52,15 +56,15 @@ async function backendPlan(): Promise<{ backend: MattingBackend; url: string }[]
  * Runs on WebGPU where the browser has it, otherwise on WASM (much slower).
  */
 export class BackgroundRemover {
-  private constructor(private readonly ort: Ort, private readonly session: InferenceSession, readonly backend: MattingBackend) {}
+  private constructor(private readonly ort: Ort, private readonly session: InferenceSession, readonly backend: MattingBackend, readonly fp16: boolean) {}
 
   /**
    * `onProgress` reports the model download (instant from the model cache on later visits), `onWasmProgress` ONNX Runtime's binary.
    * Downloads start at once; the session is only built once `after` settles, so it doesn't land on top of
    * the pose models being built (memory peaks then, and iOS kills tabs that go over).
    */
-  static async create(onProgress?: DownloadProgress, onWasmProgress?: DownloadProgress, after?: Promise<unknown>): Promise<BackgroundRemover> {
-    const plan = await backendPlan();
+  static async create(onProgress?: DownloadProgress, onWasmProgress?: DownloadProgress, after?: Promise<unknown>, prefer?: MattingPreference): Promise<BackgroundRemover> {
+    const plan = await backendPlan(prefer);
     const [ort, wasm, downloaded] = await Promise.all([
       import("onnxruntime-web"),
       loadModelBytes(ORT_WASM_URL, onWasmProgress),
@@ -80,12 +84,12 @@ export class BackgroundRemover {
         // ORT has its own copies now: let the downloaded bytes go before anything else allocates.
         model = null;
         ort.env.wasm.wasmBinary = undefined;
-        const remover = new BackgroundRemover(ort, session, backend);
+        const remover = new BackgroundRemover(ort, session, backend, url === MATTING_MODEL_FP16_URL);
         // The first WebGPU run compiles shaders (seconds): do it while loading, not on the first snapshot.
         // On WASM a run costs as much as a real one, so don't. Nor on iOS, where a 1024² run on top of
         // everything loading is what pushes the tab over its memory limit: the first snapshot is slower there.
         if (backend === "webgpu" && !isIOS()) await remover.infer(new Float32Array(3 * MODEL_SIZE * MODEL_SIZE));
-        console.info(`[matting] ISNet (${url === MATTING_MODEL_FP16_URL ? "fp16" : "fp32"}) on ${backend}`);
+        console.info(`[matting] ISNet (${remover.fp16 ? "fp16" : "fp32"}) on ${backend}`);
         return remover;
       } catch (err) {
         console.warn(`[matting] ${backend} unavailable`, err);
@@ -109,13 +113,13 @@ export class BackgroundRemover {
 
   /**
    * The cut-out (RGBA, crop-sized, alpha = person) and the crop it covers.
-   * `landmarks` are MediaPipe-normalized.
+   * `landmarks` are MediaPipe-normalized. `cropMargins` is for the lab.
    */
-  async cutout(frame: HTMLCanvasElement | OffscreenCanvas, landmarks: NormalizedLandmark[]): Promise<{ foreground: Uint8ClampedArray<ArrayBuffer>; debug: MatteDebug }> {
+  async cutout(frame: HTMLCanvasElement | OffscreenCanvas, landmarks: NormalizedLandmark[], cropMargins: CropMargins = CROP_MARGINS): Promise<{ foreground: Uint8ClampedArray<ArrayBuffer>; debug: MatteDebug }> {
     const W = frame.width;
     const H = frame.height;
     const px = toPixelLandmarks(landmarks, W, H);
-    const rect = personCropRect(px, W, H);
+    const rect = personCropRect(px, W, H, cropMargins);
 
     const rgba = context2d(frame).getImageData(rect.x, rect.y, rect.width, rect.height).data;
 

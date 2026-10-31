@@ -17,15 +17,20 @@ export type { Rect };
 
 const VISIBLE = 0.3;
 
+/** The crop's margins around the landmarks, in torso lengths. */
+export interface CropMargins { side: number; top: number; bottom: number }
+
+export const CROP_MARGINS: CropMargins = { side: 0.6, top: 0.8, bottom: 0.35 };
+
 /** Region around the person: landmark bounds plus margins in torso lengths (more above for hair). */
-export function personCropRect(landmarksPx: NormalizedLandmark[], frameWidth: number, frameHeight: number): Rect {
+export function personCropRect(landmarksPx: NormalizedLandmark[], frameWidth: number, frameHeight: number, margins: CropMargins = CROP_MARGINS): Rect {
   const visible = landmarksPx.filter((l) => l.visibility >= VISIBLE);
   const pts = visible.length ? visible : landmarksPx;
   const torso = torsoLength(landmarksPx) || Math.max(frameWidth, frameHeight) / 6;
-  const minX = Math.min(...pts.map((p) => p.x)) - 0.6 * torso;
-  const maxX = Math.max(...pts.map((p) => p.x)) + 0.6 * torso;
-  const minY = Math.min(...pts.map((p) => p.y)) - 0.8 * torso;
-  const maxY = Math.max(...pts.map((p) => p.y)) + 0.35 * torso;
+  const minX = Math.min(...pts.map((p) => p.x)) - margins.side * torso;
+  const maxX = Math.max(...pts.map((p) => p.x)) + margins.side * torso;
+  const minY = Math.min(...pts.map((p) => p.y)) - margins.top * torso;
+  const maxY = Math.max(...pts.map((p) => p.y)) + margins.bottom * torso;
   const x = Math.max(0, Math.floor(minX));
   const y = Math.max(0, Math.floor(minY));
   return {
@@ -152,9 +157,9 @@ export function skeletonSeeds(landmarks: NormalizedLandmark[], width: number, he
  * The model's alpha (0..1, crop-sized) as bytes, keeping only regions
  * connected to the skeleton. Landmarks are in crop pixels.
  */
-export function keepPerson(alpha: Float32Array, width: number, height: number, landmarks: NormalizedLandmark[]): Uint8ClampedArray {
+export function keepPerson(alpha: Float32Array, width: number, height: number, landmarks: NormalizedLandmark[], regionAlpha = REGION_ALPHA): Uint8ClampedArray {
   const region = new Uint8Array(alpha.length);
-  for (let i = 0; i < alpha.length; i++) region[i] = alpha[i] >= REGION_ALPHA ? 1 : 0;
+  for (let i = 0; i < alpha.length; i++) region[i] = alpha[i] >= regionAlpha ? 1 : 0;
   let kept = keepConnected(region, width, height, skeletonSeeds(landmarks, width, height));
   if (!kept.includes(1)) kept = region; // the landmarks missed the matte entirely: trust the model
   const out = new Uint8ClampedArray(alpha.length);

@@ -5,6 +5,24 @@ import { POSE_MODEL_URL, VISION_FILESET, loadModelBytes, prefetchWasm, withDeleg
 /** Live detection throttle: the heavy model can't keep up with every video frame on every computer. */
 export const LIVE_DETECTION_HZ = 15;
 
+/** What the lab (/lab) can change; the studio uses the defaults. */
+export interface PoseTrackerOptions {
+  modelUrl: string;
+  /** "auto": the GPU, falling back to the CPU. */
+  delegate: "auto" | "GPU" | "CPU";
+  minPoseDetectionConfidence: number;
+  minPosePresenceConfidence: number;
+  minTrackingConfidence: number;
+}
+
+export const DEFAULT_POSE_TRACKER_OPTIONS: PoseTrackerOptions = {
+  modelUrl: POSE_MODEL_URL,
+  delegate: "auto",
+  minPoseDetectionConfidence: 0.5,
+  minPosePresenceConfidence: 0.5,
+  minTrackingConfidence: 0.5,
+};
+
 /** The first inference compiles shaders / spins up WASM (seconds); do it before the first snapshot. */
 function warmUp(landmarker: PoseLandmarker): void {
   const blank = document.createElement("canvas");
@@ -33,30 +51,31 @@ export class PoseTracker {
    * `onProgress` reports the model download (instant from the model cache on
    * later visits), `onWasmProgress` the MediaPipe runtime's; both download at once.
    */
-  static async create(onProgress?: DownloadProgress, onWasmProgress?: DownloadProgress): Promise<PoseTracker> {
-    const [model] = await Promise.all([loadModelBytes(POSE_MODEL_URL, onProgress), prefetchWasm(onWasmProgress)]);
-    const [video, still] = await Promise.all([PoseTracker.createLandmarker("VIDEO", model), PoseTracker.createLandmarker("IMAGE", model)]);
+  static async create(onProgress?: DownloadProgress, onWasmProgress?: DownloadProgress, options: Partial<PoseTrackerOptions> = {}): Promise<PoseTracker> {
+    const o = { ...DEFAULT_POSE_TRACKER_OPTIONS, ...options };
+    const [model] = await Promise.all([loadModelBytes(o.modelUrl, onProgress), prefetchWasm(onWasmProgress)]);
+    const [video, still] = await Promise.all([PoseTracker.createLandmarker("VIDEO", model, o), PoseTracker.createLandmarker("IMAGE", model, o)]);
     warmUp(still);
     return new PoseTracker(video, still);
   }
 
-  private static createLandmarker(runningMode: "VIDEO" | "IMAGE", model: Uint8Array<ArrayBuffer>): Promise<PoseLandmarker> {
-    return withDelegateFallback((delegate) =>
+  private static createLandmarker(runningMode: "VIDEO" | "IMAGE", model: Uint8Array<ArrayBuffer>, o: PoseTrackerOptions): Promise<PoseLandmarker> {
+    const create = (delegate: "GPU" | "CPU") =>
       PoseLandmarker.createFromOptions(VISION_FILESET, {
         // A copy each: MediaPipe may take over the buffer it's given.
         baseOptions: { modelAssetBuffer: model.slice(), delegate },
         runningMode,
         numPoses: 1,
-        minPoseDetectionConfidence: 0.5,
-        minPosePresenceConfidence: 0.5,
-        minTrackingConfidence: 0.5,
-      }),
-    );
+        minPoseDetectionConfidence: o.minPoseDetectionConfidence,
+        minPosePresenceConfidence: o.minPosePresenceConfidence,
+        minTrackingConfidence: o.minTrackingConfidence,
+      });
+    return o.delegate === "auto" ? withDelegateFallback(create) : create(o.delegate);
   }
 
   /** Whether enough time has passed since the last live detection (throttled to ~15 Hz). */
-  shouldDetect(nowMs: number): boolean {
-    return nowMs - this.lastDetectionAt >= 1000 / LIVE_DETECTION_HZ - 1;
+  shouldDetect(nowMs: number, hz = LIVE_DETECTION_HZ): boolean {
+    return nowMs - this.lastDetectionAt >= 1000 / hz - 1;
   }
 
   detectLive(video: HTMLVideoElement, nowMs: number): NormalizedLandmark[] | null {
