@@ -125,7 +125,7 @@ describe("acrobat: flying knee", () => {
     expect(high).toContainEqual(expect.objectContaining({ type: "hit", attack: "flyingKnee", blocked: true }));
   });
 
-  it("frame advantage: +2 on hit, −4 on block", () => {
+  it("frame advantage: +1 on hit, −4 on block", () => {
     const isFree = (a: string) => a === "idle" || a === "walk" || a === "block";
     const advantage = (guard: InputFrame) => {
       const sim = fightingSim("acrobat", 150);
@@ -140,7 +140,7 @@ describe("acrobat: flying knee", () => {
       }
       return dFree - aFree;
     };
-    expect(advantage(idle)).toBe(2);
+    expect(advantage(idle)).toBe(1);
     expect(advantage(input({ right: true }))).toBe(-4);
   });
 });

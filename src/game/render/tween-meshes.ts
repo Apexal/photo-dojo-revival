@@ -24,6 +24,9 @@ export class TweenMeshes {
   show(layers: TweenLayer[], facing: 1 | -1, at: { x: number; y: number }, depth: number, scale = 1): void {
     const shown = layers.map((layer, i) => {
       const mesh = this.meshFor(layer);
+      // The capture's texture can change under a mesh (a talking stand-in: talking-mouth-view.ts).
+      const texture = this.textureFor(layer.frame);
+      if (mesh.texture.key !== texture) mesh.setTexture(texture);
       // Write screen-space vertex positions straight in (vx/vy), mirrored for P2. x/y
       // match them through the mesh's orthographic view, so a recompute changes nothing.
       for (let k = 0; k < mesh.vertices.length; k++) {

@@ -5,6 +5,7 @@ import type { FrameTween } from "../../simulation/fight-simulation";
 import type { Point } from "./arap";
 import { PoseTweener, breathingStance, type FrameRef, type TweenSource } from "./pose-tweener";
 import { TweenMeshes, readAlpha } from "./tween-meshes";
+import { JawTextures, Voice } from "./talking-mouth-view";
 
 export type PreviewPose = "flex" | "win";
 
@@ -41,6 +42,10 @@ export class PosePreview {
   private morph: { from: PreviewPose; start: number } | null = null;
   private breathStart: number;
   private shownKey: string | null = null;
+  /** The line it's saying (a pick's victory line), and its captures with the jaw dropped to match. */
+  private readonly voice = new Voice();
+  private readonly jaws: JawTextures;
+  private open = 0;
 
   constructor(
     scene: Phaser.Scene,
@@ -55,7 +60,8 @@ export class PosePreview {
     now: number,
   ) {
     this.sprite = scene.add.image(at.x, at.y, captures[pose].texture).setScale(scale).setFlipX(facing === -1).setDepth(depth);
-    this.meshes = new TweenMeshes(scene, (frame) => captures[poseOf(frame)].texture);
+    this.jaws = new JawTextures(scene);
+    this.meshes = new TweenMeshes(scene, (frame) => this.texture(poseOf(frame)));
     this.tweener = scene.renderer.type === Phaser.WEBGL ? new PoseTweener((frame) => this.tweenSource(scene, frame)) : null;
     this.breathStart = now;
   }
@@ -66,7 +72,13 @@ export class PosePreview {
     this.pose = pose;
   }
 
+  /** Say a voice line (just started playing): the jaw drops along with it. */
+  say(sound: Phaser.Sound.BaseSound): void {
+    this.voice.say(sound);
+  }
+
   update(now: number): void {
+    this.open = this.voice.openness;
     let tween: FrameTween;
     if (this.morph && now - this.morph.start < MORPH_FRAMES * FRAME_MS) {
       const x = (now - this.morph.start) / (MORPH_FRAMES * FRAME_MS);
@@ -90,15 +102,23 @@ export class PosePreview {
   destroy(): void {
     this.sprite.destroy();
     this.meshes.destroy();
+    this.jaws.destroy();
   }
 
   private showSprite(pose: PreviewPose): void {
-    const { texture, anchor } = this.captures[pose];
+    const { anchor } = this.captures[pose];
+    const texture = this.texture(pose);
     if (texture !== this.shownKey) {
       this.shownKey = texture;
       this.sprite.setTexture(texture).setOrigin(anchor.x / SPRITE_CANVAS_SIZE, anchor.y / SPRITE_CANVAS_SIZE);
     }
     this.sprite.setVisible(true);
+  }
+
+  /** The texture a pose is drawn with: its capture's, or that capture talking mid-line. */
+  private texture(pose: PreviewPose): string {
+    const { texture, landmarks } = this.captures[pose];
+    return this.jaws.textureFor(texture, () => landmarks, this.open);
   }
 
   private tweenSource(scene: Phaser.Scene, frame: FrameRef): TweenSource | null {

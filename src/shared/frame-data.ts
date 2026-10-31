@@ -63,20 +63,20 @@ export interface AttackData {
  * hitstun − (active − 1 + recovery) − 1 on hit, and the same with blockstun on block:
  *
  *              on hit   on block
- *   punch        +3        −3     safe: too little for a 4f punch to punish; high: whiffs over a crouching guard
- *   kick         +2        −6     the long one: lunges 60 px on its active frames, so it beats a punch at
+ *   punch        +2        −3     safe: too little for a 4f punch to punish; high: whiffs over a crouching guard
+ *   kick         +1        −6     the long one: lunges 60 px on its active frames, so it beats a punch at
  *                                 long range; punishable up close, safe blocked at the tip (pushback 20)
- *   uppercut     +2        −8     anti-air: airborne attacks can't hit it during startup/active; very punishable on block
- *   low kick     +1        −4     quick poke along the ground (lunges 20 px); must be blocked crouching
+ *   uppercut     +1        −8     anti-air: airborne attacks can't hit it during startup/active; very punishable on block
+ *   low kick      0        −4     quick poke along the ground (lunges 20 px); must be blocked crouching
  *   charge      knockdown −16     brawler: a slow wind-up, then 300 px across the stage; blocking it is a free punish
- *   flying knee   +2        −4     acrobat: an overhead from the ground (lunges 80 px), so a crouching guard can't sit still
+ *   flying knee   +1        −4     acrobat: an overhead from the ground (lunges 80 px), so a crouching guard can't sit still
  *
  * The jump kick is an overhead (must be blocked standing); landing ends it, so its
  * advantage depends on how high it hits.
  */
 export const ATTACKS: Record<AttackId, AttackData> = {
   punch: {
-    startup: 4, active: 3, recovery: 10, damage: 8, hitstun: 16, blockstun: 10, pushback: 6,
+    startup: 4, active: 3, recovery: 10, damage: 8, hitstun: 15, blockstun: 10, pushback: 6,
     limb: "arm", level: "high", pose: { poseId: "punch", variant: 0 },
     sequence: [
       { fromPoseId: "idle", toPoseId: "punch", frames: 4, phase: "startup" },
@@ -86,7 +86,7 @@ export const ATTACKS: Record<AttackId, AttackData> = {
     ],
   },
   kick: {
-    startup: 7, active: 4, recovery: 16, damage: 12, hitstun: 22, blockstun: 14, pushback: 20, advance: 60,
+    startup: 7, active: 4, recovery: 16, damage: 12, hitstun: 21, blockstun: 14, pushback: 20, advance: 60,
     limb: "leg", level: "mid", pose: { poseId: "kick", variant: 0 },
     sequence: [
       { fromPoseId: "idle", toPoseId: "kick", frames: 7, phase: "startup" },
@@ -96,7 +96,7 @@ export const ATTACKS: Record<AttackId, AttackData> = {
     ],
   },
   uppercut: {
-    startup: 6, active: 4, recovery: 18, damage: 11, hitstun: 24, blockstun: 14, pushback: 12,
+    startup: 6, active: 4, recovery: 18, damage: 11, hitstun: 23, blockstun: 14, pushback: 12,
     limb: "arm", level: "mid", pose: { poseId: "punch", variant: 1 }, knockdown: "air",
     sequence: [
       // Hard cut out of the crouch: the pop up is what reads as an anti-air.
@@ -107,7 +107,7 @@ export const ATTACKS: Record<AttackId, AttackData> = {
     ],
   },
   lowKick: {
-    startup: 6, active: 3, recovery: 12, damage: 7, hitstun: 16, blockstun: 11, pushback: 8, advance: 20,
+    startup: 6, active: 3, recovery: 12, damage: 7, hitstun: 15, blockstun: 11, pushback: 8, advance: 20,
     limb: "leg", level: "low", pose: { poseId: "kick", variant: 1 },
     sequence: [
       { fromPoseId: "idle", toPoseId: "kick", frames: 6, phase: "startup" },
@@ -122,7 +122,7 @@ export const ATTACKS: Record<AttackId, AttackData> = {
    * a crouch, or crouching would be safe against everything but throws.
    */
   jumpKick: {
-    startup: 5, active: 40, recovery: 4, damage: 10, hitstun: 18, blockstun: 12, pushback: 8,
+    startup: 5, active: 40, recovery: 4, damage: 10, hitstun: 17, blockstun: 12, pushback: 8,
     limb: "leg", level: "overhead", pose: { poseId: "kick", variant: 0 },
     sequence: [
       { fromPoseId: "jump", toPoseId: "kick", frames: 5, phase: "startup" },
@@ -132,7 +132,7 @@ export const ATTACKS: Record<AttackId, AttackData> = {
   },
   /** Brawler: leans in slowly (the tell), then barrels forward over its active frames. */
   charge: {
-    startup: 14, active: 10, recovery: 18, damage: 14, hitstun: 24, blockstun: 12, pushback: 30, advance: 300,
+    startup: 14, active: 10, recovery: 18, damage: 14, hitstun: 23, blockstun: 12, pushback: 30, advance: 300,
     limb: "shoulder", level: "mid", pose: { poseId: "signature", variant: 0 }, knockdown: "always",
     sequence: [
       { fromPoseId: "idle", toPoseId: "signature", frames: 14, phase: "startup" },
@@ -144,7 +144,7 @@ export const ATTACKS: Record<AttackId, AttackData> = {
   },
   /** Acrobat: a dip (the block capture, like the uppercut's), then the knee drives up and forward. */
   flyingKnee: {
-    startup: 16, active: 4, recovery: 14, damage: 9, hitstun: 20, blockstun: 14, pushback: 10, advance: 80,
+    startup: 16, active: 4, recovery: 14, damage: 9, hitstun: 19, blockstun: 14, pushback: 10, advance: 80,
     limb: "leg", level: "overhead", pose: { poseId: "signature", variant: 0 },
     sequence: [
       { poseId: "block", frames: 6, phase: "startup" },

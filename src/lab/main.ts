@@ -38,6 +38,7 @@ import {
   toDefinition,
   type PoseEdit,
 } from "./pose-edits";
+import { TalkingBench, type TalkingFace } from "./talking";
 
 /**
  * The pose lab (/lab, dev only): the studio's capture pipeline with every knob out
@@ -199,6 +200,9 @@ class LabApp {
   private freezing = false;
   private matte: Matte | null = null;
   private matteBusy = false;
+  /** The latest cut-out's sprite, for the talking-mouth bench. */
+  private labFace: TalkingFace | null = null;
+  private readonly talking = new TalkingBench(() => this.labFace);
 
   // The page's fixed parts.
   private readonly viewport = h("div", { class: "viewport" });
@@ -648,6 +652,8 @@ class LabApp {
       void renderSprite(cutoutFromCrop(foreground, rect), plan).then((blob) => {
         sprite.src = URL.createObjectURL(blob);
         sprite.onload = () => URL.revokeObjectURL(sprite.src);
+        this.labFace = { label: `Lab cut-out (${still.name})`, sprite: blob, landmarks: plan.landmarks };
+        void this.talking.refresh();
       });
       // The ghost where the game would expect the body.
       const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
@@ -726,6 +732,7 @@ class LabApp {
         this.status),
       this.viewport,
       this.matteSection,
+      this.talking.element,
     );
   }
 

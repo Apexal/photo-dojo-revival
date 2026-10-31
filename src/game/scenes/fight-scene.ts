@@ -19,6 +19,7 @@ import { REPLAY_SPEED, ReplayBuffer } from "../replay-buffer";
 import { pickTake } from "../sound-choice";
 import { JOIN_RUMBLE, RumbleScheduler, rumbleFor } from "../input/rumble";
 import { playGameSound } from "../game-sounds";
+import { playVoice } from "../render/talking-mouth-view";
 import { announce } from "../announcer";
 import { calloutLine, roundEndLine, roundStartLine } from "../announcer-lines";
 import { getOptions, setOption } from "../options";
@@ -666,8 +667,7 @@ export class FightScene extends Phaser.Scene {
     const takes = this.sounds[player]?.[id] ?? [fallbackSoundKey(id)];
     const key = pickTake(takes, this.lastTake.get(`${player}:${id}`));
     this.lastTake.set(`${player}:${id}`, key);
-    const v = volume * getOptions(this.registry).voiceVolume;
-    if (v > 0 && this.cache.audio.exists(key)) this.sound.play(key, { volume: v });
+    playVoice(this, key, volume * getOptions(this.registry).voiceVolume, this.views[player]);
   }
 
   private shake(ms: number, pixels: number): void {

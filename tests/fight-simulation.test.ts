@@ -339,10 +339,10 @@ describe("frame advantage", () => {
   }
 
   it.each([
-    ["punch: +3 on hit, −3 on block", { punch: true }, 3, -3],
-    ["kick: +2 on hit, −6 on block", { kick: true }, 2, -6],
-    ["uppercut: +2 on hit, −8 on block", { punch: true, down: true }, 2, -8],
-    ["low kick: +1 on hit, −4 on block", { kick: true, down: true }, 1, -4],
+    ["punch: +2 on hit, −3 on block", { punch: true }, 2, -3],
+    ["kick: +1 on hit, −6 on block", { kick: true }, 1, -6],
+    ["uppercut: +1 on hit, −8 on block", { punch: true, down: true }, 1, -8],
+    ["low kick: 0 on hit, −4 on block", { kick: true, down: true }, 0, -4],
   ] as const)("%s", (_name, press, onHit, onBlock) => {
     expect(advantage(press, false)).toBe(onHit);
     expect(advantage(press, true)).toBe(onBlock);

@@ -11,6 +11,7 @@ import { createInputSource, isPlayerInput, type PlayerInputDescriptor } from "..
 import type { InputSource } from "../input/input-source";
 import { getOptions } from "../options";
 import { FighterSpriteView, fighterTextureKeys, loadFighterSounds, preloadFighterTextures } from "../render/fighter-sprite-view";
+import { playVoice } from "../render/talking-mouth-view";
 import { GAME_HEIGHT, GAME_WIDTH, PLAYER_COLORS } from "../render/stage";
 import { bodyText, COLOR, displayText, HEX, popBox, RADIUS, SHADOW, stamp } from "../render/theme";
 import { stageFor } from "../stages/stages";
@@ -187,8 +188,7 @@ export class VersusScene extends Phaser.Scene {
   private playVoice(player: number, id: SoundId): void {
     const takes = this.sounds[player]?.[id] ?? [`fallback:${id}`];
     const key = pickTake(takes, undefined);
-    const v = 0.9 * getOptions(this.registry).voiceVolume;
-    if (v > 0 && this.cache.audio.exists(key)) this.sound.play(key, { volume: v });
+    playVoice(this, key, 0.9 * getOptions(this.registry).voiceVolume, this.views[player]);
   }
 
   // --- the set ---------------------------------------------------------------------

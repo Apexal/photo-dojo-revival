@@ -14,6 +14,7 @@ import { Ragdoll, torsoCover } from "./ragdoll";
 import { FLOOR_SCREEN_Y, GAME_WIDTH, worldToScreen } from "./stage";
 import { TweenMeshes, readAlpha } from "./tween-meshes";
 import { TOP_EDGE_STEP, blendProfiles, topProfile, type TopEdge } from "./top-edge";
+import { JawTextures, Voice } from "./talking-mouth-view";
 
 export const textureKey = (prefix: string, poseId: PoseId, variant = 0) => `${prefix}:pose:${poseId}${variant ? `#${variant}` : ""}`;
 export const soundKey = (prefix: string, soundId: SoundId, take = 0) => `${prefix}:sound:${soundId}${take ? `#${take}` : ""}`;
@@ -118,6 +119,11 @@ export class FighterSpriteView {
   private ragdoll: { body: Ragdoll; frame: FrameRef; backing: FrameRef; origin: { x: number; y: number } } | null = null;
   /** The capture whose arms cover its torso least, with that cover (torsoCover): drawn under a ragdoll. Built on the first KO. */
   private clearestTorso: { frame: FrameRef; cover: number } | null = null;
+  /** The voice line they're saying, and their captures with the jaw dropped to match (talking-mouth-view.ts). */
+  private readonly voice = new Voice();
+  private readonly jaws: JawTextures;
+  /** How open the mouth is this render. */
+  private open = 0;
 
   /** `grip`: the handshake as the round intro aims it (FightSimulation.grips); without it the hand doesn't shake. */
   constructor(
@@ -131,10 +137,16 @@ export class FighterSpriteView {
     this.sprite = scene.add.image(0, 0, textureKey(prefix, "idle"));
     if (tint !== undefined) this.sprite.setTint(tint);
     this.torso = torsoLength(geometry.idle.landmarks);
-    this.meshes = new TweenMeshes(scene, (frame) => this.frameTexture(frame), tint);
+    this.jaws = new JawTextures(scene);
+    this.meshes = new TweenMeshes(scene, (frame) => this.drawnTexture(frame), tint);
     this.tweener = scene.renderer.type === Phaser.WEBGL ? new PoseTweener((frame) => this.tweenSource(frame)) : null;
     // Build every mesh now: a few ms per pose here beats a hitch on the first punch.
     if (this.tweener) for (const tween of this.everyTween()) this.tweener.prepare(tween);
+  }
+
+  /** Say a voice line (just started playing): the jaw drops along with it. */
+  say(sound: Phaser.Sound.BaseSound): void {
+    this.voice.say(sound);
   }
 
   /** Whether this view can morph at all (WebGL); without it, every tween is a hard cut. */
@@ -148,6 +160,7 @@ export class FighterSpriteView {
    * other fighter, so a hit that lands shakes the attacker too.
    */
   render(state: FighterState, frame: number, tweening = true, opponent?: FighterState): void {
+    this.open = this.voice.openness;
     let tween: FrameTween | null = null;
     let step: GaitFrame | null = null;
     if (tweening && this.tweener) {
@@ -351,7 +364,7 @@ export class FighterSpriteView {
   }
 
   private showSprite(frame: FrameRef, facing: 1 | -1, at: { x: number; y: number }): void {
-    const key = this.frameTexture(frame);
+    const key = this.drawnTexture(frame);
     if (key !== this.currentFrame) {
       this.currentFrame = key;
       this.sprite.setTexture(key);
@@ -410,6 +423,12 @@ export class FighterSpriteView {
   /** The texture for a frame. The handshake's made-up versions (the pumping hand) show its one capture. */
   private frameTexture(frame: FrameRef): string {
     return textureKey(this.prefix, frame.poseId, frame.poseId === "handshake" ? 0 : frame.variant);
+  }
+
+  /** The texture a frame is drawn with: its capture's, or that capture talking (the jaw dropped) mid-line. */
+  private drawnTexture(frame: FrameRef): string {
+    const variant = frame.poseId === "handshake" ? 0 : frame.variant;
+    return this.jaws.textureFor(this.frameTexture(frame), () => frameGeometry(this.geometry, frame.poseId, variant).landmarks, this.open);
   }
 
   /**

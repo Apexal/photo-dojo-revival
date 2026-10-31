@@ -731,6 +731,8 @@ export class CharacterSelectScene extends Phaser.Scene {
     });
     line.play();
     this.voiceLines[i] = line;
+    // The picked fighter says it: the preview's jaw drops along.
+    this.previews[i]?.fighter?.say(line);
   }
 
   private fadeOutVoice(i: number): void {
