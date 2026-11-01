@@ -1,5 +1,5 @@
 import Phaser from "phaser";
-import { SOUND_FALLBACK, SOUND_IDS } from "../../shared/fighter-model";
+import { SILENT_SOUNDS, SOUND_FALLBACK, SOUND_IDS } from "../../shared/fighter-model";
 import { getSetting, onDbBlocked, openFighterDb } from "../../shared/fighter-storage";
 import { loadLibrary } from "../fighter-library";
 import { GAME_SOUND_IDS, gameSoundKey } from "../game-sounds";
@@ -35,7 +35,7 @@ export class BootScene extends Phaser.Scene {
 
   preload(): void {
     for (const id of SOUND_IDS) {
-      if (!SOUND_FALLBACK[id]) this.load.audio(fallbackSoundKey(id), `${import.meta.env.BASE_URL}sounds/${id}.wav`);
+      if (!SOUND_FALLBACK[id] && !SILENT_SOUNDS.includes(id)) this.load.audio(fallbackSoundKey(id), `${import.meta.env.BASE_URL}sounds/${id}.wav`);
     }
     for (const id of GAME_SOUND_IDS) this.load.audio(gameSoundKey(id), `${import.meta.env.BASE_URL}sounds/${id}.wav`);
     preloadAnnouncer(this);

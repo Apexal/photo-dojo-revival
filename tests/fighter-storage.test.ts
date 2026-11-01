@@ -39,6 +39,17 @@ describe("fighter storage", () => {
     expect((await listFighters()).map((f) => f.name)).toEqual(["B"]);
   });
 
+  it("gives fighters saved before the intro and snubbed lines empty slots for them", async () => {
+    const fighter = makeFighter();
+    const { intro: _intro, rejected: _rejected, ...older } = fighter.sounds;
+    await saveFighter({ ...fighter, sounds: older as typeof fighter.sounds });
+    const loaded = await loadFighter(fighter.fighterId);
+    expect(loaded!.sounds.intro).toBeNull();
+    expect(loaded!.sounds.rejected).toBeNull();
+    expect(loaded!.sounds.taunt).toEqual(fighter.sounds.taunt);
+    expect((await listFighters())[0].sounds.intro).toBeNull();
+  });
+
   it("keeps a studio fighter's sources with it, and drops them with it", async () => {
     const f = makeFighter({ name: "Studio" });
     const sources: FighterSources = {

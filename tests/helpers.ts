@@ -42,6 +42,8 @@ export function makeFighter(options: { poseBytes?: Partial<Record<PoseId, number
       hurt: null,
       win: withSounds ? new Blob([bytes(2500, 51)], { type: "audio/webm;codecs=opus" }) : null,
       taunt: withSounds ? new Blob([bytes(2000, 52)], { type: "audio/webm;codecs=opus" }) : null,
+      intro: withSounds ? new Blob([bytes(1800, 53)], { type: "audio/webm;codecs=opus" }) : null,
+      rejected: null,
     },
     thumbnailBlob: new Blob([bytes(400, 99)], { type: "image/png" }),
     poseVariants: Object.fromEntries(

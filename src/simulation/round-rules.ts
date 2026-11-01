@@ -77,15 +77,16 @@ export function nextRoundStakes(roundNumber: number, wins: readonly [number, num
 }
 
 /**
- * Advance one frame. Returns a new state; never mutates.
+ * Advance one frame. Returns a new state; never mutates. `introFrames`: this
+ * round's intro (longer for a match's opening, fight-simulation.ts introLength).
  * intro → fighting → (KO or timeout) → outro → roundOver | matchOver.
  * roundOver waits for `startNextRound`.
  */
-export function tickRound(state: RoundState, health: [number, number]): RoundState {
+export function tickRound(state: RoundState, health: [number, number], introFrames = ROUND_INTRO_FRAMES): RoundState {
   const next: RoundState = { ...state, wins: [...state.wins] as [number, number], phaseFrame: state.phaseFrame + 1 };
   switch (state.phase) {
     case "intro":
-      if (next.phaseFrame >= ROUND_INTRO_FRAMES) return { ...next, phase: "fighting", phaseFrame: 0 };
+      if (next.phaseFrame >= introFrames) return { ...next, phase: "fighting", phaseFrame: 0 };
       return next;
     case "fighting": {
       next.framesRemaining = Math.max(0, state.framesRemaining - 1);

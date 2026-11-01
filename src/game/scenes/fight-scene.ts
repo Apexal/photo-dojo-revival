@@ -5,7 +5,7 @@ import { setSetting } from "../../shared/fighter-storage";
 import { FightSimulation, frameOf, type FightState } from "../../simulation/fight-simulation";
 import { currentAttackPhase, isAttack, type FighterState } from "../../simulation/fighter-state-machine";
 import type { InputFrame } from "../../simulation/input-frame";
-import { MAX_HEALTH, secondsRemaining, type PlayerIndex } from "../../simulation/round-rules";
+import { FRAMES_PER_SECOND, MAX_HEALTH, secondsRemaining, type PlayerIndex } from "../../simulation/round-rules";
 import { geometryOf, type LibraryEntry } from "../fighter-library";
 import { DUMMY_BEHAVIORS, DummyInputSource, cpuBehavior, nextCpuBehavior } from "../input/dummy-input-source";
 import { createInputSource, isPlayerInput, sameInput, type InputDescriptor, type PlayerInputDescriptor } from "../input/input-descriptor";
@@ -64,6 +64,10 @@ export function menuSceneFor(data: FightSceneData): string {
 
 const STEP_MS = 1000 / 60;
 const MAX_FRAME_MS = 100;
+/** A beat after each intro line before the next one (or the handshake). */
+const INTRO_LINE_GAP_FRAMES = 18;
+/** The longest an intro line holds the floor, however long the clip is. */
+const MAX_INTRO_LINE_FRAMES = 4 * FRAMES_PER_SECOND;
 const PREFIXES = ["p0", "p1"] as const;
 const BAR_W = 520;
 const BAR_H = 26;
@@ -104,6 +108,10 @@ export class FightScene extends Phaser.Scene {
   /** The stage's soundtrack (null if it has none). */
   private music: Phaser.Sound.BaseSound | null = null;
   private sounds: Record<SoundId, string[]>[] = [];
+  /** The fight doesn't start until the voice clips are in: the opening is timed to the intro lines. */
+  private soundsReady = false;
+  /** The take of each player's intro line the opening was timed to (null: they say nothing). */
+  private introLines: (string | null)[] = [null, null];
   private lastTake = new Map<string, string>();
   private objectUrls: string[] = [];
   private accumulator = 0;
@@ -146,6 +154,8 @@ export class FightScene extends Phaser.Scene {
     this.stats = new MatchStatsTracker(); // a rematch restarts the scene: fresh stats
     this.callouts = new CalloutTracker({ match: !data.practice });
     this.sounds = [];
+    this.soundsReady = false;
+    this.introLines = [null, null];
     this.replayBuffer = new ReplayBuffer<FightState>();
     this.replay = null;
     this.replayDone = false;
@@ -164,14 +174,21 @@ export class FightScene extends Phaser.Scene {
     markPlayed(this.registry, this.setup.entries.filter((_, i) => isPlayerInput(this.setup.inputs[i])).map((e) => e.fighter.fighterId));
     this.geometry = [geometryOf(a.fighter), geometryOf(b.fighter)];
     // A fresh seed per match so variant choices differ between fights (and stay replayable within one).
-    this.sim = new FightSimulation(this.geometry, { seed: (Math.random() * 2 ** 32) >>> 0, practice: this.setup.practice });
+    // A match (not practice) opens with both walking on from off-screen and saying their intro lines.
+    this.sim = new FightSimulation(this.geometry, { seed: (Math.random() * 2 ** 32) >>> 0, practice: this.setup.practice, opening: !this.setup.practice });
     this.sources = this.setup.inputs.map((d) =>
       isPlayerInput(d) ? createInputSource(this, d) : (this.dummy = new DummyInputSource(this.sim, 1)),
     );
     // Practice opens against an easy CPU; 1–8 / Tab switch to the scripted dummies. The tutorial's dummy waits.
     const opponent = this.setup.inputs[1];
     this.dummy?.setBehavior(opponent.kind === "cpu" ? cpuBehavior(opponent.level) : this.tutorial ? "stand" : "cpuEasy");
-    void Promise.all(this.setup.entries.map((e, i) => loadFighterSounds(this, e.fighter, PREFIXES[i]))).then((s) => { this.sounds = s; });
+    void Promise.all(this.setup.entries.map((e, i) => loadFighterSounds(this, e.fighter, PREFIXES[i])))
+      .then((s) => {
+        this.sounds = s;
+        this.sim.setOpeningLines([0, 1].map((i) => this.pickIntroLine(i)) as [number, number]);
+      })
+      .catch((err) => console.warn("[sound] couldn't load the fighters' voices", err))
+      .finally(() => { this.soundsReady = true; });
 
     this.stage = stageFor(this.setup.stageId);
     this.stage.build(this, this.add.container(0, 0).setDepth(0));
@@ -393,6 +410,7 @@ export class FightScene extends Phaser.Scene {
   update(_time: number, delta: number): void {
     if (this.replay) return this.updateReplay(delta);
     if (this.waitingForResult) return;
+    if (!this.soundsReady) return this.renderState(this.sim.current);
     this.checkControllers();
     if (this.paused) {
       // The pause menu reads its own inputs; drain ours so nothing fires on resume.
@@ -662,12 +680,38 @@ export class FightScene extends Phaser.Scene {
 
   // --- events → sound and banners ---------------------------------------------
 
-  /** A fighter's voice (their clip, or the bundled stand-in): the "Voice volume" setting. */
-  private play(player: number, id: SoundId, volume = 0.8): void {
+  /** A fighter's voice (their clip, or the bundled stand-in): the "Voice volume" setting. Null if there's nothing to say. */
+  private play(player: number, id: SoundId, volume = 0.8): Phaser.Sound.BaseSound | null {
     const takes = this.sounds[player]?.[id] ?? [fallbackSoundKey(id)];
+    if (!takes.length) return null;
     const key = pickTake(takes, this.lastTake.get(`${player}:${id}`));
     this.lastTake.set(`${player}:${id}`, key);
-    playVoice(this, key, volume * getOptions(this.registry).voiceVolume, this.views[player]);
+    return playVoice(this, key, volume * getOptions(this.registry).voiceVolume, this.views[player]);
+  }
+
+  /**
+   * Picks the take of a player's intro line the opening plays (their taunt if
+   * they have no intro line) and returns how long it holds the floor, in
+   * frames: 0 if there's none, or voices are muted.
+   */
+  private pickIntroLine(player: number): number {
+    const takes = this.sounds[player]?.intro ?? [];
+    if (!takes.length || getOptions(this.registry).voiceVolume <= 0) return 0;
+    const key = pickTake(takes, undefined);
+    const clip = this.cache.audio.get(key) as AudioBuffer | undefined;
+    if (!clip?.duration) return 0;
+    this.introLines[player] = key;
+    return Math.min(MAX_INTRO_LINE_FRAMES, Math.ceil(clip.duration * FRAMES_PER_SECOND)) + INTRO_LINE_GAP_FRAMES;
+  }
+
+  /** Refused handshakes this round: someone who refused too doesn't complain about it. */
+  private snubbers = new Set<PlayerIndex>();
+
+  private snubLines(snubber: PlayerIndex): void {
+    const rejected = () => { if (this.sys.isActive() && !this.snubbers.has((1 - snubber) as PlayerIndex)) this.play(1 - snubber, "rejected", 0.9); };
+    const taunt = this.play(snubber, "taunt", 0.9);
+    if (taunt) taunt.once(Phaser.Sound.Events.COMPLETE, () => this.time.delayedCall(250, rejected));
+    else rejected();
   }
 
   private shake(ms: number, pixels: number): void {
@@ -727,6 +771,7 @@ export class FightScene extends Phaser.Scene {
       if (options.replay && (ev.type === "roundStart" || ev.type === "fight" || ev.type === "roundEnd" || ev.type === "matchEnd" || ev.type === "throwTech")) continue;
       switch (ev.type) {
         case "roundStart": {
+          this.snubbers.clear();
           const tutorial = this.tutorial && !this.tutorial.finished;
           this.banner(tutorial ? "TUTORIAL" : this.setup.practice ? "PRACTICE" : `ROUND ${ev.round}`, 900);
           announce(this, tutorial ? "tutorial" : this.setup.practice ? "practice" : roundStartLine(ev.round, state.round.wins));
@@ -768,8 +813,16 @@ export class FightScene extends Phaser.Scene {
           announce(this, "throw-break");
           break;
         case "taunt": this.play(ev.player, "taunt", 0.9); break;
-        // The callout and "Disrespectful!" come from CalloutTracker; then the snubber's own voice.
-        case "snub": this.time.delayedCall(700, () => this.play(ev.player, "win", 0.9)); break;
+        case "introLine": {
+          const key = this.introLines[ev.player];
+          if (key) playVoice(this, key, 0.9 * getOptions(this.registry).voiceVolume, this.views[ev.player]);
+          break;
+        }
+        // The callout and "Disrespectful!" come from CalloutTracker; then the snubber's taunt, then the snubbed one's comeback.
+        case "snub":
+          this.snubbers.add(ev.player);
+          this.time.delayedCall(700, () => this.snubLines(ev.player));
+          break;
         case "ko":
           if (!options.replay) this.banner("K.O.", 2000);
           break;

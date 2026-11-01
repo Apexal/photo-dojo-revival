@@ -97,7 +97,9 @@ const SOUND_PROMPTS: Record<SoundId, { title: string; hint: string }> = {
   attack: { title: "Battle cry", hint: "Plays when you punch or kick. “Hyah!”" },
   hurt: { title: "Ouch", hint: "Plays when you get hit." },
   win: { title: "Victory line", hint: "Plays when you win a round." },
-  taunt: { title: "Taunt (optional)", hint: "Plays when you taunt: punch + kick from far away. Skip it and you'll say your victory line instead." },
+  taunt: { title: "Taunt (optional)", hint: "Plays when you taunt: punch + kick from far away, or turn down a handshake. Skip it and you'll say your victory line instead." },
+  intro: { title: "Entrance line (optional)", hint: "Plays once at the start of a match, face to face before the handshake. Skip it and you'll say your taunt instead." },
+  rejected: { title: "Snubbed (optional)", hint: "Plays when the other fighter refuses to shake your hand. “Wow. Rude.”" },
 };
 
 const panel = (cls: string, ...children: (Node | string | null | false)[]) => h("section", { class: `panel ${cls}` }, ...children);

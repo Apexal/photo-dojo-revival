@@ -1,5 +1,5 @@
 import { openDB, type DBSchema, type IDBPDatabase } from "idb";
-import type { Fighter } from "./fighter-model";
+import { SOUND_IDS, type Fighter } from "./fighter-model";
 
 // Named before the game was Foto Fighter; renaming it would strand every saved fighter.
 export const DB_NAME = "photo-dojo";
@@ -119,14 +119,21 @@ export async function saveFighter(fighter: Fighter): Promise<void> {
   await requestPersistence();
 }
 
+/** Fighters saved before a voice line existed have no slot for it: give them an empty one. */
+export function withAllSounds(fighter: Fighter): Fighter {
+  if (SOUND_IDS.every((id) => id in fighter.sounds)) return fighter;
+  return { ...fighter, sounds: { ...Object.fromEntries(SOUND_IDS.map((id) => [id, null])), ...fighter.sounds } as Fighter["sounds"] };
+}
+
 export async function loadFighter(fighterId: string): Promise<Fighter | undefined> {
-  return (await openFighterDb()).get("fighters", fighterId);
+  const fighter = await (await openFighterDb()).get("fighters", fighterId);
+  return fighter && withAllSounds(fighter);
 }
 
 /** Newest first. */
 export async function listFighters(): Promise<Fighter[]> {
   const all = await (await openFighterDb()).getAll("fighters");
-  return all.sort((a, b) => b.createdAt - a.createdAt);
+  return all.map(withAllSounds).sort((a, b) => b.createdAt - a.createdAt);
 }
 
 /** Deletes the fighter and its sources together. */

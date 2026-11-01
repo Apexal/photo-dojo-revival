@@ -84,6 +84,8 @@ export type FightEvent =
   | { type: "taunt"; player: PlayerIndex }
   /** The round intro: `player` held back and refused the handshake. */
   | { type: "snub"; player: PlayerIndex }
+  /** A match's opening: `player` starts saying their intro line (IntroPlan.lines). */
+  | { type: "introLine"; player: PlayerIndex }
   | { type: "ko"; player: PlayerIndex }
   /** Sent flying by a throw or a hit in the air; `landed` when they (or a KO'd fighter) hit the floor. */
   | { type: "knockdown"; player: PlayerIndex }
@@ -177,10 +179,33 @@ export function handshakeShakeOf(state: FighterState, offeredAt: number): FrameT
 }
 
 /**
+ * How a round's intro runs. Every round: walk in, pause, shake hands, walk
+ * back. A match's opening (its first intro) walks in from off-screen instead,
+ * and between walking in and the pause each player in turn (player 1 first)
+ * holds the floor to say their intro line, in the taunt pose.
+ */
+export interface IntroPlan {
+  /** Frames walking in. */
+  walkIn: number;
+  /** Frames each player's intro line takes (0: they don't say one). */
+  lines: readonly [number, number];
+  /** Walking in from off-screen, rather than from where the round starts. */
+  offscreen: boolean;
+}
+
+export const ROUND_INTRO: IntroPlan = { walkIn: INTRO.walkIn, lines: [0, 0], offscreen: false };
+/** How far past the stage's edge the opening's walk-in starts: far enough that nobody's in sight. */
+export const OFFSCREEN_MARGIN = 260;
+
+export const introLength = (plan: IntroPlan): number =>
+  plan.walkIn + plan.lines[0] + plan.lines[1] + INTRO.pause + INTRO.shake + INTRO.walkOut + INTRO.settle;
+
+/**
  * The scripted round intro on a given frame of it, for one player: walking in
- * (`along` goes 0 → 1, from where the round starts to where the hands meet),
- * a pause, the handshake (player 1 offers first, player 2 takes it a moment
- * later), walking back, then standing ready.
+ * (`along` goes 0 → 1, from where they come in to where the hands meet), the
+ * intro lines if the plan has any, a pause, the handshake (player 1 offers
+ * first, player 2 takes it a moment later), walking back (`along` 1 → 0, to
+ * where the round starts), then standing ready.
  *
  * `snubbed`: who refused the handshake (snubDueFrame). A snubber turns their
  * back (`turnedAway`) where they'd have held out a hand, until they've walked
@@ -190,18 +215,26 @@ export function introStep(
   phaseFrame: number,
   player: PlayerIndex,
   snubbed: readonly [boolean, boolean] = [false, false],
-): { action: "walk" | "handshake" | "idle"; actionFrame: number; along: number; turnedAway: boolean } {
+  plan: IntroPlan = ROUND_INTRO,
+): { action: "walk" | "handshake" | "idle" | "taunt"; actionFrame: number; along: number; turnedAway: boolean } {
   let f = phaseFrame;
-  if (f < INTRO.walkIn) return { action: "walk", actionFrame: f, along: (f + 1) / INTRO.walkIn, turnedAway: false };
-  f -= INTRO.walkIn;
-  if (f < INTRO.pause) return { action: "idle", actionFrame: f, along: 1, turnedAway: false };
+  if (f < plan.walkIn) return { action: "walk", actionFrame: f, along: (f + 1) / plan.walkIn, turnedAway: false };
+  f -= plan.walkIn;
+  const talk = plan.lines[0] + plan.lines[1];
+  if (f < talk) {
+    const from = player === 0 ? 0 : plan.lines[0];
+    if (f >= from && f < from + plan.lines[player]) return { action: "taunt", actionFrame: f - from, along: 1, turnedAway: false };
+    return { action: "idle", actionFrame: f, along: 1, turnedAway: false };
+  }
+  f -= talk;
+  if (f < INTRO.pause) return { action: "idle", actionFrame: talk + f, along: 1, turnedAway: false };
   f -= INTRO.pause;
   const offered = player === 0 ? 0 : SECOND_HAND_FRAMES;
   const snubbing = snubbed[player];
   if (f < INTRO.shake) {
     // Player 2 stands there a moment before taking the offered hand.
-    if (f < offered) return { action: "idle", actionFrame: INTRO.pause + f, along: 1, turnedAway: false };
-    if (snubbing) return { action: "idle", actionFrame: INTRO.pause + f, along: 1, turnedAway: true };
+    if (f < offered) return { action: "idle", actionFrame: talk + INTRO.pause + f, along: 1, turnedAway: false };
+    if (snubbing) return { action: "idle", actionFrame: talk + INTRO.pause + f, along: 1, turnedAway: true };
     // Left hanging: the hand stays out, held still just short of the shake.
     const hold = snubbed[1 - player] ? SHAKE_START_FRAME - offered - 1 : Infinity;
     return { action: "handshake", actionFrame: Math.min(f - offered, hold), along: 1, turnedAway: false };
@@ -213,10 +246,11 @@ export function introStep(
 
 /**
  * The last intro frame on which holding back refuses the handshake: the one
- * before this player would hold out a hand. Any frame of the walk-in counts.
+ * before this player would hold out a hand. Any frame of the walk-in (and of
+ * the intro lines) counts.
  */
-export function snubDueFrame(player: PlayerIndex): number {
-  return INTRO.walkIn + INTRO.pause + (player === 0 ? 0 : SECOND_HAND_FRAMES) - 1;
+export function snubDueFrame(player: PlayerIndex, plan: IntroPlan = ROUND_INTRO): number {
+  return plan.walkIn + plan.lines[0] + plan.lines[1] + INTRO.pause + (player === 0 ? 0 : SECOND_HAND_FRAMES) - 1;
 }
 
 export function currentGeometry(geometry: FighterGeometry, state: FighterState): PoseGeometry {
@@ -344,21 +378,63 @@ export class FightSimulation {
   readonly grips: [HandshakeGrip, HandshakeGrip];
   /** Who has refused this round's handshake (held back during the intro). */
   private snubbed: [boolean, boolean] = [false, false];
+  /** This round's intro: the match's opening for the first one (`opening`), else ROUND_INTRO. */
+  private intro: IntroPlan = ROUND_INTRO;
 
+  /**
+   * `opening`: the match's first intro walks in from off-screen, with time for
+   * intro lines (setOpeningLines). Restarting round 1 or later rounds get the
+   * ordinary intro.
+   */
   constructor(
     private readonly geometry: [FighterGeometry, FighterGeometry],
-    options: { startPositions?: [number, number]; seed?: number; practice?: boolean } = {},
+    options: { startPositions?: [number, number]; seed?: number; practice?: boolean; opening?: boolean } = {},
   ) {
     this.practice = options.practice ?? false;
     this.startPositions = options.startPositions ?? START_POSITIONS;
     this.random = createRng(options.seed ?? 1);
     this.grips = handshakeGrips(geometry);
+    if (options.opening) this.intro = this.openingPlan([0, 0]);
+    const origin = this.introOrigins(1);
     this.state = {
       frame: 0,
-      fighters: this.freshFighters(),
+      fighters: this.freshFighters().map((f, i) => ({ ...f, position: { ...f.position, x: origin[i] } })) as [FighterState, FighterState],
       round: createMatch(),
       events: [{ type: "roundStart", round: 1 }],
     };
+  }
+
+  get introPlan(): IntroPlan {
+    return this.intro;
+  }
+
+  /**
+   * How long each player's intro line runs, in frames (0: none). Only for an
+   * `opening` match, before its first step; ignored otherwise.
+   */
+  setOpeningLines(lines: readonly [number, number]): void {
+    if (!this.intro.offscreen || this.state.frame !== 0) return;
+    this.intro = this.openingPlan(lines.map((n) => Math.max(0, Math.round(n))) as [number, number]);
+  }
+
+  /** Off-screen to the handshake at the same pace as an ordinary walk-in from where the round starts. */
+  private openingPlan(lines: readonly [number, number]): IntroPlan {
+    const start = this.freshFighters(1);
+    const meet = this.handshakePositions(1);
+    const origin = this.offscreenPositions(1);
+    const pace = Math.max(1, ...[0, 1].map((i) => Math.abs(meet[i] - start[i].position.x))) / INTRO.walkIn;
+    const walkIn = Math.ceil(Math.max(...[0, 1].map((i) => Math.abs(meet[i] - origin[i]))) / pace);
+    return { walkIn, lines, offscreen: true };
+  }
+
+  /** Just past the stage's edge on each fighter's own side. */
+  private offscreenPositions(roundNumber: number): [number, number] {
+    return this.freshFighters(roundNumber).map((f) => (f.facing === 1 ? -OFFSCREEN_MARGIN : STAGE_WIDTH + OFFSCREEN_MARGIN)) as [number, number];
+  }
+
+  /** Where this round's intro walks in from. */
+  private introOrigins(roundNumber: number): [number, number] {
+    return this.intro.offscreen ? this.offscreenPositions(roundNumber) : this.freshFighters(roundNumber).map((f) => f.position.x) as [number, number];
   }
 
   /** Players swap sides every round, so nobody is stuck with the same side all match. */
@@ -408,6 +484,7 @@ export class FightSimulation {
     this.guardHistory = [{ back: 99, down: 99 }, { back: 99, down: 99 }];
     this.calmFrames = [0, 0];
     this.snubbed = [false, false];
+    this.intro = ROUND_INTRO;
     this.state = { frame: this.state.frame, fighters: this.freshFighters(round.roundNumber), round, events: [{ type: "roundStart", round: round.roundNumber }] };
     return this.state;
   }
@@ -469,7 +546,7 @@ export class FightSimulation {
 
     for (const i of [0, 1] as const) {
       const f = fighters[i], was = prev.fighters[i];
-      if (f.action === "taunt" && was.action !== "taunt") events.push({ type: "taunt", player: i });
+      if (f.action === "taunt" && was.action !== "taunt" && phase !== "intro") events.push({ type: "taunt", player: i });
       const fell = (was.action === "knockdown" && f.action === "downed") || (f.action === "ko" && !isGrounded(was) && isGrounded(f));
       if (fell) events.push({ type: "landed", player: i });
       if (isAttack(f.action) && f.actionFrame === ATTACKS[f.action].startup) {
@@ -485,7 +562,7 @@ export class FightSimulation {
     if (this.practice) fighters = this.practiceRefill(fighters);
     let round = this.practice && prev.round.phase === "fighting"
       ? { ...prev.round, phaseFrame: prev.round.phaseFrame + 1 } // the clock never runs and nobody gets KO'd
-      : tickRound(prev.round, [fighters[0].health, fighters[1].health]);
+      : tickRound(prev.round, [fighters[0].health, fighters[1].health], introLength(this.intro));
     if (round.phase === "fighting" && prev.round.phase === "intro") events.push({ type: "fight" });
     if (round.phase === "outro" && prev.round.phase === "fighting") {
       events.push({ type: "roundEnd", outcome: round.roundWinner!, reason: round.roundEndReason! });
@@ -500,28 +577,33 @@ export class FightSimulation {
   }
 
   /**
-   * The round intro: both fighters walk in, shake hands and walk back to where
-   * the round starts. The only input that counts is holding back on the way
-   * in, which refuses the handshake.
+   * The round intro (introStep, this.intro): both fighters walk in (the
+   * match's opening: from off-screen, then their intro lines), shake hands and
+   * walk back to where the round starts. The only input that counts is holding
+   * back before the hand goes out, which refuses the handshake.
    */
   private introFighters(prev: FightState, inputs: [InputFrame, InputFrame], events: FightEvent[]): [FighterState, FighterState] {
     const start = this.freshFighters(prev.round.roundNumber);
     const meet = this.handshakePositions(prev.round.roundNumber);
     const phaseFrame = prev.round.phaseFrame;
+    const plan = this.intro;
+    // Walking in from where they come in; walking back to where the round starts.
+    const from = phaseFrame < plan.walkIn ? this.introOrigins(prev.round.roundNumber) : start.map((f) => f.position.x);
     for (const i of [0, 1] as const) {
-      const due = snubDueFrame(i);
+      const due = snubDueFrame(i, plan);
       const back = start[i].facing === 1 ? inputs[i].left : inputs[i].right;
       if (back && phaseFrame <= due) this.snubbed[i] = true;
       // Announced as they turn their back, when the hand would have come out.
       if (this.snubbed[i] && phaseFrame === due + 1) events.push({ type: "snub", player: i });
+      if (plan.lines[i] > 0 && phaseFrame === plan.walkIn + (i === 1 ? plan.lines[0] : 0)) events.push({ type: "introLine", player: i });
     }
     return prev.fighters.map((f, i): FighterState => {
-      const step = introStep(phaseFrame, i as PlayerIndex, this.snubbed);
+      const step = introStep(phaseFrame, i as PlayerIndex, this.snubbed, plan);
       return {
         ...f,
         action: step.action,
         actionFrame: step.actionFrame,
-        position: { x: start[i].position.x + (meet[i] - start[i].position.x) * step.along, y: FLOOR_Y },
+        position: { x: from[i] + (meet[i] - from[i]) * step.along, y: FLOOR_Y },
         facing: step.turnedAway ? (-start[i].facing as 1 | -1) : start[i].facing,
         velocity: { x: 0, y: 0 },
         crouching: false,

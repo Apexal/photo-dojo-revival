@@ -8,13 +8,19 @@ export type PoseId =
   /** Reaching out to shake hands: the round intro (fight-simulation.ts). */
   | "handshake";
 
-export type SoundId = "attack" | "hurt" | "win" | "taunt";
+export type SoundId = "attack" | "hurt" | "win" | "taunt" | "intro" | "rejected";
 
 /** Capture order: easy poses first so the user learns the mechanic. */
 export const POSE_IDS: readonly PoseId[] = ["idle", "walk", "block", "crouch", "punch", "kick", "jump", "hurt", "win", "signature", "handshake"];
-export const SOUND_IDS: readonly SoundId[] = ["attack", "hurt", "win", "taunt"];
-/** Optional lines: without a take of their own, the game plays this one's instead (a taunt says the victory line). */
-export const SOUND_FALLBACK: Partial<Record<SoundId, SoundId>> = { taunt: "win" };
+export const SOUND_IDS: readonly SoundId[] = ["attack", "hurt", "win", "taunt", "intro", "rejected"];
+/**
+ * Optional lines: without a take of their own, the game plays this one's own
+ * takes instead (a taunt says the victory line, an intro line the taunt). Only
+ * one step: an intro line never falls through to the victory line.
+ */
+export const SOUND_FALLBACK: Partial<Record<SoundId, SoundId>> = { taunt: "win", intro: "taunt" };
+/** Optional lines that are left out, rather than played by a bundled stand-in, when there's nothing to say. */
+export const SILENT_SOUNDS: readonly SoundId[] = ["intro", "rejected"];
 
 /** Pixel coords in the sprite canvas (or in the source frame before normalization). */
 export interface NormalizedLandmark { x: number; y: number; visibility: number }
@@ -40,7 +46,8 @@ export interface Fighter {
   createdAt: number;
   facingDirection: "right";               // all captures face right; renderer flips for P2
   poses: Record<PoseId, CapturedPose>;
-  sounds: Record<SoundId, Blob | null>;   // webm/opus, ≤MAX_SOUND_SECONDS each
+  /** webm/opus, ≤MAX_SOUND_SECONDS each. Stored fighters from before a line existed get null for it (withAllSounds). */
+  sounds: Record<SoundId, Blob | null>;
   thumbnailBlob: Blob;                    // idle pose downscaled, for character select
   /**
    * Second versions of idle (the stance it sways into), punch (uppercut), kick
@@ -75,7 +82,7 @@ export const JUMP_ANCHOR_Y = 300;
 export const THUMBNAIL_SIZE = 128;
 export const LANDMARK_COUNT = 33;
 /** Recording limit per voice line: the victory line has room for a short speech. */
-export const MAX_SOUND_SECONDS: Record<SoundId, number> = { attack: 2, hurt: 2, win: 5, taunt: 3 };
+export const MAX_SOUND_SECONDS: Record<SoundId, number> = { attack: 2, hurt: 2, win: 5, taunt: 3, intro: 3, rejected: 3 };
 
 /** MediaPipe Pose landmark indices. */
 export const LANDMARK = {

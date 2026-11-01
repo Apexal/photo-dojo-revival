@@ -4,7 +4,8 @@ import { LANDMARK } from "../src/shared/fighter-model";
 import { groundAnchorFor, type FighterGeometry } from "../src/shared/frame-data";
 import { REACH_FRAMES, SECOND_HAND_FRAMES, SHAKE_PERIOD_FRAMES, SHAKE_PX, SHAKE_START_FRAME, SHAKES, handOf, handshakeGrips, shakeAt, shakenGrip, turnArm } from "../src/shared/handshake";
 import { buildStickFigureLandmarks, stickFigureGeometry } from "../src/shared/stick-figure";
-import { FightSimulation, handshakeShakeOf, introStep, snubDueFrame, type FightEvent, type FightState } from "../src/simulation/fight-simulation";
+import { FightSimulation, OFFSCREEN_MARGIN, ROUND_INTRO, handshakeShakeOf, introLength, introStep, snubDueFrame, type FightEvent, type FightState } from "../src/simulation/fight-simulation";
+import { STAGE_WIDTH } from "../src/simulation/fighter-state-machine";
 import { input } from "../src/simulation/input-frame";
 import { INTRO, ROUND_INTRO_FRAMES } from "../src/simulation/round-rules";
 
@@ -197,5 +198,65 @@ describe("round intro", () => {
     const layers = new PoseTweener(source).layers({ from: { poseId: "handshake", variant: 1 }, to: { poseId: "handshake", variant: 2 }, t: 0.5 });
     expect(layers).toHaveLength(1);
     expect(layers![0]).toMatchObject({ frame: { poseId: "handshake", variant: 0 }, alpha: 1 });
+  });
+});
+
+describe("match opening", () => {
+  const LINES = [50, 30] as const;
+  function opening(lines: readonly [number, number] = LINES, p2: (frame: number) => ReturnType<typeof input> = () => idle) {
+    const sim = new FightSimulation([geo, geo], { opening: true });
+    sim.setOpeningLines(lines);
+    const states: FightState[] = [];
+    const length = introLength(sim.introPlan);
+    for (let i = 0; i < length; i++) states.push(sim.step([idle, p2(i)]));
+    return { sim, states, events: states.flatMap((s) => s.events) };
+  }
+
+  it("walks both on from off-screen to the handshake, at the usual pace", () => {
+    const sim = new FightSimulation([geo, geo], { opening: true });
+    expect(sim.current.fighters.map((f) => f.position.x)).toEqual([-OFFSCREEN_MARGIN, STAGE_WIDTH + OFFSCREEN_MARGIN]);
+    const { walkIn } = sim.introPlan;
+    expect(walkIn).toBeGreaterThan(INTRO.walkIn);
+    for (let i = 0; i < walkIn; i++) sim.step([idle, idle]);
+    expect(sim.current.fighters.map((f) => f.position.x)).toEqual(sim.handshakePositions());
+  });
+
+  it("gives each player the floor in turn for their intro line, then shakes hands and fights", () => {
+    const { sim, states, events } = opening();
+    const { walkIn } = sim.introPlan;
+    const lineAt = (player: number) => states.findIndex((s) => s.events.some((e) => e.type === "introLine" && e.player === player));
+    expect(lineAt(0)).toBe(walkIn);
+    expect(lineAt(1)).toBe(walkIn + LINES[0]);
+    expect(states[walkIn].fighters.map((f) => f.action)).toEqual(["taunt", "idle"]);
+    expect(states[walkIn + LINES[0]].fighters.map((f) => f.action)).toEqual(["idle", "taunt"]);
+    // Not a taunt in the fight's sense: no taunt event, nothing for the stats.
+    expect(events.some((e) => e.type === "taunt")).toBe(false);
+    const offer = walkIn + LINES[0] + LINES[1] + INTRO.pause;
+    expect(states[offer].fighters[0].action).toBe("handshake");
+    expect(sim.current.round.phase).toBe("fighting");
+    expect(sim.current.fighters.map((f) => f.position.x)).toEqual(new FightSimulation([geo, geo]).current.fighters.map((f) => f.position.x));
+  });
+
+  it("skips a player with no intro line, and refuses a handshake as late as the hand", () => {
+    const { states, events } = opening([0, 40]);
+    expect(events.filter((e) => e.type === "introLine")).toEqual([{ type: "introLine", player: 1 }]);
+    expect(states.some((s) => s.fighters[0].action === "taunt")).toBe(false);
+
+    const sim = new FightSimulation([geo, geo], { opening: true });
+    sim.setOpeningLines(LINES);
+    const due = snubDueFrame(1, sim.introPlan);
+    expect(due).toBe(snubDueFrame(1) + sim.introPlan.walkIn - INTRO.walkIn + LINES[0] + LINES[1]);
+    const snubs = opening(LINES, (i) => input({ right: i === due })).events.filter((e) => e.type === "snub");
+    expect(snubs).toEqual([{ type: "snub", player: 1 }]);
+  });
+
+  it("happens once a match: restarts and later rounds get the ordinary intro", () => {
+    const { sim } = opening();
+    sim.restartRound();
+    expect(sim.introPlan).toBe(ROUND_INTRO);
+    expect(sim.current.fighters.map((f) => f.position.x)).toEqual(new FightSimulation([geo, geo]).current.fighters.map((f) => f.position.x));
+    // Too late once the match has started.
+    sim.setOpeningLines(LINES);
+    expect(sim.introPlan).toBe(ROUND_INTRO);
   });
 });

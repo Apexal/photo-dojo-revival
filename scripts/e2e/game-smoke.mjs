@@ -160,7 +160,7 @@ try {
     const s = window.fotoFighter.scene.getScene("fight").sim.current;
     return { phase: s.round.phase, f: s.fighters.map((f) => ({ x: Math.round(f.position.x), action: f.action, health: f.health })) };
   });
-  await game.waitForFunction(() => window.fotoFighter.scene.getScene("fight").sim.current.round.phase === "fighting", null, { timeout: 5000 });
+  await game.waitForFunction(() => window.fotoFighter.scene.getScene("fight").sim.current.round.phase === "fighting", null, { timeout: 12000 }); // a match opens with a walk-on from off-screen
   const variants = await game.evaluate(() => {
     const scene = window.fotoFighter.scene.getScene("fight");
     return { punch: scene.geometry[1].variants?.punch?.length ?? 0, texture: scene.textures.exists("p1:pose:punch#1") };
@@ -298,7 +298,7 @@ try {
     return !window.fotoFighter.scene.isActive("match-result") && r?.roundNumber === 1 && r.wins[0] === 0 && r.wins[1] === 0;
   }, null, { timeout: 3000 });
   step(`match over → stats page (${matchStats.players[0].hits} clean hits, ${matchStats.players[0].throws} throw) → punch: rematch`);
-  await game.waitForFunction(() => window.fotoFighter.scene.getScene("fight").sim.current.round.phase === "fighting", null, { timeout: 5000 });
+  await game.waitForFunction(() => window.fotoFighter.scene.getScene("fight").sim.current.round.phase === "fighting", null, { timeout: 12000 }); // a match opens with a walk-on from off-screen
 
   // --- vs CPU, then practice: quit to select (pause menu: up from Resume wraps to Quit); one player picks, punch opens the CPU's slot ---
   await game.keyboard.press("Escape");
@@ -348,7 +348,7 @@ try {
   await stepTo("cpu skip", () => window.fotoFighter.scene.isActive("controls")); // the CPU always agrees to skip
   await game.waitForTimeout(600); // the controls screen ignores input at first
   await stepTo("cpu ready", () => window.fotoFighter.scene.isActive("fight"));
-  await game.waitForFunction(() => window.fotoFighter.scene.getScene("fight").sim.current.round.phase === "fighting", null, { timeout: 8000 });
+  await game.waitForFunction(() => window.fotoFighter.scene.getScene("fight").sim.current.round.phase === "fighting", null, { timeout: 12000 }); // a match opens with a walk-on from off-screen
   const vsCpu = await game.evaluate(() => {
     const f = window.fotoFighter.scene.getScene("fight");
     return { input: f.setup.inputs[1], behavior: f.dummy.behavior, practice: f.sim.practice, opponent: f.setup.entries[1].fighter.fighterId, timer: f.timerText.text };

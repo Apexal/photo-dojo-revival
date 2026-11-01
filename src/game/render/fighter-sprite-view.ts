@@ -1,7 +1,7 @@
 import Phaser from "phaser";
 import { trimLeadingSilence } from "../../shared/audio-trim";
 import { SOFT_CUTS, frameGeometry, groundAnchorFor, variantCount, type FighterGeometry } from "../../shared/frame-data";
-import { LANDMARK, POSE_IDS, SOUND_FALLBACK, SOUND_IDS, SPRITE_CANVAS_SIZE, soundTakes, type Fighter, type LimbSide, type NormalizedLandmark, type PoseId, type SoundId } from "../../shared/fighter-model";
+import { LANDMARK, POSE_IDS, SILENT_SOUNDS, SOUND_FALLBACK, SOUND_IDS, SPRITE_CANVAS_SIZE, soundTakes, type Fighter, type LimbSide, type NormalizedLandmark, type PoseId, type SoundId } from "../../shared/fighter-model";
 import { torsoLength } from "../../shared/pose-geometry";
 import { shakenGrip, type HandshakeGrip } from "../../shared/handshake";
 import { allTweens, frameOf, handshakeShakeOf, idleSwayOf, tweenOf, type FrameTween } from "../../simulation/fight-simulation";
@@ -51,7 +51,8 @@ export function preloadFighterTextures(scene: Phaser.Scene, fighter: Fighter, pr
 /**
  * Decode the fighter's voice clips into Phaser's audio cache. Missing or
  * undecodable clips map to the bundled generic sounds; an optional line
- * without takes (SOUND_FALLBACK) gets its fallback line's takes.
+ * without takes (SOUND_FALLBACK) gets its fallback line's takes, and a
+ * SILENT_SOUNDS line with nothing to fall back on gets none.
  */
 export async function loadFighterSounds(scene: Phaser.Scene, fighter: Fighter, prefix: string): Promise<Record<SoundId, string[]>> {
   const keys = Object.fromEntries(SOUND_IDS.map((id) => [id, [] as string[]])) as Record<SoundId, string[]>;
@@ -75,9 +76,13 @@ export async function loadFighterSounds(scene: Phaser.Scene, fighter: Fighter, p
     );
   }
   for (const id of SOUND_IDS) keys[id] = keys[id].filter(Boolean);
+  // Fallbacks take the other line's own takes (before it got a fallback of its own): one step only.
+  const own = { ...keys };
   for (const id of SOUND_IDS) {
     const fallback = SOUND_FALLBACK[id];
-    if (!keys[id].length) keys[id] = fallback && keys[fallback].length ? keys[fallback] : [fallbackSoundKey(id)];
+    if (keys[id].length) continue;
+    if (fallback && own[fallback].length) keys[id] = own[fallback];
+    else keys[id] = SILENT_SOUNDS.includes(id) ? [] : [fallbackSoundKey(id)];
   }
   return keys;
 }
