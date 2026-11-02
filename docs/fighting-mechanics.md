@@ -1,6 +1,6 @@
 # Making fights fair (without making them serious)
 
-> **Status: implemented.** Everything in sections 2–4 is in the game, plus the taunt and "chip can't KO" from section 5: blockstun and hitstun (2.1), throw and tech (2.2), high/low with the low kick and an overhead jump kick (2.3), reach and hurtbox clamping (3.1), uppercut / low kick on inputs (3.2B), cross-ups and alternating sides (3.3), the input buffer, block leniency, the jump wind-up and the replay's mash guard (4). Each rule is covered by tests in `tests/fight-simulation.test.ts` and `tests/collision.test.ts`. Section 1 describes the rules *before* these changes.
+> **Status: implemented.** Everything in sections 2–4 is in the game, plus the taunt from section 5: blockstun and hitstun (2.1), throw and tech (2.2), high/low with the low kick and an overhead jump kick (2.3), reach and hurtbox clamping (3.1), uppercut / low kick on inputs (3.2B), cross-ups and alternating sides (3.3), the input buffer, block leniency, the jump wind-up and the replay's mash guard (4). Each rule is covered by tests in `tests/fight-simulation.test.ts` and `tests/collision.test.ts`. Section 1 describes the rules *before* these changes.
 
 Foto Fighter is a party game: two friends, one laptop, fighters made of their own goofy photos. The goal isn't tournament depth. It's that **the person who plays better usually wins, and nobody feels cheated**. This report looks at where the current rules fall short of that, and what real fighting games do about it. It suggests the smallest changes that fix each problem, ordered by how much they matter.
 
@@ -57,7 +57,7 @@ Minimal version:
 
 ### 2.4 Knockdowns (implemented)
 
-Street Fighter's reset: a throw, or an **uppercut** hit on someone in the air (the anti-air's reward), sends the victim flying back to the floor; a KO hit makes the loser fall too. Other air hits are plain hits, so knockdowns stay an event rather than every exchange.
+Street Fighter's reset: a throw, a clean **jump kick** (the jump-in's reward for getting past the guard), or an **uppercut** hit on someone in the air (the anti-air's reward) sends the victim flying back to the floor; a KO hit makes the loser fall too. Other hits are plain hits, so knockdowns stay an event rather than every exchange.
 
 - `knockdown` (flying) → `downed` (40 frames on the floor) → `wakeup` (12 frames) → free; buffered presses come out on the first free frame (a wake-up attack).
 - The whole time they can't be hit or thrown and have no push box (walk over them): **no juggles**, so this fits the "no combos" rule in section 5. It resets to neutral with the attacker free first; the fixed wake-up timing is the guessing game (attack so it's out as they rise, or wait and block).
@@ -100,7 +100,7 @@ Measured with a simulated option-vs-option table (every pair of options, both st
 - **Kicks lunge:** `advance` on an attack moves the fighter forward evenly over its *active* frames (kick 60 px, low kick 20 px), so the body only closes in after the punch window has passed, and the lunge stops on contact. Moving during startup instead walked the kicker into the punch. Hitboxes still follow the visible limb.
 - **Kicking while backing off doesn't lunge:** a kick (or low kick) pressed with back held comes out in place (`retreating` on the fighter state). Lunging forward when the player is retreating felt like the game ignoring the input, and it removed the backing-off kick that catches someone walking in. Checked in the same table: the in-place kick is never undefeated (a punch beats it at most distances), and walking back then kicking is what beats an incoming lunge kick at 370 px.
 - **Tip-safe kick:** kick pushback 20 (was 10). Blocked from ~310–350 px it can't be punished; blocked closer it can.
-- Result: at every distance up to 290 px and at 370 px, no option is undefeated (the punch loses to a duck read; the kick to block/duck punishes). At ~330 px a well-spaced kick has no counter in the table, but it only nets chip damage against a blocker. That's the reward for spacing.
+- Result: at every distance up to 290 px and at 370 px, no option is undefeated (the punch loses to a duck read; the kick to block/duck punishes). At ~330 px a well-spaced kick has no counter in the table, but it does nothing to a blocker. That's the reward for spacing.
 
 ### 3.2 Make the variants fair (there's a trade-off here)
 
@@ -167,7 +167,7 @@ These are standard in serious fighters, but they'd make Foto Fighter worse for i
 
 **Optional fun that doesn't hurt fairness:**
 - **Taunt** (both buttons while far away): plays the win pose and the taunt line (the victory line if none was recorded), with no gameplay effect except leaving the taunter open.
-- **Chip damage can't KO**, so a blocked kick never ends a round. Blocking should never feel like losing.
+- **Blocked hits do no damage.** Blocking should never feel like losing; what it costs is blockstun and the throw.
 - **A tiny comeback cushion:** the losing fighter's hitstun on the round's final hit is shown in slow motion. It's pure spectacle and changes nothing.
 
 ---

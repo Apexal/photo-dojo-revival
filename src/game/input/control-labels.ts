@@ -3,7 +3,7 @@ import type { FighterAction } from "../../shared/frame-data";
 import type { PlayerInputDescriptor } from "./input-descriptor";
 import { actionKeyLabel } from "./key-bindings";
 
-export type ButtonLabels = { forward: string; back: string; up: string; down: string; punch: string; kick: string };
+export type ButtonLabels = { forward: string; back: string; up: string; down: string; punch: string; kick: string; /** A dedicated block button (a pad's bumpers). */ block?: string };
 
 /**
  * What to press, for one player's device and side of the screen.
@@ -21,6 +21,7 @@ export function controlLabels(input: PlayerInputDescriptor, side: "left" | "righ
     up: dirs.up,
     down: dirs.down,
     ...buttons,
+    ...(input.kind === "pad" ? { block: "LB / RB" } : {}),
   };
 }
 
@@ -39,7 +40,7 @@ export const GRAB_TIPS = "Grabbed? Punch + kick breaks free (not out of a bear h
 export const MOVE_GUIDE: readonly MoveGuide[] = [
   { name: "Walk", action: "walk", how: (b) => `${b.back} / ${b.forward}` },
   { name: "Jump", action: "jump", how: (b) => b.up },
-  { name: "Block", action: "block", how: (b) => `hold ${b.back} or ${b.down}` },
+  { name: "Block", action: "block", how: (b) => (b.block ? `${b.block}, or hold ${b.back} / ${b.down}` : `hold ${b.back} or ${b.down}`) },
   { name: "Punch", action: "punch", how: (b) => b.punch },
   { name: "Kick", action: "kick", how: (b) => b.kick },
   { name: "Uppercut", action: "uppercut", how: (b) => `${b.down} + ${b.punch}` },

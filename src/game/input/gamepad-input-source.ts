@@ -4,7 +4,7 @@ import type { InputSource } from "./input-source";
 import { playRumble, type Rumble } from "./rumble";
 
 /** Standard mapping button indices. */
-export const PAD_BUTTON = { A: 0, B: 1, X: 2, Y: 3, SELECT: 8, START: 9, UP: 12, DOWN: 13, LEFT: 14, RIGHT: 15 } as const;
+export const PAD_BUTTON = { A: 0, B: 1, X: 2, Y: 3, LB: 4, RB: 5, SELECT: 8, START: 9, UP: 12, DOWN: 13, LEFT: 14, RIGHT: 15 } as const;
 export const STICK_DEADZONE = 0.4;
 
 /** Buttons and axes of one pad for this frame. */
@@ -14,7 +14,7 @@ interface PadState {
 }
 
 /**
- * A/Cross = punch, B/Circle = kick, d-pad or left stick to move, Start = pause.
+ * A/Cross = punch, B/Circle = kick, either bumper = standing block, d-pad or left stick to move, Start = pause.
  * Reads the browser's live Gamepad by index each frame. Phaser's copy is per
  * scene and stops updating under an overlay scene that captures input (the
  * pause menu), so it's only the fallback where the Gamepad API is missing.
@@ -66,6 +66,7 @@ export class GamepadInputSource implements InputSource {
       down: b(PAD_BUTTON.DOWN) || y > STICK_DEADZONE * 1.5,
       punch: b(PAD_BUTTON.A) || b(PAD_BUTTON.X),
       kick: b(PAD_BUTTON.B) || b(PAD_BUTTON.Y),
+      block: b(PAD_BUTTON.LB) || b(PAD_BUTTON.RB),
     };
   }
 

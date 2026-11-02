@@ -17,8 +17,14 @@ function source(pad: ReturnType<typeof fakePad> | null) {
 
 describe("GamepadInputSource", () => {
   it("A = punch, B = kick, d-pad moves", () => {
-    expect(source(fakePad([PAD_BUTTON.A, PAD_BUTTON.LEFT])).read()).toEqual({ left: true, right: false, up: false, down: false, punch: true, kick: false });
+    expect(source(fakePad([PAD_BUTTON.A, PAD_BUTTON.LEFT])).read()).toEqual({ left: true, right: false, up: false, down: false, punch: true, kick: false, block: false });
     expect(source(fakePad([PAD_BUTTON.B, PAD_BUTTON.UP])).read()).toMatchObject({ kick: true, up: true, punch: false });
+  });
+
+  it("either bumper is the block button", () => {
+    expect(source(fakePad([PAD_BUTTON.LB])).read().block).toBe(true);
+    expect(source(fakePad([PAD_BUTTON.RB])).read().block).toBe(true);
+    expect(source(fakePad([PAD_BUTTON.A])).read().block).toBe(false);
   });
 
   it("left stick moves past the deadzone", () => {

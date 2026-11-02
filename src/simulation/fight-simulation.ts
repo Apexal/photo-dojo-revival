@@ -496,7 +496,7 @@ export class FightSimulation {
 
     for (const i of [0, 1] as const) {
       const f = prev.fighters[i];
-      const back = f.facing === 1 ? inputs[i].left : inputs[i].right;
+      const back = inputs[i].block || (f.facing === 1 ? inputs[i].left : inputs[i].right);
       this.guardHistory[i].back = back ? 0 : this.guardHistory[i].back + 1;
       this.guardHistory[i].down = inputs[i].down ? 0 : this.guardHistory[i].down + 1;
     }

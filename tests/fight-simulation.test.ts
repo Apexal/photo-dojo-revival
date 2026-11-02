@@ -3,7 +3,7 @@ import { ATTACKS, KNOCKDOWN, THROW } from "../src/shared/frame-data";
 import { stickFigureGeometry } from "../src/shared/stick-figure";
 import { FightSimulation, antiAirImmune, frameOf, hurtboxesOf, headHitLineY, worldBoxesOf, type FightEvent, type FightState } from "../src/simulation/fight-simulation";
 import { createFighterState, currentAttackPhase } from "../src/simulation/fighter-state-machine";
-import { JUMP_IMPULSE, WALK_SPEED, blockedDamage } from "../src/simulation/fighter-state-machine";
+import { JUMP_IMPULSE, WALK_SPEED } from "../src/simulation/fighter-state-machine";
 import { JUMP_SQUAT_FRAMES } from "../src/shared/frame-data";
 import { input, type InputFrame } from "../src/simulation/input-frame";
 import { MAX_HEALTH, ROUND_FRAMES, ROUND_INTRO_FRAMES } from "../src/simulation/round-rules";
@@ -131,21 +131,57 @@ describe("FightSimulation", () => {
     expect(hits).toHaveLength(1);
   });
 
-  it("holding back against an incoming attack blocks for 25% damage and no hitstun", () => {
+  it("holding back against an incoming attack blocks: no damage and no hitstun", () => {
     const sim = fightingSim(150);
     // P2 faces left, so "back" is right.
     const events = run(sim, 10, input({ punch: true }), input({ right: true }));
     const hit = events.find((e) => e.type === "hit");
-    expect(hit).toEqual({ type: "hit", attacker: 0, defender: 1, attack: "punch", blocked: true, damage: blockedDamage(ATTACKS.punch.damage), at: expect.any(Object) });
-    expect(blockedDamage(ATTACKS.punch.damage)).toBe(2);
-    expect(sim.current.fighters[1].health).toBe(MAX_HEALTH - 2);
+    expect(hit).toEqual({ type: "hit", attacker: 0, defender: 1, attack: "punch", blocked: true, damage: 0, at: expect.any(Object) });
+    expect(sim.current.fighters[1].health).toBe(MAX_HEALTH);
     expect(sim.current.fighters[1].action).toBe("blockstun");
   });
 
   it("crouch-block with down also blocks", () => {
     const sim = fightingSim(150);
     const hit = run(sim, 12, input({ kick: true }), input({ down: true })).find((e) => e.type === "hit");
-    expect(hit).toMatchObject({ blocked: true, damage: 3 });
+    expect(hit).toMatchObject({ blocked: true, damage: 0 });
+  });
+
+  describe("the block button (a pad's bumpers)", () => {
+    it("guards standing with no attack coming, instead of walking or jumping", () => {
+      const sim = fightingSim(300);
+      const x = sim.current.fighters[1].position.x;
+      run(sim, 5, idle, input({ block: true, left: true, up: true }));
+      expect(sim.current.fighters[1]).toMatchObject({ action: "block", crouching: false });
+      expect(sim.current.fighters[1].position.x).toBe(x);
+    });
+
+    it("blocks an incoming attack without holding back", () => {
+      const sim = fightingSim(150);
+      const hit = run(sim, 10, input({ punch: true }), input({ block: true })).find((e) => e.type === "hit");
+      expect(hit).toMatchObject({ blocked: true, damage: 0 });
+    });
+
+    it("stays a standing guard with down held: a low kick gets through", () => {
+      const sim = fightingSim(150);
+      const hit = run(sim, 12, input({ kick: true, down: true }), input({ block: true, down: true })).find((e) => e.type === "hit");
+      expect(hit).toMatchObject({ attack: "lowKick", blocked: false });
+    });
+
+    it("turns a jump's wind-up into a block", () => {
+      const sim = fightingSim(300);
+      sim.step([idle, input({ up: true })]);
+      expect(sim.current.fighters[1].action).toBe("jumpSquat");
+      sim.step([idle, input({ block: true })]);
+      expect(sim.current.fighters[1].action).toBe("block");
+    });
+
+    it("still counts just after letting go (block leniency)", () => {
+      const sim = fightingSim(150);
+      run(sim, ATTACKS.punch.startup - 1, input({ punch: true }), input({ block: true }));
+      const hit = run(sim, 6, idle).find((e) => e.type === "hit");
+      expect(hit).toMatchObject({ blocked: true });
+    });
   });
 
   it("holding back with no threat walks backward", () => {
@@ -528,6 +564,20 @@ describe("high / low", () => {
     }
   });
 
+  it("a clean jump kick knocks down; a blocked one doesn't", () => {
+    const jumpKick = (guard: Partial<InputFrame>) => {
+      const sim = fightingSim(220);
+      const p2 = input(guard);
+      sim.step([input({ up: true, right: true }), p2]);
+      run(sim, JUMP_SQUAT_FRAMES + 8, input({ right: true }), p2);
+      return run(sim, 40, input({ kick: true }), p2);
+    };
+    const clean = jumpKick({});
+    expect(clean).toContainEqual(expect.objectContaining({ type: "hit", attack: "jumpKick", blocked: false }));
+    expect(clean).toContainEqual({ type: "knockdown", player: 1 });
+    expect(jumpKick({ right: true }).some((e) => e.type === "knockdown")).toBe(false);
+  });
+
   it("the punch is high: blocked standing, and it whiffs over a crouching guard", () => {
     expect(attackInto({ punch: true }, { right: true })).toMatchObject({ attack: "punch", blocked: true });
     expect(attackInto({ punch: true }, { down: true })).toBeUndefined();
@@ -599,9 +649,9 @@ describe("forgiveness", () => {
     expect(hit).toMatchObject({ blocked: true });
   });
 
-  it("chip damage from blocking can't finish a round", () => {
+  it("a blocked hit costs nothing, even on the last sliver of health", () => {
     const sim = fightingSim(150);
-    (sim as unknown as { state: FightState }).state.fighters[1].health = 2;
+    (sim as unknown as { state: FightState }).state.fighters[1].health = 1;
     run(sim, 30, input({ kick: true }), input({ right: true }));
     expect(sim.current.fighters[1].health).toBe(1);
     expect(sim.current.round.phase).toBe("fighting");
@@ -871,7 +921,7 @@ describe("knockdowns stay rare", () => {
     expect(plain.length).toBeGreaterThan(0);
     expect(plain.every((r) => !r.knockdown)).toBe(true);
     expect(Object.entries(ATTACKS).filter(([, a]) => a.knockdown === "air").map(([id]) => id)).toEqual(["uppercut"]);
-    // The brawler's charge is the one move that knocks anyone down.
-    expect(Object.entries(ATTACKS).filter(([, a]) => a.knockdown === "always").map(([id]) => id)).toEqual(["charge"]);
+    // The jump kick and the brawler's charge knock anyone down.
+    expect(Object.entries(ATTACKS).filter(([, a]) => a.knockdown === "always").map(([id]) => id)).toEqual(["jumpKick", "charge"]);
   });
 });

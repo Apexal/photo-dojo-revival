@@ -25,7 +25,6 @@ export const FLOOR_Y = 0;
 export const GRAVITY = 0.6;
 export const JUMP_IMPULSE = -14;
 export const WALK_SPEED = 4;
-export const BLOCK_DAMAGE_FRACTION = 0.25;
 export const HITSTOP_FRAMES = 6;
 
 export interface FighterState {
@@ -184,6 +183,7 @@ function chooseFreeAction(s: FighterState, ctx: StepContext): FighterState {
   if (pressed.punch) return startMove(s, input.down ? "uppercut" : "punch");
   // Kicking while backing off keeps your distance: no lunge.
   if (pressed.kick) return { ...startMove(s, input.down ? "lowKick" : "kick"), retreating: backHeld };
+  if (input.block) return { ...setAction(s, "block"), crouching: false, velocity: { x: 0, y: 0 } };
   if (input.up) return { ...startMove(s, "jumpSquat"), crouching: false };
   if (input.down || (backHeld && isThreatening(opponent))) return { ...setAction(s, "block"), crouching: input.down, velocity: { x: 0, y: 0 } };
   if (forwardHeld !== backHeld) {
@@ -245,8 +245,8 @@ export function stepFighter(s: FighterState, ctx: StepContext): FighterState {
     case "jumpSquat": {
       // The wind-up can still turn into a block.
       const backHeld = s.facing === 1 ? ctx.input.left : ctx.input.right;
-      if (ctx.controllable && (ctx.input.down || (backHeld && isThreatening(ctx.opponent)))) {
-        next = { ...s, action: "block", actionFrame: 0, crouching: ctx.input.down, velocity: { x: 0, y: 0 } };
+      if (ctx.controllable && (ctx.input.block || ctx.input.down || (backHeld && isThreatening(ctx.opponent)))) {
+        next = { ...s, action: "block", actionFrame: 0, crouching: ctx.input.down && !ctx.input.block, velocity: { x: 0, y: 0 } };
       } else if (s.actionFrame + 1 >= JUMP_SQUAT_FRAMES) {
         const dir = ctx.input.right === ctx.input.left ? 0 : ctx.input.right ? 1 : -1;
         next = { ...s, action: "jump", actionFrame: 0, airAttackUsed: false, velocity: { x: dir * WALK_SPEED, y: JUMP_IMPULSE } };
@@ -318,20 +318,13 @@ export function stepFighter(s: FighterState, ctx: StepContext): FighterState {
   return applyPhysics(next);
 }
 
-/** Damage after blocking; blocked hits take 25%. */
-export function blockedDamage(damage: number): number {
-  return Math.round(damage * BLOCK_DAMAGE_FRACTION);
-}
-
 /** `minHealth` 1 = practice mode: nobody gets KO'd. */
 export function applyHit(defender: FighterState, attack: AttackId, blocked: boolean, minHealth = 0): FighterState {
   const data = ATTACKS[attack];
-  const damage = blocked ? blockedDamage(data.damage) : data.damage;
-  // Chip damage from a blocked hit never finishes a round: blocking shouldn't feel like losing.
-  const health = Math.max(blocked ? Math.max(1, minHealth) : minHealth, defender.health - damage);
+  // Blocked: no damage, just locked in block (blockstun, no hitstun).
+  if (blocked) return { ...defender, action: "blockstun", actionFrame: 0, stunFrames: data.blockstun, velocity: { x: 0, y: defender.velocity.y } };
+  const health = Math.max(minHealth, defender.health - data.damage);
   if (health <= 0) return { ...defender, health, action: "ko", actionFrame: 0, stunFrames: 0, velocity: { x: 0, y: defender.velocity.y } };
-  // Blockstun: locked in block, no hitstun.
-  if (blocked) return { ...defender, health, action: "blockstun", actionFrame: 0, stunFrames: data.blockstun, velocity: { x: 0, y: defender.velocity.y } };
   return { ...defender, health, action: "hurt", actionFrame: 0, stunFrames: data.hitstun, velocity: { x: 0, y: defender.velocity.y } };
 }
 

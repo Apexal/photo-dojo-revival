@@ -45,8 +45,8 @@ export interface AttackData {
   /** Which limb carries the hitbox (shoulder: the lead shoulder and upper arm). */
   limb: "arm" | "leg" | "shoulder";
   /**
-   * A clean hit knocks down: "air" only someone in the air (the anti-air's reward;
-   * other air hits are plain hits), "always" anyone.
+   * A clean hit knocks down: "air" only someone in the air (the uppercut, the anti-air's
+   * reward), "always" anyone.
    */
   knockdown?: "air" | "always";
   level: HitLevel;
@@ -123,7 +123,7 @@ export const ATTACKS: Record<AttackId, AttackData> = {
    */
   jumpKick: {
     startup: 5, active: 40, recovery: 4, damage: 10, hitstun: 17, blockstun: 12, pushback: 8,
-    limb: "leg", level: "overhead", pose: { poseId: "kick", variant: 0 },
+    limb: "leg", level: "overhead", pose: { poseId: "kick", variant: 0 }, knockdown: "always",
     sequence: [
       { fromPoseId: "jump", toPoseId: "kick", frames: 5, phase: "startup" },
       { poseId: "kick", frames: 40, phase: "active" },
@@ -261,8 +261,8 @@ export function parryActiveAt(actionFrame: number): boolean {
 }
 
 /**
- * Knockdown, Street Fighter style: a grab, a shoulder charge, or an anti-air
- * (uppercut) hit on someone in the air, sends them flying back to the floor (other
+ * Knockdown, Street Fighter style: a grab, a shoulder charge, a jump kick, or an
+ * anti-air (uppercut) hit on someone in the air, sends them flying back to the floor (other
  * hits are plain hits: knockdowns should be an event, not every exchange); they lie there, then get up. All
  * the while they can't be hit or thrown and have no push box (walk over them):
  * no juggles, just a reset to neutral with the attacker free first. The fixed
