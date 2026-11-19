@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
-import { GamepadInputSource, PAD_BUTTON } from "../src/game/input/gamepad-input-source";
+import { GamepadInputSource, PAD_BUTTON, padBinding } from "../src/game/input/gamepad-input-source";
+import { sameInput } from "../src/game/input/input-descriptor";
+import { padConnections } from "../src/game/input/pad-connections";
 import { signalingBaseUrl, signalingHttpBase, signalingUrl } from "../src/transfer/signaling-client";
 
 function fakePad(pressed: number[] = [], axes: [number, number] = [0, 0], connected = true) {
@@ -460,5 +462,146 @@ describe("controller rumble", () => {
     }
     expect(live).toHaveLength(2);
     expect(stale).toHaveLength(0);
+  });
+});
+
+describe("controllers falling asleep and waking up", () => {
+  /** A browser Gamepad. */
+  const livePad = (index: number, id: string, pressed: number[] = []) => ({
+    index, id, connected: true, axes: [0, 0],
+    buttons: Array.from({ length: 17 }, (_, i) => ({ pressed: pressed.includes(i) })),
+  });
+  type LivePad = ReturnType<typeof livePad>;
+
+  /** Runs `body` with navigator.getGamepads() returning `slots` (mutable). */
+  function withPads(body: (slots: (LivePad | null)[]) => void) {
+    const nav = globalThis.navigator as unknown as { getGamepads?: () => unknown[] };
+    const original = nav.getGamepads;
+    const slots: (LivePad | null)[] = [null, null, null, null];
+    nav.getGamepads = () => slots;
+    try { body(slots); } finally { nav.getGamepads = original; }
+  }
+  const plugin = { getPad: () => null } as never;
+  const connect = (slots: (LivePad | null)[], pad: LivePad) => { slots[pad.index] = pad; padConnections.connected(pad.index); };
+  const disconnect = (slots: (LivePad | null)[], index: number) => { slots[index] = null; padConnections.disconnected(index); };
+
+  it("a pad that wakes up in a player's old slot doesn't drive them", () => {
+    withPads((slots) => {
+      connect(slots, livePad(0, "sleepy-a"));
+      const p1 = new GamepadInputSource(plugin, padBinding(0));
+      expect(p1.connected).toBe(true);
+      disconnect(slots, 0);
+      expect(p1.connected).toBe(false);
+      // Someone else's pad lands in slot 0, holding punch.
+      connect(slots, livePad(0, "sleepy-b", [PAD_BUTTON.A]));
+      expect(p1.connected).toBe(false);
+      expect(p1.read().punch).toBe(false);
+    });
+  });
+
+  it("is a new connection even when the events were missed (seen empty by a poll)", () => {
+    withPads((slots) => {
+      slots[0] = livePad(0, "missed");
+      const p1 = new GamepadInputSource(plugin, padBinding(0));
+      expect(p1.connected).toBe(true);
+      slots[0] = null;
+      expect(p1.connected).toBe(false);
+      slots[0] = livePad(0, "missed");
+      expect(p1.connected).toBe(false);
+    });
+  });
+
+  it("both asleep, P2's wakes first into slot 0: it goes back to P2, not P1", () => {
+    withPads((slots) => {
+      connect(slots, livePad(0, "xbox-pad"));
+      connect(slots, livePad(1, "ps-pad"));
+      const p1 = new GamepadInputSource(plugin, padBinding(0));
+      const p2 = new GamepadInputSource(plugin, padBinding(1));
+      disconnect(slots, 0);
+      disconnect(slots, 1);
+      // P2's pad wakes up first: the browser gives it slot 0. The waking press doesn't count.
+      const ps = livePad(0, "ps-pad", [16]);
+      connect(slots, ps);
+      expect(p1.read().punch || p2.read().punch).toBe(false);
+      expect([p1.connected, p2.connected]).toEqual([false, false]);
+      ps.buttons[16].pressed = false;
+      p1.read(); p2.read();
+      ps.buttons[PAD_BUTTON.A].pressed = true;
+      // P1 had another model: this one is P2's.
+      expect(p1.read().punch).toBe(false);
+      expect(p1.connected).toBe(false);
+      // P2 takes it back; the press that did it isn't a punch.
+      expect(p2.read().punch).toBe(false);
+      expect(p2.connected).toBe(true);
+      expect(p2.padIndex).toBe(0);
+      ps.buttons[PAD_BUTTON.A].pressed = false;
+      expect(p2.read().punch).toBe(false);
+      ps.buttons[PAD_BUTTON.A].pressed = true;
+      expect(p2.read().punch).toBe(true);
+      // P1's pad wakes into slot 1 and comes back to P1.
+      const xbox = livePad(1, "xbox-pad");
+      connect(slots, xbox);
+      p1.read();
+      xbox.buttons[PAD_BUTTON.B].pressed = true;
+      p1.read();
+      expect([p1.connected, p1.padIndex]).toEqual([true, 1]);
+    });
+  });
+
+  it("reclaim(): two lost pads of one model, whoever asks first gets the press", () => {
+    withPads((slots) => {
+      connect(slots, livePad(0, "twin"));
+      connect(slots, livePad(1, "twin"));
+      const p1 = new GamepadInputSource(plugin, padBinding(0));
+      const p2 = new GamepadInputSource(plugin, padBinding(1));
+      disconnect(slots, 0);
+      disconnect(slots, 1);
+      const pad = livePad(0, "twin");
+      connect(slots, pad);
+      expect(p2.reclaim()).toBe(false); // seen with every button up first
+      pad.buttons[PAD_BUTTON.A].pressed = true;
+      // The pause menu asks for P2 first.
+      expect(p2.reclaim()).toBe(true);
+      expect(p1.reclaim()).toBe(false);
+      expect([p1.connected, p2.connected, p2.padIndex]).toEqual([false, true, 0]);
+      expect(p2.reclaim()).toBe(false); // not lost any more
+    });
+  });
+
+  it("a lost player can't take a pad another player is holding", () => {
+    withPads((slots) => {
+      const mine = livePad(0, "held-a");
+      connect(slots, mine);
+      connect(slots, livePad(1, "held-b"));
+      const p1 = new GamepadInputSource(plugin, padBinding(0));
+      const p2 = new GamepadInputSource(plugin, padBinding(1));
+      disconnect(slots, 1);
+      p2.read();
+      mine.buttons[PAD_BUTTON.A].pressed = true;
+      expect(p2.read().punch).toBe(false);
+      expect(p2.connected).toBe(false);
+      expect(p1.read().punch).toBe(true);
+    });
+  });
+
+  it("menus' unbound sources still read whatever pad is in the slot", () => {
+    withPads((slots) => {
+      connect(slots, livePad(2, "menu-a"));
+      const menu = new GamepadInputSource(plugin, 2);
+      disconnect(slots, 2);
+      connect(slots, livePad(2, "menu-b", [PAD_BUTTON.A]));
+      expect(menu.read().punch).toBe(true);
+    });
+  });
+
+  it("the same pad in the same connection is the same input; a new connection isn't", () => {
+    withPads((slots) => {
+      connect(slots, livePad(3, "same"));
+      const a = padBinding(3);
+      expect(sameInput(a, padBinding(3))).toBe(true);
+      disconnect(slots, 3);
+      connect(slots, livePad(3, "same"));
+      expect(sameInput(a, padBinding(3))).toBe(false);
+    });
   });
 });

@@ -140,6 +140,16 @@ Notes:
 - **No stat leans** (speed, health, damage) for now: the moves need tuning on their own first.
 - **Tests:** `tests/signature-moves.test.ts`; each archetype also plays the whole tutorial in `tests/tutorial.test.ts`.
 
+### 3.5 Movement: snappy in, snappy out (implemented)
+
+Playtesters found movement slow, and felt punished for walking in to attack and for backing off. Four changes, all in `fighter-state-machine.ts`:
+- **Proximity guard.** Holding back used to turn into a block whenever the opponent was in an attack's startup or active frames, at any distance, so a whiff from across the screen froze a retreating player for the whole swing. Now it only does when the move could reach (`threatReaches` in `fight-simulation.ts`, passed in as `StepContext.threatened`): the attack's own active hitbox, placed where the attacker will be (plus any lunge still to come, or an airborne attacker's drift), within `THREAT_MARGIN` (30 px) of the defender's push box. A retreating kick doesn't lunge, so its range is shorter. Block leniency (section 4) still blocks a hit landing just after back was let go.
+- **Walk speeds.** Forward 5.5 px/frame, back 4.5 (both were 4): closing in is quick, running away still costs something.
+- **Momentum into attacks.** An attack pressed mid-walk keeps half the walk's speed through its startup (`ATTACK_CARRY`), then stops (kicks lunge over their active frames as before). From standing, attacks don't move. Grabs never carry.
+- **Snappier jump.** Jumps fall with `JUMP_GRAVITY` 0.8 and launch at −16: about 40 frames in the air (was 46) at the same height. Sideways speed is `JUMP_SPEED_X` 4.5, so a jump covers about the same ground. Knockdowns, throws and the ragdoll keep `GRAVITY` 0.6.
+
+The spacing balance in 3.1c was measured before these changes and needs re-checking: walk-in attacks now reach a little further (about 11 px for a punch, 19 px for a kick) and backing off is quicker.
+
 ---
 
 ## 4. Forgiveness for casual hands (cheap, high impact)

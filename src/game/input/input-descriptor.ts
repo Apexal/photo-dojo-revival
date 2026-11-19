@@ -1,6 +1,6 @@
 import type Phaser from "phaser";
 import { CPU_LEVEL_NAMES, type CpuLevel } from "./cpu-player";
-import { GamepadInputSource } from "./gamepad-input-source";
+import { GamepadInputSource, type PadBinding } from "./gamepad-input-source";
 import type { InputSource } from "./input-source";
 import { actionKeyLabel } from "./key-bindings";
 import { KeyboardInputSource, type KeyboardLayout } from "./keyboard-input-source";
@@ -8,7 +8,8 @@ import { KeyboardInputSource, type KeyboardLayout } from "./keyboard-input-sourc
 /** Serializable description of a player's controller, so each scene can bind its own input plugin. */
 export type InputDescriptor =
   | { kind: "keyboard"; layout: KeyboardLayout }
-  | { kind: "pad"; index: number }
+  /** A gamepad: its slot and the connection in it (see PadBinding). Made with `padBinding`. */
+  | PadBinding
   /** Practice-mode opponent; the fight scene creates it (it needs the simulation). */
   | { kind: "dummy" }
   /** A match's computer opponent; likewise made by the fight scene. */
@@ -18,7 +19,7 @@ export type PlayerInputDescriptor = Exclude<InputDescriptor, { kind: "dummy" } |
 export const isPlayerInput = (d: InputDescriptor): d is PlayerInputDescriptor => d.kind !== "dummy" && d.kind !== "cpu";
 
 export function createInputSource(scene: Phaser.Scene, d: PlayerInputDescriptor): InputSource {
-  return d.kind === "keyboard" ? new KeyboardInputSource(scene, d.layout) : new GamepadInputSource(scene.input.gamepad!, d.index);
+  return d.kind === "keyboard" ? new KeyboardInputSource(scene, d.layout) : new GamepadInputSource(scene.input.gamepad!, d);
 }
 
 export const describeInput = (d: InputDescriptor) =>
@@ -33,5 +34,8 @@ export function keyboardKeys(layout: KeyboardLayout): string {
   return `${dirs.every((d) => d.length === 1) ? dirs.join("") : dirs.join(" ")} + ${k("punch")}/${k("kick")}`;
 }
 
+/** Pads: the same slot and the same connection in it (a pad that woke up in someone's old slot isn't theirs). */
 export const sameInput = (a: InputDescriptor, b: InputDescriptor) =>
-  a.kind === b.kind && (a.kind === "keyboard" ? a.layout === (b as typeof a).layout : a.kind === "pad" ? a.index === (b as typeof a).index : a.kind === "cpu" ? a.level === (b as typeof a).level : true);
+  a.kind === b.kind && (a.kind === "keyboard" ? a.layout === (b as typeof a).layout
+    : a.kind === "pad" ? a.index === (b as typeof a).index && a.connection === (b as typeof a).connection
+    : a.kind === "cpu" ? a.level === (b as typeof a).level : true);

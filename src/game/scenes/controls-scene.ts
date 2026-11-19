@@ -2,7 +2,7 @@ import Phaser from "phaser";
 import { ATTACKS, GRABS, PARRY_TOTAL_FRAMES, grabTotalFrames, groundAnchorFor, isGrab, type FighterAction, type FighterGeometry } from "../../shared/frame-data";
 import { SPRITE_CANVAS_SIZE } from "../../shared/fighter-model";
 import { frameOf } from "../../simulation/fight-simulation";
-import { GRAVITY, JUMP_IMPULSE, createFighterState, isAttack } from "../../simulation/fighter-state-machine";
+import { JUMP_GRAVITY, JUMP_IMPULSE, createFighterState, isAttack } from "../../simulation/fighter-state-machine";
 import type { InputFrame } from "../../simulation/input-frame";
 import { geometryOf } from "../fighter-library";
 import { GRAB_TIPS, GUARD_TIPS, controlLabels, deviceName, moveGuide } from "../input/control-labels";
@@ -40,7 +40,7 @@ function loopFrames(action: FighterAction): number {
   if (isAttack(action)) return ATTACKS[action].startup + ATTACKS[action].active + ATTACKS[action].recovery;
   if (isGrab(action)) return grabTotalFrames(GRABS[action]);
   if (action === "parry") return PARRY_TOTAL_FRAMES;
-  if (action === "jump") return Math.round((2 * -JUMP_IMPULSE) / GRAVITY);
+  if (action === "jump") return Math.round((2 * -JUMP_IMPULSE) / JUMP_GRAVITY);
   return 40;
 }
 
@@ -199,7 +199,7 @@ export class ControlsScene extends Phaser.Scene {
     const anchor = groundAnchorFor(this.geometry[card.player], poseId, variant);
     card.sprite.setOrigin(anchor.x / SPRITE_CANVAS_SIZE, anchor.y / SPRITE_CANVAS_SIZE);
     // Jump: follow the real arc, scaled to the card.
-    const height = playing && card.action === "jump" ? -JUMP_IMPULSE * t - (GRAVITY * t * t) / 2 : 0;
+    const height = playing && card.action === "jump" ? -JUMP_IMPULSE * t - (JUMP_GRAVITY * t * t) / 2 : 0;
     card.sprite.y = card.baseY - Math.max(0, height) * SPRITE_SCALE;
   }
 }

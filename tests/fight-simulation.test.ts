@@ -3,7 +3,7 @@ import { ATTACKS, KNOCKDOWN, THROW } from "../src/shared/frame-data";
 import { stickFigureGeometry } from "../src/shared/stick-figure";
 import { FightSimulation, antiAirImmune, frameOf, hurtboxesOf, headHitLineY, worldBoxesOf, type FightEvent, type FightState } from "../src/simulation/fight-simulation";
 import { createFighterState, currentAttackPhase } from "../src/simulation/fighter-state-machine";
-import { JUMP_IMPULSE, WALK_SPEED } from "../src/simulation/fighter-state-machine";
+import { JUMP_IMPULSE, WALK_BACK_SPEED, WALK_FORWARD_SPEED } from "../src/simulation/fighter-state-machine";
 import { JUMP_SQUAT_FRAMES } from "../src/shared/frame-data";
 import { input, type InputFrame } from "../src/simulation/input-frame";
 import { MAX_HEALTH, ROUND_FRAMES, ROUND_INTRO_FRAMES } from "../src/simulation/round-rules";
@@ -35,11 +35,11 @@ describe("FightSimulation", () => {
     expect(sim.step([idle, idle]).events).toContainEqual({ type: "fight" });
   });
 
-  it("walks at 4 px/frame and faces the opponent", () => {
+  it("walks forward at WALK_FORWARD_SPEED and faces the opponent", () => {
     const sim = fightingSim(600);
     const x0 = sim.current.fighters[0].position.x;
     run(sim, 10, input({ right: true }));
-    expect(sim.current.fighters[0].position.x).toBe(x0 + 10 * WALK_SPEED);
+    expect(sim.current.fighters[0].position.x).toBe(x0 + 10 * WALK_FORWARD_SPEED);
     expect(sim.current.fighters[0].action).toBe("walk");
     expect(sim.current.fighters[0].facing).toBe(1);
     expect(sim.current.fighters[1].facing).toBe(-1);
@@ -64,8 +64,9 @@ describe("FightSimulation", () => {
     expect(s.fighters[0].position.y).toBe(0);
     expect(s.fighters[0].action).toBe("idle");
     expect(minY).toBeLessThan(-150);
-    expect(frames).toBeGreaterThan(40);
-    expect(frames).toBeLessThan(50);
+    // About 40 frames in the air (JUMP_GRAVITY): snappy, but as high as ever.
+    expect(frames).toBeGreaterThanOrEqual(38);
+    expect(frames).toBeLessThanOrEqual(42);
   });
 
   it("punch connects on frame 5 and applies damage, hitstun, pushback", () => {
@@ -189,7 +190,63 @@ describe("FightSimulation", () => {
     const x = sim.current.fighters[1].position.x;
     run(sim, 5, idle, input({ right: true }));
     expect(sim.current.fighters[1].action).toBe("walk");
-    expect(sim.current.fighters[1].position.x).toBe(x + 5 * WALK_SPEED);
+    expect(sim.current.fighters[1].position.x).toBe(x + 5 * WALK_BACK_SPEED);
+  });
+
+  it("walks forward faster than back", () => {
+    expect(WALK_FORWARD_SPEED).toBeGreaterThan(WALK_BACK_SPEED);
+  });
+
+  describe("proximity guard: holding back blocks only an attack that could reach", () => {
+    /** P1 attacks from `gap` px away while P2 holds back; P2's action and how far they moved during the startup. */
+    const backOff = (gap: number, attack: Partial<InputFrame>) => {
+      const sim = fightingSim(gap);
+      const x = sim.current.fighters[1].position.x;
+      run(sim, 3, input(attack), input({ right: true }));
+      return { action: sim.current.fighters[1].action, moved: sim.current.fighters[1].position.x - x };
+    };
+
+    it("backing off from a swing that can't reach keeps walking", () => {
+      expect(backOff(600, { punch: true })).toEqual({ action: "walk", moved: 3 * WALK_BACK_SPEED });
+      expect(backOff(600, { kick: true })).toEqual({ action: "walk", moved: 3 * WALK_BACK_SPEED });
+    });
+
+    // `moved`: one step back on the press frame itself, before the attack has started.
+    it("an attack in range still stops them in a guard", () => {
+      expect(backOff(150, { punch: true })).toEqual({ action: "block", moved: WALK_BACK_SPEED });
+    });
+
+    it("counts the kick's lunge as range", () => {
+      // Out of the kick's standing reach, but not of where the lunge takes it.
+      expect(backOff(280, { kick: true })).toEqual({ action: "block", moved: WALK_BACK_SPEED });
+      // A kick pressed backing off doesn't lunge, so it doesn't reach that far.
+      expect(backOff(280, { kick: true, left: true }).action).toBe("walk");
+    });
+  });
+
+  describe("attacking out of a walk", () => {
+    /** How far P1 travels through each phase of a punch pressed after walking (or standing). */
+    const travel = (walkFirst: boolean) => {
+      const sim = fightingSim(600);
+      if (walkFirst) run(sim, 5, input({ right: true }));
+      const x0 = sim.current.fighters[0].position.x;
+      sim.step([input({ punch: true }), idle]);
+      run(sim, ATTACKS.punch.startup - 1);
+      const x1 = sim.current.fighters[0].position.x;
+      run(sim, ATTACKS.punch.active + ATTACKS.punch.recovery - 1);
+      expect(sim.current.fighters[0].action).toBe("punch");
+      return { startup: x1 - x0, after: sim.current.fighters[0].position.x - x1 };
+    };
+
+    it("carries half the walk's speed through the startup, then stops", () => {
+      const { startup, after } = travel(true);
+      expect(startup).toBeCloseTo(ATTACKS.punch.startup * WALK_FORWARD_SPEED * 0.5, 5);
+      expect(after).toBe(0);
+    });
+
+    it("an attack from standing still doesn't move", () => {
+      expect(travel(false)).toEqual({ startup: 0, after: 0 });
+    });
   });
 
   it("punches whiff at long range", () => {
@@ -350,6 +407,12 @@ describe("moves from inputs", () => {
     expect(fightingSim(100).step([input({ throw: true }), idle]).fighters[0].action).toBe("throw");
     expect(fightingSim(600).step([input({ throw: true }), idle]).fighters[0].action).toBe("taunt");
     expect(fightingSim(600).step([input({ throw: true, down: true }), idle]).fighters[0].action).toBe("charge");
+  });
+
+  it("the throw button throws even with punch already held", () => {
+    const sim = fightingSim(100);
+    run(sim, 60, input({ punch: true })); // the punch comes out and recovers, punch still held
+    expect(sim.step([input({ punch: true, throw: true }), idle]).fighters[0].action).toBe("throw");
   });
 
   it("an uppercut connects up close", () => {

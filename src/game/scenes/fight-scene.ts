@@ -10,6 +10,7 @@ import { geometryOf, type LibraryEntry } from "../fighter-library";
 import { DUMMY_BEHAVIORS, DummyInputSource, cpuBehavior, nextCpuBehavior } from "../input/dummy-input-source";
 import { createInputSource, isPlayerInput, sameInput, type InputDescriptor, type PlayerInputDescriptor } from "../input/input-descriptor";
 import { PAD_BUTTON } from "../input/gamepad-input-source";
+import { padConnections } from "../input/pad-connections";
 import type { InputSource } from "../input/input-source";
 import { layoutForKey } from "../input/key-bindings";
 import { FighterSpriteView, fallbackSoundKey, fighterTextureKeys, loadFighterSounds, preloadFighterTextures } from "../render/fighter-sprite-view";
@@ -414,7 +415,9 @@ export class FightScene extends Phaser.Scene {
     this.checkControllers();
     if (this.paused) {
       // The pause menu reads its own inputs; drain ours so nothing fires on resume.
-      this.sources.forEach((s) => { if (s !== this.dummy) { s.read(); s.pausePressed(); } });
+      // Not a lost one: reading it would take a pad back behind the menu's
+      // back (pollReconnect does that, in the menu's order).
+      this.sources.forEach((s) => { if (s !== this.dummy && s.connected) { s.read(); s.pausePressed(); } });
       return;
     }
     // Poll every source (no short-circuit) so a press shared by both keyboard halves is consumed once.
@@ -584,6 +587,8 @@ export class FightScene extends Phaser.Scene {
 
   /** A player's gamepad unplugged or out of battery: pause until they press a button again. */
   private checkControllers(): void {
+    // Their source took its pad back (pollReconnect, or a read before the pause).
+    if (this.disconnected !== null && this.sources[this.disconnected].connected) this.disconnected = null;
     if (this.disconnected !== null) return;
     const lost = this.setup.inputs.findIndex((d, i) => d.kind === "pad" && !this.sources[i].connected);
     if (lost < 0) return;
@@ -592,35 +597,54 @@ export class FightScene extends Phaser.Scene {
   }
 
   /**
-   * Called by the pause menu each frame, before it reads its own input: a button
-   * on any pad the other player isn't using takes over the missing controller.
-   * Polled from the browser because Phaser's per-scene pad events don't reach
-   * this scene while the menu is on top.
+   * Called by the pause menu each frame, before it reads its own input. Lost
+   * pads are taken back by their own sources (GamepadInputSource.reclaim: a
+   * fresh press on a pad nobody holds, matched by model), asked here with the
+   * player the menu names first, so with both pads lost and of one model a
+   * press goes to them. Keyboard halves take over through `reconnect`.
+   * Returns true when it used up a press (a reconnect, or the press that woke a
+   * pad), which then mustn't also be a menu choice.
    */
-  pollReconnect(): void {
-    if (this.disconnected === null || typeof navigator === "undefined" || !navigator.getGamepads) return;
-    for (const pad of navigator.getGamepads()) {
-      if (pad?.connected && pad.buttons.some((b) => b.pressed)) {
-        this.reconnect({ kind: "pad", index: pad.index });
-        if (this.disconnected === null) return;
+  pollReconnect(): boolean {
+    const asked = this.disconnected;
+    if (asked === null) return false;
+    let consumed = false;
+    for (const i of [asked, asked === 0 ? 1 : 0] as const) {
+      if (this.dummy && this.sources[i] === this.dummy) continue;
+      if (!this.sources[i].reclaim?.()) continue;
+      consumed = true;
+      this.heldMask[i] = new Set();
+      if (getOptions(this.registry).rumble) this.sources[i].rumble?.(JOIN_RUMBLE);
+    }
+    if (this.sources[asked].connected) this.disconnected = null; // checkControllers asks for the next lost one, if any
+    // The press that woke (or plugged in) a pad doesn't reconnect, but isn't a menu choice either.
+    if (typeof navigator !== "undefined" && navigator.getGamepads) {
+      for (const pad of navigator.getGamepads()) {
+        if (!pad?.connected) continue;
+        const pressed = pad.buttons.some((b) => b.pressed);
+        if (pressed && !padConnections.freshPress(pad.index, pressed)) consumed = true;
       }
     }
+    return consumed;
   }
 
-  /** Any button on a pad or keyboard half the other player isn't using takes over the missing controller. */
-  private reconnect(input: PlayerInputDescriptor): void {
+  /** A keyboard half the other player isn't using takes over the missing controller (pads take their seat back themselves: pollReconnect). */
+  private reconnect(input: PlayerInputDescriptor): boolean {
     const player = this.disconnected;
-    if (player === null) return;
+    if (player === null) return false;
     const other = this.setup.inputs[player === 0 ? 1 : 0];
-    if (sameInput(other, input)) return;
+    if (sameInput(other, input)) return false;
     (this.setup.inputs as InputDescriptor[])[player] = input; // a rematch keeps the new controller
     // So does the next match of a tournament / king of the hill (built from the series' own inputs).
     const series: SeriesSession | undefined = this.setup.series ? this.registry.get(REGISTRY.series) : undefined;
     if (series) series.inputs[player] = input;
+    this.sources[player].release?.(); // its old binding no longer holds a seat
     this.sources[player] = createInputSource(this, input);
     this.heldMask[player] = new Set();
+    // Back to fighting once nobody's missing (checkControllers asks for the next lost one, if any).
     this.disconnected = null;
     if (getOptions(this.registry).rumble) this.sources[player].rumble?.(JOIN_RUMBLE);
+    return true;
   }
 
   quitToSelect(): void {

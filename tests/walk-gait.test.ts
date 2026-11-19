@@ -5,7 +5,7 @@ import { buildStickFigureLandmarks } from "../src/shared/stick-figure";
 import { interpolateLandmarks } from "../src/game/render/pose-tweener";
 import { GaitShape, STEP_LIFT, WalkGait, stepPose, type GaitFrame } from "../src/game/render/walk-gait";
 import { STRIDE_LIMITS } from "../src/shared/walk-step";
-import { WALK_SPEED } from "../src/simulation/fighter-state-machine";
+import { WALK_BACK_SPEED, WALK_FORWARD_SPEED as WALK_SPEED } from "../src/simulation/fighter-state-machine";
 
 /** Like the tweener: each capture relative to its own feet anchor. */
 const relative = (poseId: "idle" | "walk") => {
@@ -35,6 +35,9 @@ function walk(gait: WalkGait, frames: number, speed: number, facing: 1 | -1 = 1,
 const plantedSlip = (run: ReturnType<typeof walk>) =>
   run.slice(1).map((r, i) => Math.min(Math.abs(r.left - run[i].left), Math.abs(r.right - run[i].right)));
 
+/** Frames where the planted foot may change hands: about one per 40 px walked. */
+const crossings = (frames: number, speed: number) => Math.ceil((frames * Math.abs(speed)) / 40);
+
 describe("the walk gait", () => {
   it("measures a stride from the stance and the step, within the limits", () => {
     expect(shape).not.toBeNull();
@@ -48,7 +51,7 @@ describe("the walk gait", () => {
     const run = walk(new WalkGait(shape), 120, WALK_SPEED);
     const slips = plantedSlip(run);
     // Every frame but the ones crossing from one half to the other (where the planted foot changes hands).
-    expect(slips.filter((s) => s > 0.25).length).toBeLessThanOrEqual(Math.ceil(120 / 10));
+    expect(slips.filter((s) => s > 0.25).length).toBeLessThanOrEqual(crossings(120, WALK_SPEED));
     expect(Math.max(...slips)).toBeLessThan(WALK_SPEED);
     // And it actually walks: both feet end up well ahead.
     expect(Math.min(run.at(-1)!.left - run[0].left, run.at(-1)!.right - run[0].right)).toBeGreaterThan(WALK_SPEED * 100);
@@ -68,12 +71,12 @@ describe("the walk gait", () => {
   });
 
   it("walks backward with the planted feet swapped, not a moonwalk", () => {
-    const run = walk(new WalkGait(shape), 120, -WALK_SPEED, 1);
+    const run = walk(new WalkGait(shape), 120, -WALK_BACK_SPEED, 1);
     const slips = plantedSlip(run);
-    expect(slips.filter((s) => s > 0.25).length).toBeLessThanOrEqual(Math.ceil(120 / 10));
+    expect(slips.filter((s) => s > 0.25).length).toBeLessThanOrEqual(crossings(120, WALK_BACK_SPEED));
     // Facing left (player 2 walking toward the right is backward for them).
-    const mirrored = plantedSlip(walk(new WalkGait(shape), 120, WALK_SPEED, -1));
-    expect(mirrored.filter((s) => s > 0.25).length).toBeLessThanOrEqual(Math.ceil(120 / 10));
+    const mirrored = plantedSlip(walk(new WalkGait(shape), 120, WALK_BACK_SPEED, -1));
+    expect(mirrored.filter((s) => s > 0.25).length).toBeLessThanOrEqual(crossings(120, WALK_BACK_SPEED));
   });
 
   it("turns around mid-stride without a jump in the pose", () => {

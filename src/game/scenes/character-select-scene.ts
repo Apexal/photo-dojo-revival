@@ -9,7 +9,7 @@ import type { InputFrame } from "../../simulation/input-frame";
 import { geometryOf, type LibraryEntry } from "../fighter-library";
 import { playGameSound } from "../game-sounds";
 import { announce } from "../announcer";
-import { PAD_BUTTON } from "../input/gamepad-input-source";
+import { PAD_BUTTON, padBinding } from "../input/gamepad-input-source";
 import { createInputSource, describeInput, sameInput, type PlayerInputDescriptor } from "../input/input-descriptor";
 import type { InputSource } from "../input/input-source";
 import { KeyboardInputSource } from "../input/keyboard-input-source";
@@ -272,9 +272,10 @@ export class CharacterSelectScene extends Phaser.Scene {
 
     this.input.keyboard!.on("keydown", (ev: KeyboardEvent) => this.onKeyDown(ev));
     this.input.gamepad?.on("down", (pad: Phaser.Input.Gamepad.Gamepad, button: Phaser.Input.Gamepad.Button) => {
+      const input = padBinding(pad.index);
       if (button.index === PAD_BUTTON.SELECT) this.openSettings();
-      else if (button.index === PAD_BUTTON.START && this.players.some((p) => p?.input.kind === "pad" && p.input.index === pad.index)) this.openSeries();
-      else this.join({ kind: "pad", index: pad.index });
+      else if (button.index === PAD_BUTTON.START && this.players.some((p) => p && sameInput(p.input, input))) this.openSeries();
+      else this.join(input);
     });
     const [settings, settingsBox] = this.headerButton(1240, 56, "⚙ Settings (Tab)", 20, () => this.openSettings());
     const [modes, modesBox] = this.headerButton(settings.x - settings.width - 12, 56, "🏆 Party modes (T)", 18, () => this.openSeries());
@@ -675,6 +676,11 @@ export class CharacterSelectScene extends Phaser.Scene {
 
   /** "Press any button": the first unassigned controller takes the next free slot. */
   private join(input: PlayerInputDescriptor): void {
+    // A pad that just woke up may be in a seated player's old slot: that seat is free now.
+    if (this.dropLostPads()) {
+      this.updatePreviews();
+      this.drawCursors();
+    }
     if (this.players.some((p) => p && sameInput(p.input, input))) return;
     this.cpu = null; // a person takes the CPU's place
     const slot = this.players.findIndex((p) => p === null);
@@ -986,15 +992,9 @@ export class CharacterSelectScene extends Phaser.Scene {
       v.fighter?.update(this.time.now);
       if (v.tipPulses) v.tip.setAlpha(0.55 + 0.45 * Math.cos(this.time.now / 220));
     }
-    let changed = false;
+    let changed = this.dropLostPads();
     this.players.forEach((p, i) => {
       if (!p) return;
-      if (!p.source.connected && p.input.kind === "pad") {
-        this.players[i] = null;
-        this.cpu = null;
-        changed = true;
-        return;
-      }
       const now = p.source.read();
       if (p.fresh) {
         p.fresh = false;
@@ -1049,6 +1049,23 @@ export class CharacterSelectScene extends Phaser.Scene {
     if (bothReady && !this.vs) this.showVs();
     if (!bothReady && this.vs) this.hideVs();
     if (bothReady && this.vs && this.time.now >= this.vs.until) this.startFight(a!, b!);
+  }
+
+  /**
+   * A player whose pad unplugged, ran flat or fell asleep leaves their seat. Woken
+   * up, it's a new connection (maybe in another slot): pressing a button joins again.
+   */
+  private dropLostPads(): boolean {
+    let dropped = false;
+    this.players.forEach((p, i) => {
+      if (p && p.input.kind === "pad" && !p.source.connected) {
+        p.source.release?.();
+        this.players[i] = null;
+        this.cpu = null;
+        dropped = true;
+      }
+    });
+    return dropped;
   }
 
   private startFight(a: PlayerSlot, b: PlayerSlot): void {

@@ -117,7 +117,12 @@ try {
   check(JSON.stringify(await fightState()) === JSON.stringify({ paused: true, disconnected: 0, menu: true }), `unplugging pauses with P1 disconnected (${JSON.stringify(await fightState())})`);
   await tap(9); // Start does nothing while unplugged
   check((await fightState()).paused, "can't resume while the controller is missing");
-  await page.evaluate(() => { window.__unplugged = false; });
+  // Waking up with a button held (the press that woke it) doesn't count; the next press does.
+  await page.evaluate(() => { window.__press(16, true); window.__unplugged = false; });
+  await page.waitForTimeout(200);
+  check((await fightState()).disconnected === 0, "the press that woke the pad doesn't reconnect it");
+  await page.evaluate(() => window.__press(16, false));
+  await page.waitForTimeout(100);
   await tap(0);
   check((await fightState()).disconnected === null, "pressing a button on the pad reconnects it");
   check((await fightState()).paused, "still paused after reconnecting, so the player can get ready");

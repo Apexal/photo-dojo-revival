@@ -45,6 +45,7 @@ import {
   isAttack,
   isCommitted,
   isGuarding,
+  isThreatening,
   isThrowable,
   type Presses,
   isCrouching,
@@ -354,6 +355,37 @@ export function worldBoxesOf(geometry: FighterGeometry, state: FighterState): Fi
   };
 }
 
+/** Slack on the proximity guard's range: holding back blocks from this far outside the attack's reach. */
+export const THREAT_MARGIN = 30;
+/** How far ahead an airborne attacker's drift is projected for the proximity guard. */
+const THREAT_DRIFT_FRAMES = 20;
+
+/**
+ * Proximity guard: the attacker's move is coming (isThreatening) and could reach
+ * the defender, so holding back blocks rather than walks away. Range is the
+ * move's own active hitbox, placed where the attacker will be: plus whatever
+ * lunge is still to come, and an airborne attacker's drift. Out of range,
+ * backing off from a whiffed swing just walks (leniency still blocks a hit
+ * that arrives a frame after letting go of back).
+ */
+export function threatReaches(attackerGeo: FighterGeometry, attacker: FighterState, defenderGeo: FighterGeometry, defender: FighterState): boolean {
+  if (!isThreatening(attacker) || !isAttack(attacker.action)) return false;
+  const attack = ATTACKS[attacker.action];
+  const { poseId, variant } = attack.pose;
+  const activeEnd = attack.startup + attack.active;
+  const lungeLeft = attack.advance && !attacker.retreating && !attacker.hasHit
+    ? attack.advance * Math.min(1, (activeEnd - attacker.actionFrame) / attack.active)
+    : 0;
+  const drift = isGrounded(attacker) ? 0 : attacker.velocity.x * Math.min(THREAT_DRIFT_FRAMES, activeEnd - attacker.actionFrame);
+  const x = attacker.position.x + attacker.facing * lungeLeft + drift;
+  const hit = toWorldBox(hitboxFor(attacker.action, frameGeometry(attackerGeo, poseId, variant)), {
+    position: { x, y: attacker.position.y }, facing: attacker.facing, anchor: groundAnchorFor(attackerGeo, poseId, variant),
+  });
+  const body = bodyBoxOf(defenderGeo, defender);
+  const gap = Math.max(body.x - (hit.x + hit.width), hit.x - (body.x + body.width));
+  return gap <= THREAT_MARGIN;
+}
+
 /** Grabbed fighters go free (the round ended mid-hold). */
 function releaseGrabs(fighters: [FighterState, FighterState]): [FighterState, FighterState] {
   return fighters.map((f) => (f.action === "grabbed" ? { ...f, action: "idle", actionFrame: 0, stunFrames: 0 } : f)) as [FighterState, FighterState];
@@ -362,6 +394,8 @@ function releaseGrabs(fighters: [FighterState, FighterState]): [FighterState, Fi
 export class FightSimulation {
   private state: FightState;
   private previousInputs: [InputFrame, InputFrame] = [EMPTY_INPUT, EMPTY_INPUT];
+  /** Whether each player's throw button was down last step (a fresh press buffers punch and kick both). */
+  private previousThrow: [boolean, boolean] = [false, false];
   /** Frames since each fighter last held back / down (for block leniency). */
   private guardHistory = [{ back: 99, down: 99 }, { back: 99, down: 99 }];
   /** Frames left on each buffered press (0 = none). */
@@ -480,6 +514,7 @@ export class FightSimulation {
 
   private beginRound(round: RoundState): FightState {
     this.previousInputs = [EMPTY_INPUT, EMPTY_INPUT];
+    this.previousThrow = [false, false];
     this.buffers = [{ punch: 0, kick: 0 }, { punch: 0, kick: 0 }];
     this.guardHistory = [{ back: 99, down: 99 }, { back: 99, down: 99 }];
     this.calmFrames = [0, 0];
@@ -502,12 +537,15 @@ export class FightSimulation {
       this.guardHistory[i].down = inputs[i].down ? 0 : this.guardHistory[i].down + 1;
     }
     // New presses go into the buffer (even during hitstop, so they fire right after it).
+    // A fresh throw press is a fresh punch AND kick, even with one of them already held.
     for (const i of [0, 1] as const) {
+      const throwPressed = rawInputs[i].throw && !this.previousThrow[i];
       for (const button of ["punch", "kick"] as const) {
-        if (inputs[i][button] && !this.previousInputs[i][button]) this.buffers[i][button] = INPUT_BUFFER_FRAMES;
+        if (throwPressed || (inputs[i][button] && !this.previousInputs[i][button])) this.buffers[i][button] = INPUT_BUFFER_FRAMES;
       }
     }
     this.previousInputs = inputs;
+    this.previousThrow = [rawInputs[0].throw, rawInputs[1].throw];
 
     // Hitstop: both fighters freeze, the clock too.
     if (prev.fighters[0].hitstopFrames > 0 || prev.fighters[1].hitstopFrames > 0) {
@@ -532,6 +570,7 @@ export class FightSimulation {
         opponent: prev.fighters[1 - i],
         controllable,
         archetype: this.geometry[i].archetype,
+        threatened: threatReaches(this.geometry[1 - i], prev.fighters[1 - i], this.geometry[i], prev.fighters[i]),
       }),
     ) as [FighterState, FighterState];
     if (controllable) fighters = this.resolveGrabs(fighters, events);

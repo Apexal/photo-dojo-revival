@@ -22,9 +22,18 @@ import type { InputFrame } from "./input-frame";
 export const STAGE_WIDTH = 1280;
 export const STAGE_MARGIN = 60;
 export const FLOOR_Y = 0;
+/** Gravity on everything that flies except a jump: knockdowns, throws, a KO'd fighter. */
 export const GRAVITY = 0.6;
-export const JUMP_IMPULSE = -14;
-export const WALK_SPEED = 4;
+/** A jump falls faster than a knockdown, so it's quick (40 frames in the air) without being lower. */
+export const JUMP_GRAVITY = 0.8;
+export const JUMP_IMPULSE = -16;
+/** Sideways speed of a jump with a direction held: about the distance a 4 px/frame jump used to cover. */
+export const JUMP_SPEED_X = 4.5;
+/** Walking forward is quicker than backing off: coming in should feel fast, running away should cost something. */
+export const WALK_FORWARD_SPEED = 5.5;
+export const WALK_BACK_SPEED = 4.5;
+/** Of a walking fighter's speed, how much carries through the startup of an attack pressed mid-stride. */
+export const ATTACK_CARRY = 0.5;
 export const HITSTOP_FRAMES = 6;
 
 export interface FighterState {
@@ -64,6 +73,12 @@ export interface StepContext {
   controllable: boolean;
   /** Whose signature move down + punch + kick starts. */
   archetype: ArchetypeId;
+  /**
+   * The opponent's attack is coming and could reach this fighter (isThreatening
+   * plus range, worked out by the simulation from hitboxes): holding back blocks
+   * instead of walking away. Out of range, backing off just walks.
+   */
+  threatened: boolean;
 }
 
 export function createFighterState(x: number, facing: Facing, health: number): FighterState {
@@ -122,11 +137,16 @@ export function clampToStage(x: number): number {
   return Math.min(STAGE_WIDTH - STAGE_MARGIN, Math.max(STAGE_MARGIN, x));
 }
 
+/** A jump (and an attack or a hit taken during one) falls with JUMP_GRAVITY; anything flung falls with GRAVITY. */
+function isJumping(s: FighterState): boolean {
+  return s.action !== "knockdown" && s.action !== "ko";
+}
+
 function applyPhysics(s: FighterState): FighterState {
   let { x, y } = s.position;
   let { x: vx, y: vy } = s.velocity;
   const airborne = y < FLOOR_Y || vy < 0;
-  if (airborne) vy += GRAVITY;
+  if (airborne) vy += isJumping(s) ? JUMP_GRAVITY : GRAVITY;
   x = clampToStage(x + vx);
   y += vy;
   let next: FighterState = { ...s, position: { x, y }, velocity: { x: vx, y: vy } };
@@ -139,10 +159,10 @@ function applyPhysics(s: FighterState): FighterState {
 }
 
 /** Frames from leaving the floor with vertical speed `vy` (negative: up) to landing again. */
-export function airFrames(vy: number): number {
+export function airFrames(vy: number, gravity = GRAVITY): number {
   let y = FLOOR_Y, v = vy, frames = 0;
   do {
-    v += GRAVITY;
+    v += gravity;
     y += v;
     frames++;
   } while (y < FLOOR_Y && frames < 1000);
@@ -164,6 +184,12 @@ export function knockDown(s: FighterState, away: 1 | -1, vx: number = away * KNO
 const startMove = (s: FighterState, action: FighterAction): FighterState =>
   ({ ...s, action, actionFrame: 0, hasHit: false, stunFrames: 0, velocity: { x: 0, y: 0 }, retreating: false });
 
+/** An attack pressed mid-stride keeps some of the walk's speed through its startup (stepFighter), so walking in and swinging is one motion. */
+function startAttack(s: FighterState, action: FighterAction): FighterState {
+  const started = startMove(s, action);
+  return s.action === "walk" ? { ...started, velocity: { x: s.velocity.x * ATTACK_CARRY, y: 0 } } : started;
+}
+
 /** Punch + kick: with down held, the archetype's signature; otherwise a throw (or a taunt from far away). */
 function bothButtons(s: FighterState, ctx: StepContext): FighterAction {
   if (ctx.input.down) return ARCHETYPES[ctx.archetype].move;
@@ -175,19 +201,19 @@ function bothButtons(s: FighterState, ctx: StepContext): FighterAction {
  * Punch + kick together = throw, or with down the signature; down + punch = uppercut; down + kick = low kick.
  */
 function chooseFreeAction(s: FighterState, ctx: StepContext): FighterState {
-  const { input, pressed, opponent } = ctx;
+  const { input, pressed } = ctx;
   const forwardHeld = s.facing === 1 ? input.right : input.left;
   const backHeld = s.facing === 1 ? input.left : input.right;
 
   if (pressed.punch && pressed.kick) return startMove(s, bothButtons(s, ctx));
-  if (pressed.punch) return startMove(s, input.down ? "uppercut" : "punch");
+  if (pressed.punch) return startAttack(s, input.down ? "uppercut" : "punch");
   // Kicking while backing off keeps your distance: no lunge.
-  if (pressed.kick) return { ...startMove(s, input.down ? "lowKick" : "kick"), retreating: backHeld };
+  if (pressed.kick) return { ...startAttack(s, input.down ? "lowKick" : "kick"), retreating: backHeld };
   if (input.block) return { ...setAction(s, "block"), crouching: false, velocity: { x: 0, y: 0 } };
   if (input.up) return { ...startMove(s, "jumpSquat"), crouching: false };
-  if (input.down || (backHeld && isThreatening(opponent))) return { ...setAction(s, "block"), crouching: input.down, velocity: { x: 0, y: 0 } };
+  if (input.down || (backHeld && ctx.threatened)) return { ...setAction(s, "block"), crouching: input.down, velocity: { x: 0, y: 0 } };
   if (forwardHeld !== backHeld) {
-    return { ...setAction(s, "walk"), crouching: false, velocity: { x: (forwardHeld ? 1 : -1) * s.facing * WALK_SPEED, y: 0 } };
+    return { ...setAction(s, "walk"), crouching: false, velocity: { x: forwardHeld ? s.facing * WALK_FORWARD_SPEED : -s.facing * WALK_BACK_SPEED, y: 0 } };
   }
   return { ...setAction(s, "idle"), crouching: false, velocity: { x: 0, y: 0 } };
 }
@@ -245,11 +271,11 @@ export function stepFighter(s: FighterState, ctx: StepContext): FighterState {
     case "jumpSquat": {
       // The wind-up can still turn into a block.
       const backHeld = s.facing === 1 ? ctx.input.left : ctx.input.right;
-      if (ctx.controllable && (ctx.input.block || ctx.input.down || (backHeld && isThreatening(ctx.opponent)))) {
+      if (ctx.controllable && (ctx.input.block || ctx.input.down || (backHeld && ctx.threatened))) {
         next = { ...s, action: "block", actionFrame: 0, crouching: ctx.input.down && !ctx.input.block, velocity: { x: 0, y: 0 } };
       } else if (s.actionFrame + 1 >= JUMP_SQUAT_FRAMES) {
         const dir = ctx.input.right === ctx.input.left ? 0 : ctx.input.right ? 1 : -1;
-        next = { ...s, action: "jump", actionFrame: 0, airAttackUsed: false, velocity: { x: dir * WALK_SPEED, y: JUMP_IMPULSE } };
+        next = { ...s, action: "jump", actionFrame: 0, airAttackUsed: false, velocity: { x: dir * JUMP_SPEED_X, y: JUMP_IMPULSE } };
       } else {
         next = { ...s, actionFrame: s.actionFrame + 1 };
       }
@@ -284,10 +310,12 @@ export function stepFighter(s: FighterState, ctx: StepContext): FighterState {
       // Lunge (kicks): move forward evenly over the active frames, so the body only
       // closes in once the kick is already out. Contact (hit or block) stops it, so
       // the pushback holds and a kick blocked at the tip of its range is safe.
+      // During startup, whatever the walk carried in (startAttack) keeps going.
       if (next.action === s.action) {
         const f = next.actionFrame;
         const lunging = attack.advance && !s.retreating && !s.hasHit && f >= attack.startup && f < attack.startup + attack.active;
-        next = { ...next, velocity: { x: lunging ? (s.facing * attack.advance!) / attack.active : 0, y: 0 } };
+        const carried = f < attack.startup && !s.hasHit ? s.velocity.x : 0;
+        next = { ...next, velocity: { x: lunging ? (s.facing * attack.advance!) / attack.active : carried, y: 0 } };
       }
       break;
     }

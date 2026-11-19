@@ -124,10 +124,10 @@ export class PauseScene extends Phaser.Scene {
 
   update(): void {
     const wasDisconnected = this.shownDisconnect !== null;
-    this.fight.pollReconnect();
+    const usedPress = this.fight.pollReconnect();
     this.updateDisconnect();
-    if (wasDisconnected && this.shownDisconnect === null) {
-      // The press that reconnected a controller isn't also a menu choice.
+    if (usedPress || (wasDisconnected && this.shownDisconnect === null)) {
+      // The press that reconnected (or woke) a controller isn't also a menu choice.
       this.menuInput.reset();
       return;
     }

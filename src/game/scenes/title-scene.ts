@@ -7,6 +7,7 @@ import type { PlayerIndex } from "../../simulation/round-rules";
 import { geometryOf, type LibraryEntry } from "../fighter-library";
 import { DummyInputSource, type DummyBehavior } from "../input/dummy-input-source";
 import type { PlayerInputDescriptor } from "../input/input-descriptor";
+import { padBinding } from "../input/gamepad-input-source";
 import { KeyboardInputSource } from "../input/keyboard-input-source";
 import { getOptions } from "../options";
 import { FighterSpriteView, fallbackSoundKey, fighterTextureKeys, loadFighterSounds, preloadFighterTextures } from "../render/fighter-sprite-view";
@@ -114,7 +115,7 @@ export class TitleScene extends Phaser.Scene {
       const layout = KeyboardInputSource.layoutForKey(ev.keyCode);
       this.start(layout ? { kind: "keyboard", layout } : null);
     });
-    this.input.gamepad?.on("down", (pad: Phaser.Input.Gamepad.Gamepad) => this.start({ kind: "pad", index: pad.index }));
+    this.input.gamepad?.on("down", (pad: Phaser.Input.Gamepad.Gamepad) => this.start(padBinding(pad.index)));
     this.input.on("pointerdown", () => this.start(null));
 
     this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => {
