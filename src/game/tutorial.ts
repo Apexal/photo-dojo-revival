@@ -51,7 +51,7 @@ export const TUTORIAL_STEPS: readonly TutorialStep[] = [
   },
   { title: "Punch the dummy", how: (b) => `Press ${b.punch}: quick, short reach`, dummy: "stand", goal: 3, progress: landed("punch"), move: "punch" },
   { title: "Kick it", how: (b) => `Press ${b.kick}: slower, but reaches further`, dummy: "stand", goal: 2, progress: landed("kick"), move: "kick" },
-  { title: "Uppercut", how: (b) => `Hold ${b.down} and press ${b.punch}: knocks jumpers down`, dummy: "stand", goal: 2, progress: landed("uppercut"), move: "uppercut" },
+  { title: "Uppercut", how: (b) => `${b.uppercut ? `Press ${b.uppercut} (or hold ${b.down} and press ${b.punch})` : `Hold ${b.down} and press ${b.punch}`}: knocks jumpers down`, dummy: "stand", goal: 2, progress: landed("uppercut"), move: "uppercut" },
   { title: "Low kick", how: (b) => `Hold ${b.down} and press ${b.kick}: must be blocked crouching`, dummy: "stand", goal: 2, progress: landed("lowKick"), move: "lowKick" },
   {
     title: "Now block",

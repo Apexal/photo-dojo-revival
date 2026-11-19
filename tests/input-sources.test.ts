@@ -19,7 +19,7 @@ function source(pad: ReturnType<typeof fakePad> | null) {
 
 describe("GamepadInputSource", () => {
   it("A = punch, B = kick, d-pad moves", () => {
-    expect(source(fakePad([PAD_BUTTON.A, PAD_BUTTON.LEFT])).read()).toEqual({ left: true, right: false, up: false, down: false, punch: true, kick: false, block: false, throw: false });
+    expect(source(fakePad([PAD_BUTTON.A, PAD_BUTTON.LEFT])).read()).toEqual({ left: true, right: false, up: false, down: false, punch: true, kick: false, block: false, throw: false, uppercut: false, taunt: false, hasTauntButton: true });
     expect(source(fakePad([PAD_BUTTON.B, PAD_BUTTON.UP])).read()).toMatchObject({ kick: true, up: true, punch: false });
   });
 
@@ -27,8 +27,15 @@ describe("GamepadInputSource", () => {
     expect(source(fakePad([PAD_BUTTON.Y])).read()).toMatchObject({ throw: true, punch: false, kick: false, block: false });
   });
 
-  it("X or either bumper is the block button", () => {
-    expect(source(fakePad([PAD_BUTTON.X])).read()).toMatchObject({ block: true, punch: false });
+  it("X is the uppercut button, a stick click the taunt button", () => {
+    expect(source(fakePad([PAD_BUTTON.X])).read()).toMatchObject({ uppercut: true, punch: false, block: false });
+    expect(source(fakePad([PAD_BUTTON.L3])).read()).toMatchObject({ taunt: true, down: false });
+    expect(source(fakePad([PAD_BUTTON.R3])).read().taunt).toBe(true);
+  });
+
+  it("either trigger or bumper is the block button", () => {
+    expect(source(fakePad([PAD_BUTTON.LT])).read()).toMatchObject({ block: true, punch: false });
+    expect(source(fakePad([PAD_BUTTON.RT])).read().block).toBe(true);
     expect(source(fakePad([PAD_BUTTON.LB])).read().block).toBe(true);
     expect(source(fakePad([PAD_BUTTON.RB])).read().block).toBe(true);
     expect(source(fakePad([PAD_BUTTON.A])).read().block).toBe(false);
@@ -137,7 +144,8 @@ describe("pre-match control labels", () => {
     expect(how("Walk", right)).toBe("▶ / ◀");
     expect(how("Walk", controlLabels({ kind: "pad", index: 0 }, "left"))).toBe("◀ / ▶");
     expect(how("Throw", right)).toBe("Ⓨ");
-    expect(how("Block", right)).toBe("Ⓧ, or hold ▶ / ▼");
+    expect(how("Block", right)).toBe("LT / RT, or hold ▶ / ▼");
+    expect(how("Uppercut", right)).toBe("Ⓧ, or ▼ + Ⓐ");
     expect(moveGuide("brawler").at(-1)!.how(right)).toBe("▼ + Ⓨ");
   });
 

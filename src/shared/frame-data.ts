@@ -174,6 +174,18 @@ export const JUMP_SQUAT_FRAMES = 3;
 export const BLOCK_LENIENCY_FRAMES = 3;
 
 /**
+ * Guard break: standing and blocking can't last. The `blocks`-th blocked hit in a
+ * row is still blocked (no damage) but breaks the guard: the defender staggers in
+ * the hurt pose for the breaking attack's hitstun plus `extraStun` (a free hit for
+ * the attacker: +6 to +8 after any core move, +1 after a blocked charge), and
+ * can't guard again until `lockout` frames after the break. The count starts over
+ * `window` frames after the last blocked hit (blocks spread over a round don't add
+ * up) and whenever the defender takes their turn (attacks, grabs, parries, jumps),
+ * gets hit or gets thrown.
+ */
+export const GUARD_BREAK = { blocks: 3, window: 60, extraStun: 6, lockout: 45 } as const;
+
+/**
  * Grabs beat block, lose to attacks (a fighter in an attack's startup or active
  * frames can't be grabbed) and whiff into long recovery. On the active frame
  * they catch a throwable opponent within `range`, who is then held for

@@ -3,7 +3,7 @@ import type { FighterAction } from "../../shared/frame-data";
 import type { PlayerInputDescriptor } from "./input-descriptor";
 import { actionKeyLabel } from "./key-bindings";
 
-export type ButtonLabels = { forward: string; back: string; up: string; down: string; punch: string; kick: string; /** Throw (and with down, the signature move). */ throw: string; /** A dedicated block button (a pad's X). */ block?: string };
+export type ButtonLabels = { forward: string; back: string; up: string; down: string; punch: string; kick: string; /** Throw (and with down, the signature move). */ throw: string; /** A dedicated block button (a pad's triggers). */ block?: string; /** A dedicated uppercut button (a pad's X). */ uppercut?: string };
 
 /**
  * What to press, for one player's device and side of the screen.
@@ -22,7 +22,7 @@ export function controlLabels(input: PlayerInputDescriptor, side: "left" | "righ
     down: dirs.down,
     ...buttons,
     throw: key ? `${buttons.punch} + ${buttons.kick}` : "Ⓨ",
-    ...(input.kind === "pad" ? { block: "Ⓧ" } : {}),
+    ...(input.kind === "pad" ? { block: "LT / RT", uppercut: "Ⓧ" } : {}),
   };
 }
 
@@ -35,7 +35,7 @@ export interface MoveGuide {
 
 /** What beats what, for the footers of the pre-match screen and the pause menu's controls. */
 export const GUARD_TIPS = "Crouch: punches whiff over you.  Block standing: jump kick, flying knee.  Block crouching: low kick.";
-export const GRAB_TIPS = "Grabbed? Throw (punch + kick) breaks free (not out of a bear hug).  Throw from far away: taunt.";
+export const GRAB_TIPS = "Grabbed? Throw (punch + kick) breaks free (not out of a bear hug).  Taunt: punch + kick from far away, or click a stick on a pad.";
 
 /** The shared moves, in the order the pre-match screen shows them. */
 export const MOVE_GUIDE: readonly MoveGuide[] = [
@@ -44,7 +44,7 @@ export const MOVE_GUIDE: readonly MoveGuide[] = [
   { name: "Block", action: "block", how: (b) => (b.block ? `${b.block}, or hold ${b.back} / ${b.down}` : `hold ${b.back} or ${b.down}`) },
   { name: "Punch", action: "punch", how: (b) => b.punch },
   { name: "Kick", action: "kick", how: (b) => b.kick },
-  { name: "Uppercut", action: "uppercut", how: (b) => `${b.down} + ${b.punch}` },
+  { name: "Uppercut", action: "uppercut", how: (b) => (b.uppercut ? `${b.uppercut}, or ${b.down} + ${b.punch}` : `${b.down} + ${b.punch}`) },
   { name: "Low kick", action: "lowKick", how: (b) => `${b.down} + ${b.kick}` },
   { name: "Throw", action: "throw", how: (b) => b.throw },
 ];

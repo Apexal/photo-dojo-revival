@@ -5,14 +5,24 @@ export interface InputFrame {
   down: boolean;
   punch: boolean;
   kick: boolean;
-  /** Dedicated standing block (a controller's X or bumpers): guards without walking, whatever the opponent is doing. */
+  /** Dedicated standing block (a controller's triggers or bumpers): guards without walking, whatever the opponent is doing. */
   block: boolean;
   /** Dedicated throw button (a controller's Y): the same as punch + kick together, so down + it is the signature move. */
   throw: boolean;
+  /** Dedicated uppercut button (a controller's X): the same as down + punch, without crouching first. */
+  uppercut: boolean;
+  /** Dedicated taunt button (a controller's stick click). */
+  taunt: boolean;
+  /**
+   * The device has a taunt button (a controller): it's the only way to taunt,
+   * so punch + kick (or the throw button) throws even from far away.
+   */
+  hasTauntButton: boolean;
 }
 
 export const EMPTY_INPUT: Readonly<InputFrame> = Object.freeze({
   left: false, right: false, up: false, down: false, punch: false, kick: false, block: false, throw: false,
+  uppercut: false, taunt: false, hasTauntButton: false,
 });
 
 export function input(partial: Partial<InputFrame> = {}): InputFrame {
@@ -29,6 +39,9 @@ export function mergeInputs(a: InputFrame, b: InputFrame): InputFrame {
     kick: a.kick || b.kick,
     block: a.block || b.block,
     throw: a.throw || b.throw,
+    uppercut: a.uppercut || b.uppercut,
+    taunt: a.taunt || b.taunt,
+    hasTauntButton: a.hasTauntButton || b.hasTauntButton,
   };
 }
 

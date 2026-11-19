@@ -87,6 +87,7 @@ export function calloutLine(c: Callout): AnnouncerLineId | null {
     case "snub": return "disrespectful";
     case "firstBlood": return "first-blood";
     case "perfect": return "perfect";
+    case "guardBreak": return null; // no line yet
     case "streak":
       if (c.hits >= 3 && c.hits <= 5) return `streak-${c.hits}` as AnnouncerLineId;
       return c.hits === 6 ? "streak-huge" : null;

@@ -55,6 +55,15 @@ Minimal version:
 - **Pose:** reuse `punch` for the thrower and `hurt` for the victim, plus a sideways shove: the victim is pushed 80 px and the sides stay as they are. It stays silly with no new captures needed. A later bonus capture ("grab") could replace the pose.
 - **Now:** a throw that lands knocks down (section 2.4): the victim is flung `throwDistance` (90 px), lies down, then gets up, which leaves the thrower free well before them.
 
+### 2.2b Guard break (implemented)
+
+Throws open up a blocker only up close; a guard break stops a player turtling at any range. The `GUARD_BREAK.blocks`-th (3rd) blocked hit in a row still does no damage but breaks the guard: the defender plays the hurt pose for the breaking attack's hitstun + `extraStun` (6), and can't guard (back, down or the block button) until `lockout` (45) stepped frames after the break, so the lockout outlasts the stagger by ~20 frames.
+
+- **Advantage on a break** = the move's on-hit number + 6: punch +8, kick +7, uppercut +7, low kick +6, flying knee +7, a blocked charge +1 (it's slow and committal; the break just makes it safe). Enough for a free punch or kick, not a combo.
+- **"In a row":** the count starts over `window` (60) frames after the last blocked hit, so blocks spread across a round don't add up, and whenever the defender takes their turn (attacks, grabs, parries, jumps; not a taunt), gets hit or gets thrown. The counter lives on `FighterState` (`guardHits`, `guardWindow`, `guardBrokenFrames`) and ticks in `stepFighter`, so it's frozen during hitstop like everything else.
+- **The answer to it** is the point: a punch string is −3 per blocked jab, so after the first or second block the defender's own 4f punch beats the next jab and resets the count. Holding back through three jabs is the thing being punished.
+- A `guardBreak` event follows the blocked `hit` event; it gives a GUARD BREAK callout (no announcer line yet).
+
 ### 2.4 Knockdowns (implemented)
 
 Street Fighter's reset: a throw, a clean **jump kick** (the jump-in's reward for getting past the guard), or an **uppercut** hit on someone in the air (the anti-air's reward) sends the victim flying back to the floor; a KO hit makes the loser fall too. Other hits are plain hits, so knockdowns stay an event rather than every exchange.

@@ -44,9 +44,11 @@ import {
   currentAttackPhase,
   isAttack,
   isCommitted,
+  isGuardBroken,
   isGuarding,
   isThreatening,
   isThrowable,
+  PRESS_BUTTONS,
   type Presses,
   isCrouching,
   isDown,
@@ -80,6 +82,8 @@ export type FightEvent =
   | { type: "grab"; attacker: PlayerIndex; defender: PlayerIndex; grab: GrabId }
   | { type: "throw"; attacker: PlayerIndex; defender: PlayerIndex; grab: GrabId; damage: number }
   | { type: "throwTech"; attacker: PlayerIndex; defender: PlayerIndex }
+  /** The defender's guard broke on a blocked hit (GUARD_BREAK); the hit event comes first, blocked and without damage. */
+  | { type: "guardBreak"; attacker: PlayerIndex; defender: PlayerIndex }
   /** `player` parried `attacker`'s strike; `at`: where it would have landed. */
   | { type: "parry"; player: PlayerIndex; attacker: PlayerIndex; attack: AttackId; at: { x: number; y: number } }
   | { type: "taunt"; player: PlayerIndex }
@@ -360,6 +364,11 @@ export const THREAT_MARGIN = 30;
 /** How far ahead an airborne attacker's drift is projected for the proximity guard. */
 const THREAT_DRIFT_FRAMES = 20;
 
+/** Every press button set to one value (an empty buffer, no presses). */
+function noPresses<T>(value: T): Record<keyof Presses, T> {
+  return Object.fromEntries(PRESS_BUTTONS.map((b) => [b, value])) as Record<keyof Presses, T>;
+}
+
 /**
  * Proximity guard: the attacker's move is coming (isThreatening) and could reach
  * the defender, so holding back blocks rather than walks away. Range is the
@@ -399,7 +408,7 @@ export class FightSimulation {
   /** Frames since each fighter last held back / down (for block leniency). */
   private guardHistory = [{ back: 99, down: 99 }, { back: 99, down: 99 }];
   /** Frames left on each buffered press (0 = none). */
-  private buffers: [Record<keyof Presses, number>, Record<keyof Presses, number>] = [{ punch: 0, kick: 0 }, { punch: 0, kick: 0 }];
+  private buffers: [Record<keyof Presses, number>, Record<keyof Presses, number>] = [noPresses(0), noPresses(0)];
 
   private readonly startPositions: [number, number];
   private readonly random: () => number;
@@ -515,7 +524,7 @@ export class FightSimulation {
   private beginRound(round: RoundState): FightState {
     this.previousInputs = [EMPTY_INPUT, EMPTY_INPUT];
     this.previousThrow = [false, false];
-    this.buffers = [{ punch: 0, kick: 0 }, { punch: 0, kick: 0 }];
+    this.buffers = [noPresses(0), noPresses(0)];
     this.guardHistory = [{ back: 99, down: 99 }, { back: 99, down: 99 }];
     this.calmFrames = [0, 0];
     this.snubbed = [false, false];
@@ -540,8 +549,9 @@ export class FightSimulation {
     // A fresh throw press is a fresh punch AND kick, even with one of them already held.
     for (const i of [0, 1] as const) {
       const throwPressed = rawInputs[i].throw && !this.previousThrow[i];
-      for (const button of ["punch", "kick"] as const) {
-        if (throwPressed || (inputs[i][button] && !this.previousInputs[i][button])) this.buffers[i][button] = INPUT_BUFFER_FRAMES;
+      for (const button of PRESS_BUTTONS) {
+        const thrown = throwPressed && (button === "punch" || button === "kick");
+        if (thrown || (inputs[i][button] && !this.previousInputs[i][button])) this.buffers[i][button] = INPUT_BUFFER_FRAMES;
       }
     }
     this.previousInputs = inputs;
@@ -562,7 +572,9 @@ export class FightSimulation {
 
     const controllable = phase === "fighting";
     const pressed = (i: number): Presses =>
-      controllable ? { punch: this.buffers[i].punch > 0, kick: this.buffers[i].kick > 0 } : { punch: false, kick: false };
+      controllable
+        ? { punch: this.buffers[i].punch > 0, kick: this.buffers[i].kick > 0, uppercut: this.buffers[i].uppercut > 0, taunt: this.buffers[i].taunt > 0 }
+        : noPresses(false);
     let fighters = phase === "intro" ? this.introFighters(prev, inputs, events) : [0, 1].map((i) =>
       stepFighter(prev.fighters[i], {
         input: controllable ? inputs[i] : EMPTY_INPUT,
@@ -578,7 +590,7 @@ export class FightSimulation {
     for (const i of [0, 1] as const) {
       // actionFrame 0: also a move recovered straight into the same move again (a parry pressed twice).
       const started = isCommitted(fighters[i].action) && fighters[i].actionFrame === 0;
-      for (const button of ["punch", "kick"] as const) {
+      for (const button of PRESS_BUTTONS) {
         this.buffers[i][button] = started ? 0 : Math.max(0, this.buffers[i][button] - 1);
       }
     }
@@ -696,8 +708,8 @@ export class FightSimulation {
       const gap = Math.max(db.x - (ab.x + ab.width), ab.x - (db.x + db.width));
       if (gap > grab.range) continue;
       next[a] = { ...attacker, hasHit: true };
-      next[d] = this.withVariant(d, { ...fighters[d], action: "grabbed", actionFrame: 0, stunFrames: grab.holdFrames, grabbedBy: attacker.action, velocity: { x: 0, y: 0 } });
-      this.buffers[d] = { punch: 0, kick: 0 }; // only presses during the grab count as a tech
+      next[d] = this.withVariant(d, { ...fighters[d], action: "grabbed", actionFrame: 0, stunFrames: grab.holdFrames, grabbedBy: attacker.action, velocity: { x: 0, y: 0 }, guardHits: 0, guardWindow: 0 });
+      this.buffers[d] = noPresses(0); // only presses during the grab count as a tech
       events.push({ type: "grab", attacker: a, defender: d, grab: attacker.action });
     }
     return next;
@@ -716,7 +728,7 @@ export class FightSimulation {
       const away = (Math.sign(grabbed.position.x - thrower.position.x) || thrower.facing) as 1 | -1;
       if (grab.techable && this.buffers[d].punch > 0 && this.buffers[d].kick > 0) {
         // Tech: both back to neutral, a little apart.
-        this.buffers[d] = { punch: 0, kick: 0 };
+        this.buffers[d] = noPresses(0);
         next[d] = { ...grabbed, action: "idle", actionFrame: 0, stunFrames: 0, position: { ...grabbed.position, x: clampToStage(grabbed.position.x + away * 40) } };
         next[a] = { ...thrower, action: "idle", actionFrame: 0, hasHit: false, position: { ...thrower.position, x: clampToStage(thrower.position.x - away * 20) } };
         events.push({ type: "throwTech", attacker: a, defender: d });
@@ -771,10 +783,11 @@ export class FightSimulation {
       const lenient = (defender.action === "idle" || defender.action === "walk" || defender.action === "jumpSquat") && isGrounded(defender)
         && (this.guardHistory[d].back < BLOCK_LENIENCY_FRAMES || this.guardHistory[d].down < BLOCK_LENIENCY_FRAMES);
       const crouching = isGuarding(defender) ? defender.crouching : this.guardHistory[d].down < BLOCK_LENIENCY_FRAMES;
-      const blocked = (isGuarding(defender) || lenient) && isGrounded(defender) && guardBlocks(level, crouching);
+      const blocked = (isGuarding(defender) || lenient) && isGrounded(defender) && !isGuardBroken(defender) && guardBlocks(level, crouching);
       const before = defender.health;
       let hitDefender = applyHit({ ...defender, crouching }, attack, blocked, this.practice ? 1 : 0);
-      if (!blocked) hitDefender = { ...hitDefender, variant: this.reactionVariant(d, defender, at) };
+      const guardBroke = blocked && hitDefender.action === "hurt";
+      if (!blocked || guardBroke) hitDefender = { ...hitDefender, variant: this.reactionVariant(d, defender, at) };
       const away = (Math.sign(defender.position.x - fighters[a].position.x) || fighters[a].facing) as 1 | -1; // cross-ups push the right way
       // A KO'd fighter falls back; an anti-air hit knocks down (no juggles: they can't be hit again till they're up).
       if (hitDefender.action === "ko") hitDefender = { ...knockDown(hitDefender, away), action: "ko" };
@@ -792,6 +805,7 @@ export class FightSimulation {
       }
       next[a] = { ...next[a], hasHit: true };
       events.push({ type: "hit", attacker: a, defender: d, attack, blocked, damage: before - hitDefender.health, at });
+      if (guardBroke) events.push({ type: "guardBreak", attacker: a, defender: d });
       if (hitDefender.action === "ko") events.push({ type: "ko", player: d });
     }
     if (hits.length) {

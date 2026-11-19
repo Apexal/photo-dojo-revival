@@ -53,7 +53,7 @@ export class KeyboardInputSource implements InputSource {
 
   read(): InputFrame {
     if (this.boundVersion !== keyBindingsVersion()) this.bind();
-    return { ...this.taps.read(BINDABLE_ACTIONS, (a) => this.keys[a].some((k) => k.isDown)), block: false, throw: false };
+    return { ...this.taps.read(BINDABLE_ACTIONS, (a) => this.keys[a].some((k) => k.isDown)), block: false, throw: false, uppercut: false, taunt: false, hasTauntButton: false };
   }
 
   pausePressed(): boolean {

@@ -2,6 +2,7 @@ import { ARCHETYPES, type ArchetypeId } from "../shared/archetypes";
 import {
   ATTACKS,
   GRABS,
+  GUARD_BREAK,
   JUMP_SQUAT_FRAMES,
   KNOCKDOWN,
   PARRY_TOTAL_FRAMES,
@@ -58,10 +59,18 @@ export interface FighterState {
   retreating: boolean;
   /** While "grabbed": which grab is holding them (it decides the damage, the distance and whether it can be broken). */
   grabbedBy: GrabId;
+  /** Blocked hits in a row (GUARD_BREAK): the guard breaks at GUARD_BREAK.blocks. */
+  guardHits: number;
+  /** Frames left before guardHits starts over (since the last blocked hit). */
+  guardWindow: number;
+  /** Frames left of a broken guard: no blocking until it runs out. */
+  guardBrokenFrames: number;
 }
 
-/** Punch/kick presses this frame, including ones still held in the input buffer. */
-export interface Presses { punch: boolean; kick: boolean }
+/** Button presses this frame (punch, kick and a controller's uppercut and taunt buttons), including ones still held in the input buffer. */
+export interface Presses { punch: boolean; kick: boolean; uppercut: boolean; taunt: boolean }
+
+export const PRESS_BUTTONS = ["punch", "kick", "uppercut", "taunt"] as const satisfies readonly (keyof Presses)[];
 
 export interface StepContext {
   /** Held directions (and buttons). */
@@ -97,6 +106,9 @@ export function createFighterState(x: number, facing: Facing, health: number): F
     airAttackUsed: false,
     retreating: false,
     grabbedBy: "throw",
+    guardHits: 0,
+    guardWindow: 0,
+    guardBrokenFrames: 0,
   };
 }
 
@@ -104,6 +116,8 @@ export const isGrounded = (s: FighterState) => s.position.y >= FLOOR_Y && s.velo
 export const isAttack = isAttackId;
 /** Moves the fighter can't interrupt: attacks, grabs, the parry and taunts. */
 export const isCommitted = (a: FighterAction) => isAttack(a) || isGrab(a) || a === "parry" || a === "taunt";
+/** Not able to guard: the guard was broken a moment ago (GUARD_BREAK.lockout). */
+export const isGuardBroken = (s: FighterState) => s.guardBrokenFrames > 0;
 /** Holding a guard: free block or locked blockstun. */
 export const isGuarding = (s: FighterState) => s.action === "block" || s.action === "blockstun";
 /** Knocked down: flying, lying on the floor, or getting up. */
@@ -190,28 +204,37 @@ function startAttack(s: FighterState, action: FighterAction): FighterState {
   return s.action === "walk" ? { ...started, velocity: { x: s.velocity.x * ATTACK_CARRY, y: 0 } } : started;
 }
 
-/** Punch + kick: with down held, the archetype's signature; otherwise a throw (or a taunt from far away). */
+/**
+ * Punch + kick: with down held, the archetype's signature; otherwise a throw
+ * (or a taunt from far away, on a device without a taunt button).
+ */
 function bothButtons(s: FighterState, ctx: StepContext): FighterAction {
   if (ctx.input.down) return ARCHETYPES[ctx.archetype].move;
+  if (ctx.input.hasTauntButton) return "throw";
   return Math.abs(ctx.opponent.position.x - s.position.x) >= TAUNT.minDistance ? "taunt" : "throw";
 }
 
 /**
  * Choose the grounded action for this frame from input.
- * Punch + kick together = throw, or with down the signature; down + punch = uppercut; down + kick = low kick.
+ * Punch + kick together = throw, or with down the signature; down + punch (or the uppercut button) = uppercut;
+ * down + kick = low kick; the taunt button = taunt.
  */
 function chooseFreeAction(s: FighterState, ctx: StepContext): FighterState {
   const { input, pressed } = ctx;
   const forwardHeld = s.facing === 1 ? input.right : input.left;
   const backHeld = s.facing === 1 ? input.left : input.right;
+  const canGuard = !isGuardBroken(s);
 
   if (pressed.punch && pressed.kick) return startMove(s, bothButtons(s, ctx));
+  if (pressed.uppercut) return startAttack(s, "uppercut");
   if (pressed.punch) return startAttack(s, input.down ? "uppercut" : "punch");
   // Kicking while backing off keeps your distance: no lunge.
   if (pressed.kick) return { ...startAttack(s, input.down ? "lowKick" : "kick"), retreating: backHeld };
-  if (input.block) return { ...setAction(s, "block"), crouching: false, velocity: { x: 0, y: 0 } };
+  if (pressed.taunt) return startMove(s, "taunt");
+  if (input.block && canGuard) return { ...setAction(s, "block"), crouching: false, velocity: { x: 0, y: 0 } };
   if (input.up) return { ...startMove(s, "jumpSquat"), crouching: false };
-  if (input.down || (backHeld && ctx.threatened)) return { ...setAction(s, "block"), crouching: input.down, velocity: { x: 0, y: 0 } };
+  // A broken guard: down just stands there, back walks away even with an attack coming.
+  if (canGuard && (input.down || (backHeld && ctx.threatened))) return { ...setAction(s, "block"), crouching: input.down, velocity: { x: 0, y: 0 } };
   if (forwardHeld !== backHeld) {
     return { ...setAction(s, "walk"), crouching: false, velocity: { x: forwardHeld ? s.facing * WALK_FORWARD_SPEED : -s.facing * WALK_BACK_SPEED, y: 0 } };
   }
@@ -271,7 +294,7 @@ export function stepFighter(s: FighterState, ctx: StepContext): FighterState {
     case "jumpSquat": {
       // The wind-up can still turn into a block.
       const backHeld = s.facing === 1 ? ctx.input.left : ctx.input.right;
-      if (ctx.controllable && (ctx.input.block || ctx.input.down || (backHeld && ctx.threatened))) {
+      if (ctx.controllable && !isGuardBroken(s) && (ctx.input.block || ctx.input.down || (backHeld && ctx.threatened))) {
         next = { ...s, action: "block", actionFrame: 0, crouching: ctx.input.down && !ctx.input.block, velocity: { x: 0, y: 0 } };
       } else if (s.actionFrame + 1 >= JUMP_SQUAT_FRAMES) {
         const dir = ctx.input.right === ctx.input.left ? 0 : ctx.input.right ? 1 : -1;
@@ -343,17 +366,40 @@ export function stepFighter(s: FighterState, ctx: StepContext): FighterState {
       // idle / walk / block: free to act while grounded.
       next = actFree(s, ctx);
   }
-  return applyPhysics(next);
+  return applyPhysics(tickGuard(s, next));
 }
 
-/** `minHealth` 1 = practice mode: nobody gets KO'd. */
+/** Guard-break bookkeeping for one stepped frame: the lockout and the blocked-hit window run down; taking a turn starts the count over. */
+function tickGuard(was: FighterState, next: FighterState): FighterState {
+  const guardBrokenFrames = Math.max(0, next.guardBrokenFrames - 1);
+  const tookTurn = next.action !== was.action && (isCommitted(next.action) || next.action === "jumpSquat") && next.action !== "taunt";
+  const guardWindow = tookTurn ? 0 : Math.max(0, next.guardWindow - 1);
+  const guardHits = guardWindow === 0 ? 0 : next.guardHits;
+  return { ...next, guardBrokenFrames, guardWindow, guardHits };
+}
+
+/**
+ * `minHealth` 1 = practice mode: nobody gets KO'd. A blocked hit that breaks the
+ * guard (GUARD_BREAK) comes back as "hurt" with guardBrokenFrames set, still without damage.
+ */
 export function applyHit(defender: FighterState, attack: AttackId, blocked: boolean, minHealth = 0): FighterState {
   const data = ATTACKS[attack];
-  // Blocked: no damage, just locked in block (blockstun, no hitstun).
-  if (blocked) return { ...defender, action: "blockstun", actionFrame: 0, stunFrames: data.blockstun, velocity: { x: 0, y: defender.velocity.y } };
+  const still = { x: 0, y: defender.velocity.y };
+  if (blocked) {
+    const guardHits = defender.guardHits + 1;
+    if (guardHits >= GUARD_BREAK.blocks) {
+      return {
+        ...defender, action: "hurt", actionFrame: 0, stunFrames: data.hitstun + GUARD_BREAK.extraStun, velocity: still,
+        guardHits: 0, guardWindow: 0, guardBrokenFrames: GUARD_BREAK.lockout,
+      };
+    }
+    // No damage, just locked in block (blockstun, no hitstun).
+    return { ...defender, action: "blockstun", actionFrame: 0, stunFrames: data.blockstun, velocity: still, guardHits, guardWindow: GUARD_BREAK.window };
+  }
   const health = Math.max(minHealth, defender.health - data.damage);
-  if (health <= 0) return { ...defender, health, action: "ko", actionFrame: 0, stunFrames: 0, velocity: { x: 0, y: defender.velocity.y } };
-  return { ...defender, health, action: "hurt", actionFrame: 0, stunFrames: data.hitstun, velocity: { x: 0, y: defender.velocity.y } };
+  const reset = { guardHits: 0, guardWindow: 0 };
+  if (health <= 0) return { ...defender, ...reset, health, action: "ko", actionFrame: 0, stunFrames: 0, velocity: still };
+  return { ...defender, ...reset, health, action: "hurt", actionFrame: 0, stunFrames: data.hitstun, velocity: still };
 }
 
 /** Can be grabbed: grounded and neutral (or parrying). Attacks beat grabs; no throwing someone in hit- or blockstun. */

@@ -1,9 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { ATTACKS, KNOCKDOWN, THROW } from "../src/shared/frame-data";
+import { ATTACKS, GUARD_BREAK, KNOCKDOWN, THROW } from "../src/shared/frame-data";
 import { stickFigureGeometry } from "../src/shared/stick-figure";
 import { FightSimulation, antiAirImmune, frameOf, hurtboxesOf, headHitLineY, worldBoxesOf, type FightEvent, type FightState } from "../src/simulation/fight-simulation";
 import { createFighterState, currentAttackPhase } from "../src/simulation/fighter-state-machine";
-import { JUMP_IMPULSE, WALK_BACK_SPEED, WALK_FORWARD_SPEED } from "../src/simulation/fighter-state-machine";
+import { HITSTOP_FRAMES, JUMP_IMPULSE, WALK_BACK_SPEED, WALK_FORWARD_SPEED } from "../src/simulation/fighter-state-machine";
 import { JUMP_SQUAT_FRAMES } from "../src/shared/frame-data";
 import { input, type InputFrame } from "../src/simulation/input-frame";
 import { MAX_HEALTH, ROUND_FRAMES, ROUND_INTRO_FRAMES } from "../src/simulation/round-rules";
@@ -409,6 +409,22 @@ describe("moves from inputs", () => {
     expect(fightingSim(600).step([input({ throw: true, down: true }), idle]).fighters[0].action).toBe("charge");
   });
 
+  it("a pad (it has a taunt button) only taunts with that button: its throw button throws even from far away", () => {
+    const pad = (p: Partial<InputFrame>) => input({ ...p, hasTauntButton: true });
+    expect(fightingSim(600).step([pad({ throw: true }), idle]).fighters[0].action).toBe("throw");
+    expect(fightingSim(600).step([pad({ punch: true, kick: true }), idle]).fighters[0].action).toBe("throw");
+    expect(fightingSim(600).step([pad({ throw: true, down: true }), idle]).fighters[0].action).toBe("charge");
+    expect(fightingSim(600).step([pad({ taunt: true }), idle]).fighters[0].action).toBe("taunt");
+    expect(fightingSim(100).step([pad({ taunt: true }), idle]).fighters[0].action).toBe("taunt"); // up close too
+  });
+
+  it("the uppercut button (a pad's X) uppercuts without holding down, and a held one doesn't repeat", () => {
+    const sim = fightingSim(600);
+    expect(sim.step([input({ uppercut: true }), idle]).fighters[0].action).toBe("uppercut");
+    run(sim, 80, input({ uppercut: true }));
+    expect(sim.current.fighters[0].action).not.toBe("uppercut");
+  });
+
   it("the throw button throws even with punch already held", () => {
     const sim = fightingSim(100);
     run(sim, 60, input({ punch: true })); // the punch comes out and recovers, punch still held
@@ -461,6 +477,76 @@ describe("frame advantage", () => {
     expect(d.stunFrames).toBe(ATTACKS.punch.blockstun);
     run(sim, 6, idle, input({ left: true })); // tries to walk forward during blockstun
     expect(sim.current.fighters[1].action).toBe("blockstun");
+  });
+});
+
+describe("guard break", () => {
+  /** P1 jabs whenever it's free; P2 does `p2(frame)`. Returns the events. */
+  function jabs(sim: FightSimulation, frames: number, p2: (f: number) => InputFrame = () => input({ right: true })): FightEvent[] {
+    const events: FightEvent[] = [];
+    for (let f = 0; f < frames; f++) events.push(...sim.step([input({ punch: f % 2 === 0 }), p2(f)]).events);
+    return events;
+  }
+  const blockedHits = (events: FightEvent[]) => events.filter((e) => e.type === "hit" && e.blocked).length;
+
+  it(`the ${GUARD_BREAK.blocks}rd blocked hit in a row breaks the guard: no damage, the hurt pose, then a free hit`, () => {
+    const sim = fightingSim(130);
+    const events: FightEvent[] = [];
+    for (let f = 0; f < 200 && !events.some((e) => e.type === "guardBreak"); f++) {
+      events.push(...sim.step([input({ punch: f % 2 === 0 }), input({ right: true })]).events);
+    }
+    expect(blockedHits(events)).toBe(GUARD_BREAK.blocks);
+    expect(events).toContainEqual({ type: "guardBreak", attacker: 0, defender: 1 });
+    const d = sim.current.fighters[1];
+    expect(d.action).toBe("hurt");
+    expect(d.health).toBe(MAX_HEALTH);
+    expect(d.stunFrames).toBe(ATTACKS.punch.hitstun + GUARD_BREAK.extraStun);
+    // Still holding back: the next jab gets through.
+    const after = jabs(sim, 40);
+    expect(after).toContainEqual(expect.objectContaining({ type: "hit", attacker: 0, blocked: false }));
+    expect(sim.current.fighters[1].health).toBe(MAX_HEALTH - ATTACKS.punch.damage);
+  });
+
+  it("can't guard during the lockout, then blocks again", () => {
+    const sim = fightingSim(130);
+    let f = 0;
+    while (!sim.step([input({ punch: f++ % 2 === 0 }), input({ right: true })]).events.some((e) => e.type === "guardBreak")) expect(f).toBeLessThan(200);
+    // Hold down + back through the lockout without being attacked: never a block.
+    for (let i = 0; i < GUARD_BREAK.lockout - 1; i++) {
+      expect(sim.step([idle, input({ right: true, down: true, block: true })]).fighters[1].action).not.toMatch(/block/);
+    }
+    // The lockout doesn't run during hitstop.
+    run(sim, HITSTOP_FRAMES + 2, idle, input({ block: true }));
+    expect(sim.current.fighters[1].action).toBe("block");
+  });
+
+  it("blocks spread out don't add up: the count starts over after GUARD_BREAK.window frames", () => {
+    const sim = fightingSim(130);
+    const events: FightEvent[] = [];
+    for (let n = 0; n < GUARD_BREAK.blocks + 1; n++) {
+      events.push(...run(sim, ATTACKS.punch.startup + 1, input({ punch: true }), input({ block: true })));
+      events.push(...run(sim, GUARD_BREAK.window + 20, idle, input({ block: true })));
+    }
+    expect(blockedHits(events)).toBe(GUARD_BREAK.blocks + 1);
+    expect(events.some((e) => e.type === "guardBreak")).toBe(false);
+  });
+
+  it("hitting back between blocks starts the count over", () => {
+    const sim = fightingSim(130);
+    // P2 blocks two jabs, then jabs back (beats P1's next jab: P1 is −3), then blocks again.
+    const events: FightEvent[] = [];
+    let p2Swung = false;
+    for (let f = 0; f < 300; f++) {
+      const blocks = blockedHits(events.filter((e) => e.type === "hit" && e.defender === 1));
+      const swing = blocks === GUARD_BREAK.blocks - 1 && !p2Swung && sim.current.fighters[1].action === "block";
+      if (swing) p2Swung = true;
+      events.push(...sim.step([input({ punch: f % 2 === 0 }), swing ? input({ punch: true }) : input({ right: true })]).events);
+    }
+    expect(p2Swung).toBe(true);
+    expect(sim.current.fighters[1].guardHits).toBeLessThan(GUARD_BREAK.blocks);
+    const firstBreak = events.findIndex((e) => e.type === "guardBreak");
+    const before = firstBreak < 0 ? events : events.slice(0, firstBreak);
+    expect(blockedHits(before.filter((e) => e.type === "hit" && e.defender === 1))).toBeGreaterThanOrEqual(GUARD_BREAK.blocks - 1);
   });
 });
 
