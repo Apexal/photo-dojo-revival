@@ -147,7 +147,7 @@ describe("FightSimulation", () => {
     expect(hit).toMatchObject({ blocked: true, damage: 0 });
   });
 
-  describe("the block button (a pad's bumpers)", () => {
+  describe("the block button (a pad's X or bumpers)", () => {
     it("guards standing with no attack coming, instead of walking or jumping", () => {
       const sim = fightingSim(300);
       const x = sim.current.fighters[1].position.x;
@@ -344,6 +344,12 @@ describe("moves from inputs", () => {
     expect(start({ kick: true, down: true })).toBe("lowKick");
     expect(start({ punch: true, kick: true })).toBe("taunt"); // far away
     expect(fightingSim(100).step([input({ punch: true, kick: true }), idle]).fighters[0].action).toBe("throw");
+  });
+
+  it("the throw button (a pad's Y) is punch + kick: a throw, a taunt, or with down the signature", () => {
+    expect(fightingSim(100).step([input({ throw: true }), idle]).fighters[0].action).toBe("throw");
+    expect(fightingSim(600).step([input({ throw: true }), idle]).fighters[0].action).toBe("taunt");
+    expect(fightingSim(600).step([input({ throw: true, down: true }), idle]).fighters[0].action).toBe("charge");
   });
 
   it("an uppercut connects up close", () => {

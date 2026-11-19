@@ -14,7 +14,8 @@ interface PadState {
 }
 
 /**
- * A/Cross = punch, B/Circle = kick, either bumper = standing block, d-pad or left stick to move, Start = pause.
+ * A/Cross = punch, B/Circle = kick, Y/Triangle = throw (down + Y the signature move),
+ * X/Square or either bumper = standing block, d-pad or left stick to move, Start = pause.
  * Reads the browser's live Gamepad by index each frame. Phaser's copy is per
  * scene and stops updating under an overlay scene that captures input (the
  * pause menu), so it's only the fallback where the Gamepad API is missing.
@@ -64,9 +65,10 @@ export class GamepadInputSource implements InputSource {
       right: b(PAD_BUTTON.RIGHT) || x > STICK_DEADZONE,
       up: b(PAD_BUTTON.UP) || y < -STICK_DEADZONE * 1.5,
       down: b(PAD_BUTTON.DOWN) || y > STICK_DEADZONE * 1.5,
-      punch: b(PAD_BUTTON.A) || b(PAD_BUTTON.X),
-      kick: b(PAD_BUTTON.B) || b(PAD_BUTTON.Y),
-      block: b(PAD_BUTTON.LB) || b(PAD_BUTTON.RB),
+      punch: b(PAD_BUTTON.A),
+      kick: b(PAD_BUTTON.B),
+      block: b(PAD_BUTTON.X) || b(PAD_BUTTON.LB) || b(PAD_BUTTON.RB),
+      throw: b(PAD_BUTTON.Y),
     };
   }
 

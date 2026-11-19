@@ -38,7 +38,7 @@ The game opens on a title screen with a demo fight between fighters from your li
 | P2 keyboard | Arrows | `,` (or numpad 1) | `.` (or numpad 2) | Esc |
 | Gamepad | D-pad / left stick | A / Cross | B / Circle | Start |
 
-On a gamepad, either bumper (LB / RB, L1 / R1) is a standing block: hold it to guard without walking back.
+On a gamepad, X / Square (or either bumper, LB / RB, L1 / R1) is a standing block: hold it to guard without walking back. Y / Triangle is the throw button (the same as punch + kick), and down + Y is the signature move.
 
 Keyboard keys can be remapped in **Settings** (Tab or a pad's Select button on fighter select, or from the pause menu).
 

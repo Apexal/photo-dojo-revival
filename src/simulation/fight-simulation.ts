@@ -56,7 +56,7 @@ import {
   stepFighter,
   type FighterState,
 } from "./fighter-state-machine";
-import { EMPTY_INPUT, type InputFrame } from "./input-frame";
+import { EMPTY_INPUT, withThrowButton, type InputFrame } from "./input-frame";
 import {
   INTRO,
   MAX_HEALTH,
@@ -489,7 +489,8 @@ export class FightSimulation {
     return this.state;
   }
 
-  step(inputs: [InputFrame, InputFrame]): FightState {
+  step(rawInputs: [InputFrame, InputFrame]): FightState {
+    const inputs = rawInputs.map(withThrowButton) as [InputFrame, InputFrame];
     const prev = this.state;
     const events: FightEvent[] = [];
     const frame = prev.frame + 1;

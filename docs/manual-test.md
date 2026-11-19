@@ -75,7 +75,7 @@ In the studio, pick **Use a phone**.
 - [ ] Character select lists captured fighters (newest first) and the two stick figures.
 - [ ] "Press any button": first pad/keyboard half to press gets P1, the next gets P2. Pads only appear after a button press.
 - [ ] Keyboard without a numpad: P1 = WASD + J (punch) / K (kick); P2 = arrows + `,` (punch) / `.` (kick). Numpad 1/2 also work if present.
-- [ ] Gamepad (standard mapping): d-pad and left stick move, A/Cross punches, B/Circle kicks, either bumper holds a standing block (no walking, stops a punch, a low kick gets through), Start pauses. Check on Safari too.
+- [ ] Gamepad (standard mapping): d-pad and left stick move, A/Cross punches, B/Circle kicks, Y/Triangle throws up close (taunts far away, breaks a throw, down + Y is the signature move), X/Square or either bumper holds a standing block (no walking, stops a punch, a low kick gets through), Start pauses. Check on Safari too.
 - [ ] Rumble (Xbox and PlayStation pads, Chrome + Firefox + Safari): a buzz on join; getting punched < kicked < thrown < KO'd; blocking is a light tick; landing a hit is a small kick-back. Settings → Controller rumble (or pause → R) turns it off, and it stays off after a reload. A single pad the browser reports as controller 2 still works and doesn't crash on scene changes.
 - [ ] Punch to pick, kick to un-pick (or leave the slot).
 - [ ] Two players mashing their join buttons at the same moment both join without picking.

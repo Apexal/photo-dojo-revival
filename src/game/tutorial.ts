@@ -62,7 +62,7 @@ export const TUTORIAL_STEPS: readonly TutorialStep[] = [
   },
   {
     title: "Now throw",
-    how: (b) => `Walk right up to it, then press ${b.punch} + ${b.kick} together`,
+    how: (b) => `Walk right up to it, then press ${b.throw}`,
     dummy: "stand",
     goal: 2,
     progress: (s) => count(s, (ev) => ev.type === "throw" && ev.attacker === 0 && ev.grab === "throw"),
@@ -70,7 +70,7 @@ export const TUTORIAL_STEPS: readonly TutorialStep[] = [
   },
 ];
 
-const signature = (b: ButtonLabels) => `hold ${b.down}, press ${b.punch} + ${b.kick}`;
+const signature = (b: ButtonLabels) => `hold ${b.down}, press ${b.throw}`;
 
 /** The last drill: the archetype's signature move. */
 const SIGNATURE_STEPS: Record<ArchetypeId, TutorialStep> = {

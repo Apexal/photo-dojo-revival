@@ -17,11 +17,16 @@ function source(pad: ReturnType<typeof fakePad> | null) {
 
 describe("GamepadInputSource", () => {
   it("A = punch, B = kick, d-pad moves", () => {
-    expect(source(fakePad([PAD_BUTTON.A, PAD_BUTTON.LEFT])).read()).toEqual({ left: true, right: false, up: false, down: false, punch: true, kick: false, block: false });
+    expect(source(fakePad([PAD_BUTTON.A, PAD_BUTTON.LEFT])).read()).toEqual({ left: true, right: false, up: false, down: false, punch: true, kick: false, block: false, throw: false });
     expect(source(fakePad([PAD_BUTTON.B, PAD_BUTTON.UP])).read()).toMatchObject({ kick: true, up: true, punch: false });
   });
 
-  it("either bumper is the block button", () => {
+  it("Y is the throw button, on its own (not a punch or kick, so menus don't see confirm + back)", () => {
+    expect(source(fakePad([PAD_BUTTON.Y])).read()).toMatchObject({ throw: true, punch: false, kick: false, block: false });
+  });
+
+  it("X or either bumper is the block button", () => {
+    expect(source(fakePad([PAD_BUTTON.X])).read()).toMatchObject({ block: true, punch: false });
     expect(source(fakePad([PAD_BUTTON.LB])).read().block).toBe(true);
     expect(source(fakePad([PAD_BUTTON.RB])).read().block).toBe(true);
     expect(source(fakePad([PAD_BUTTON.A])).read().block).toBe(false);
@@ -103,7 +108,7 @@ describe("voice take choice", () => {
   });
 });
 
-import { MOVE_GUIDE, controlLabels } from "../src/game/input/control-labels";
+import { MOVE_GUIDE, controlLabels, moveGuide } from "../src/game/input/control-labels";
 
 describe("pre-match control labels", () => {
   const how = (name: string, labels: ReturnType<typeof controlLabels>) => MOVE_GUIDE.find((m) => m.name === name)!.how(labels);
@@ -129,6 +134,9 @@ describe("pre-match control labels", () => {
     expect(how("Punch", right)).toBe("Ⓐ");
     expect(how("Walk", right)).toBe("▶ / ◀");
     expect(how("Walk", controlLabels({ kind: "pad", index: 0 }, "left"))).toBe("◀ / ▶");
+    expect(how("Throw", right)).toBe("Ⓨ");
+    expect(how("Block", right)).toBe("Ⓧ, or hold ▶ / ▼");
+    expect(moveGuide("brawler").at(-1)!.how(right)).toBe("▼ + Ⓨ");
   });
 
   it("lists every move a player can do", () => {

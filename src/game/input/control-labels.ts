@@ -3,7 +3,7 @@ import type { FighterAction } from "../../shared/frame-data";
 import type { PlayerInputDescriptor } from "./input-descriptor";
 import { actionKeyLabel } from "./key-bindings";
 
-export type ButtonLabels = { forward: string; back: string; up: string; down: string; punch: string; kick: string; /** A dedicated block button (a pad's bumpers). */ block?: string };
+export type ButtonLabels = { forward: string; back: string; up: string; down: string; punch: string; kick: string; /** Throw (and with down, the signature move). */ throw: string; /** A dedicated block button (a pad's X). */ block?: string };
 
 /**
  * What to press, for one player's device and side of the screen.
@@ -21,7 +21,8 @@ export function controlLabels(input: PlayerInputDescriptor, side: "left" | "righ
     up: dirs.up,
     down: dirs.down,
     ...buttons,
-    ...(input.kind === "pad" ? { block: "LB / RB" } : {}),
+    throw: key ? `${buttons.punch} + ${buttons.kick}` : "Ⓨ",
+    ...(input.kind === "pad" ? { block: "Ⓧ" } : {}),
   };
 }
 
@@ -34,7 +35,7 @@ export interface MoveGuide {
 
 /** What beats what, for the footers of the pre-match screen and the pause menu's controls. */
 export const GUARD_TIPS = "Crouch: punches whiff over you.  Block standing: jump kick, flying knee.  Block crouching: low kick.";
-export const GRAB_TIPS = "Grabbed? Punch + kick breaks free (not out of a bear hug).  Punch + kick far away: taunt.";
+export const GRAB_TIPS = "Grabbed? Throw (punch + kick) breaks free (not out of a bear hug).  Throw from far away: taunt.";
 
 /** The shared moves, in the order the pre-match screen shows them. */
 export const MOVE_GUIDE: readonly MoveGuide[] = [
@@ -45,13 +46,13 @@ export const MOVE_GUIDE: readonly MoveGuide[] = [
   { name: "Kick", action: "kick", how: (b) => b.kick },
   { name: "Uppercut", action: "uppercut", how: (b) => `${b.down} + ${b.punch}` },
   { name: "Low kick", action: "lowKick", how: (b) => `${b.down} + ${b.kick}` },
-  { name: "Throw", action: "throw", how: (b) => `${b.punch} + ${b.kick}` },
+  { name: "Throw", action: "throw", how: (b) => b.throw },
 ];
 
 /** A fighter's moves: the shared ones, then their archetype's signature. */
 export function moveGuide(archetype: ArchetypeId): MoveGuide[] {
   const { move, moveName } = ARCHETYPES[archetype];
-  return [...MOVE_GUIDE, { name: moveName, action: move, how: (b) => `${b.down} + ${b.punch} + ${b.kick}` }];
+  return [...MOVE_GUIDE, { name: moveName, action: move, how: (b) => `${b.down} + ${b.throw}` }];
 }
 
 export const deviceName = (input: PlayerInputDescriptor) =>
