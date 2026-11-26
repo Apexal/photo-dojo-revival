@@ -2,7 +2,7 @@ import Phaser from "phaser";
 import { ATTACKS, frameGeometry, groundAnchorFor, type FighterGeometry } from "../../shared/frame-data";
 import { LANDMARK, type Fighter, type PoseId, type SoundId } from "../../shared/fighter-model";
 import { setSetting } from "../../shared/fighter-storage";
-import { FightSimulation, frameOf, type FightEvent, type FightState } from "../../simulation/fight-simulation";
+import { FightSimulation, frameOf, startsOnRight, type FightEvent, type FightState } from "../../simulation/fight-simulation";
 import { currentAttackPhase, isAttack, type FighterState } from "../../simulation/fighter-state-machine";
 import type { InputFrame } from "../../simulation/input-frame";
 import { FRAMES_PER_SECOND, MAX_HEALTH, secondsRemaining, type PlayerIndex } from "../../simulation/round-rules";
@@ -106,6 +106,10 @@ export class FightScene extends Phaser.Scene {
   private timingTexts: Phaser.GameObjects.Text[] = [];
   /** Why that got through ("LOW! Block it crouching"), under the callouts on the caught player's side (fight-tips.ts). */
   private tipTexts: Phaser.GameObjects.Text[] = [];
+  /** Each player's P1 / P2 chip and name, rebuilt when they change sides. */
+  private nameTags: Phaser.GameObjects.GameObject[][] = [[], []];
+  /** Which side of the screen each player's HUD is on: the side they started this round on (null: not laid out yet). */
+  private hudOnRight: [boolean, boolean] | null = null;
   /** Who gets those tips: practice, or a fighter's first few matches. */
   private tipsFor: [boolean, boolean] = [false, false];
   /** Under the center banner, after the K.O. */
@@ -158,6 +162,8 @@ export class FightScene extends Phaser.Scene {
     this.heldMask = [new Set(), new Set()];
     this.waitingForResult = false;
     this.shownHealth = [MAX_HEALTH, MAX_HEALTH];
+    this.nameTags = [[], []];
+    this.hudOnRight = null;
     this.views = [];
     this.stats = new MatchStatsTracker(); // a rematch restarts the scene: fresh stats
     this.callouts = new CalloutTracker({ match: !data.practice });
@@ -212,28 +218,12 @@ export class FightScene extends Phaser.Scene {
     this.debug = new HitboxDebugView(this);
     this.debug.visible = Boolean(this.registry.get(REGISTRY.debugHitboxes));
 
-    // Whose bar is whose: a P1 / P2 (or CPU) tag and the name, in the player's colour.
-    [a, b].forEach((entry, i) => {
-      const css = `#${PLAYER_COLORS[i].toString(16).padStart(6, "0")}`;
-      const right = i === 1;
-      const x = right ? GAME_WIDTH - 40 : 40;
-      const input = this.setup.inputs[i];
-      const tag = this.add.text(x + (right ? -8 : 8), 65, isPlayerInput(input) ? `P${i + 1}` : "CPU", displayText(18, COLOR.ink, { outline: false }))
-        .setOrigin(right ? 1 : 0, 0).setDepth(101);
-      const chipW = tag.width + 16;
-      popBox(this, right ? x - chipW : x, 62, chipW, tag.height + 6, { fill: PLAYER_COLORS[i], radius: RADIUS.sm, shadow: SHADOW.sm }).setDepth(100);
-      this.add.text(x + (right ? -1 : 1) * (chipW + 10), 60, entry.fighter.name, displayText(24, css))
-        .setOrigin(right ? 1 : 0, 0).setDepth(100);
-    });
     this.timerText = this.add.text(GAME_WIDTH / 2, 14, "60", displayText(52, COLOR.accent)).setOrigin(0.5, 0).setDepth(100);
     this.bannerText = this.add.text(GAME_WIDTH / 2, GAME_HEIGHT / 2 - 80, "", displayText(96, COLOR.accent)).setOrigin(0.5).setDepth(200);
-    this.calloutTexts = [0, 1].map((i) => {
-      return this.add.text(i === 0 ? 40 : GAME_WIDTH - 40, 150, "", displayText(40, COLOR.party)).setOrigin(i === 0 ? 0 : 1, 0.5).setDepth(200).setVisible(false);
-    });
-    this.timingTexts = [0, 1].map((i) =>
-      this.add.text(i === 0 ? 40 : GAME_WIDTH - 40, 196, "", displayText(30, COLOR.accent)).setOrigin(i === 0 ? 0 : 1, 0.5).setDepth(200).setVisible(false));
-    this.tipTexts = [0, 1].map((i) =>
-      this.add.text(i === 0 ? 40 : GAME_WIDTH - 40, 236, "", displayText(24, COLOR.bad)).setOrigin(i === 0 ? 0 : 1, 0.5).setDepth(200).setVisible(false));
+    // Placed by layoutHudSides.
+    this.calloutTexts = [0, 1].map(() => this.add.text(0, 150, "", displayText(40, COLOR.party)).setDepth(200).setVisible(false));
+    this.timingTexts = [0, 1].map(() => this.add.text(0, 196, "", displayText(30, COLOR.accent)).setDepth(200).setVisible(false));
+    this.tipTexts = [0, 1].map(() => this.add.text(0, 236, "", displayText(24, COLOR.bad)).setDepth(200).setVisible(false));
     this.tipsFor = [0, 1].map((i) => showsTips({
       practice: Boolean(this.setup.practice), player: i as PlayerIndex, isPerson: isPlayerInput(this.setup.inputs[i]),
       matchesPlayed: recordOf(this.registry, this.setup.entries[i].fighter.fighterId)?.matches ?? 0,
@@ -958,36 +948,64 @@ export class FightScene extends Phaser.Scene {
     });
   }
 
+  /**
+   * Each player's half of the HUD (bar, round pips, chip and name, callouts)
+   * sits on the side they started this round on, so it swaps with them.
+   */
+  private layoutHudSides(roundNumber: number): void {
+    const sides = [0, 1].map((i) => startsOnRight(i as PlayerIndex, roundNumber)) as [boolean, boolean];
+    if (this.hudOnRight && sides[0] === this.hudOnRight[0] && sides[1] === this.hudOnRight[1]) return;
+    this.hudOnRight = sides;
+    this.setup.entries.forEach((entry, i) => {
+      const right = sides[i];
+      const x = right ? GAME_WIDTH - 40 : 40;
+      // Whose bar is whose: a P1 / P2 (or CPU) tag and the name, in the player's colour.
+      this.nameTags[i].forEach((o) => o.destroy());
+      const css = `#${PLAYER_COLORS[i].toString(16).padStart(6, "0")}`;
+      const input = this.setup.inputs[i];
+      const tag = this.add.text(x + (right ? -8 : 8), 65, isPlayerInput(input) ? `P${i + 1}` : "CPU", displayText(18, COLOR.ink, { outline: false }))
+        .setOrigin(right ? 1 : 0, 0).setDepth(101);
+      const chipW = tag.width + 16;
+      const chip = popBox(this, right ? x - chipW : x, 62, chipW, tag.height + 6, { fill: PLAYER_COLORS[i], radius: RADIUS.sm, shadow: SHADOW.sm }).setDepth(100);
+      const name = this.add.text(x + (right ? -1 : 1) * (chipW + 10), 60, entry.fighter.name, displayText(24, css))
+        .setOrigin(right ? 1 : 0, 0).setDepth(100);
+      this.nameTags[i] = [tag, chip, name];
+      for (const text of [this.calloutTexts[i], this.timingTexts[i], this.tipTexts[i]]) text.setX(x).setOrigin(right ? 1 : 0, 0.5);
+    });
+  }
+
   private drawHud(state: FightState): void {
+    this.layoutHudSides(state.round.roundNumber);
     const g = this.hud.clear();
     state.fighters.forEach((f, i) => {
+      const left = !this.hudOnRight![i];
       // Trailing damage bar drains toward the real value.
       this.shownHealth[i] = Math.max(f.health, this.shownHealth[i] - 0.6);
-      const x = i === 0 ? 40 : GAME_WIDTH - 40 - BAR_W;
+      const x = left ? 40 : GAME_WIDTH - 40 - BAR_W;
       const y = 28;
       const w = (v: number) => (BAR_W * Math.max(0, v)) / MAX_HEALTH;
       // A pill: hard ink drop, dark track, fills (radius clamped to their width), ink outline on top.
       const pill = (px: number, pw: number) => { if (pw > 0) g.fillRoundedRect(px, y, pw, BAR_H, Math.min(PILL_R, pw / 2)); };
       g.fillStyle(HEX.ink, 1).fillRoundedRect(x, y + SHADOW.sm, BAR_W, BAR_H, PILL_R);
       g.fillStyle(HEX.healthEmpty, 1).fillRoundedRect(x, y, BAR_W, BAR_H, PILL_R);
-      // P1 drains toward the center from the left, P2 from the right.
+      // Bars drain toward the center: the left one from the left, the right one from the right.
       const trail = w(this.shownHealth[i]);
       const now = w(f.health);
       g.fillStyle(HEX.fg, 1);
-      pill(i === 0 ? x + BAR_W - trail : x, trail);
+      pill(left ? x + BAR_W - trail : x, trail);
       g.fillStyle(f.health > LOW_HEALTH ? HEX.accent : HEX.bad, 1);
-      pill(i === 0 ? x + BAR_W - now : x, now);
+      pill(left ? x + BAR_W - now : x, now);
       // Low health: the bar pulses brighter and its frame glows.
       const pulse = lowHealthPulse(f.health, state.frame);
       if (pulse > 0) {
         g.fillStyle(HEX.healthGlow, 0.45 * pulse);
-        pill(i === 0 ? x + BAR_W - now : x, now);
+        pill(left ? x + BAR_W - now : x, now);
       }
       g.lineStyle(BORDER, HEX.ink, 1).strokeRoundedRect(x, y, BAR_W, BAR_H, PILL_R);
       if (pulse > 0) g.lineStyle(3, HEX.bad, 0.35 + 0.65 * pulse).strokeRoundedRect(x - 4, y - 4, BAR_W + 8, BAR_H + 8, PILL_R + 4);
       // Round wins (none in practice)
       for (let r = 0; r < (this.setup.practice ? 0 : 2); r++) {
-        const cx = i === 0 ? x + BAR_W - 12 - r * 26 : x + 12 + r * 26;
+        const cx = left ? x + BAR_W - 12 - r * 26 : x + 12 + r * 26;
         g.fillStyle(r < state.round.wins[i] ? HEX.accent : HEX.line, 1).fillCircle(cx, y + BAR_H + 52, 9);
         g.lineStyle(3, HEX.ink, 1).strokeCircle(cx, y + BAR_H + 52, 9);
       }

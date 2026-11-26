@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { ATTACKS, DASH, GUARD_BREAK, KNOCKDOWN, THROW } from "../src/shared/frame-data";
 import { stickFigureGeometry } from "../src/shared/stick-figure";
-import { FightSimulation, antiAirImmune, frameOf, hurtboxesOf, headHitLineY, worldBoxesOf, type FightEvent, type FightState } from "../src/simulation/fight-simulation";
+import { FightSimulation, antiAirImmune, startsOnRight, frameOf, hurtboxesOf, headHitLineY, worldBoxesOf, type FightEvent, type FightState } from "../src/simulation/fight-simulation";
 import { createFighterState, currentAttackPhase } from "../src/simulation/fighter-state-machine";
 import { HITSTOP_FRAMES, JUMP_IMPULSE, WALK_BACK_SPEED, WALK_FORWARD_SPEED } from "../src/simulation/fighter-state-machine";
 import { JUMP_SQUAT_FRAMES } from "../src/shared/frame-data";
@@ -864,6 +864,17 @@ describe("sides", () => {
     const r2 = sim.startNextRound();
     expect(r2.fighters[0].position.x).toBeGreaterThan(r2.fighters[1].position.x);
     expect(r2.fighters[0].facing).toBe(-1);
+  });
+
+  it("startsOnRight (where the HUD puts each player) matches where the round starts them", () => {
+    const sim = fightingSim(150);
+    for (let i = 0; i < 3; i++) {
+      const { round: { roundNumber }, fighters: [p1, p2] } = sim.current;
+      expect(startsOnRight(0, roundNumber)).toBe(p1.position.x > p2.position.x);
+      expect(startsOnRight(1, roundNumber)).toBe(p2.position.x > p1.position.x);
+      run(sim, ROUND_FRAMES + 200);
+      sim.startNextRound();
+    }
   });
 });
 

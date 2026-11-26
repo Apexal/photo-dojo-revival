@@ -151,6 +151,11 @@ export const PRACTICE_REFILL_FRAMES = 60;
 
 export const START_POSITIONS: [number, number] = [STAGE_WIDTH / 2 - 380, STAGE_WIDTH / 2 + 380];
 
+/** Players swap sides every round: P1 starts on the left in odd rounds, on the right in even ones. */
+export function startsOnRight(player: PlayerIndex, roundNumber: number): boolean {
+  return (player === 1) !== (roundNumber % 2 === 0);
+}
+
 export function poseOf(state: FighterState): PoseId {
   if (isCrouching(state)) return "crouch";
   return poseForAction(state.action, state.actionFrame);
@@ -528,7 +533,7 @@ export class FightSimulation {
 
   /** Players swap sides every round, so nobody is stuck with the same side all match. */
   private freshFighters(roundNumber = 1): [FighterState, FighterState] {
-    const swap = roundNumber % 2 === 0;
+    const swap = startsOnRight(0, roundNumber);
     const [left, right] = this.startPositions;
     return [
       createFighterState(swap ? right : left, swap ? -1 : 1, MAX_HEALTH),
