@@ -220,7 +220,7 @@ interface FighterState {
 Rules in v1:
 
 - Stage width 1280 logical px, floor at y = 0, gravity 0.6 px/frame², jump impulse −14.
-- Walk speed 4 px/frame. Block = hold back while grounded (classic), also down for crouch-block, or a pad's trigger (or bumper) for a standing block. Blocking takes no damage and no hitstun.
+- Walk speed 4 px/frame. Block = hold back while grounded (classic), also down for crouch-block, or a pad's trigger (with down, a crouching block). Blocking takes no damage and no hitstun.
 - Punch: startup 4f, active 3f, recovery 10f, damage 8, hitstun 12f, pushback 6 px.
 - Kick: startup 7f, active 4f, recovery 16f, damage 12, hitstun 16f, pushback 10 px.
 - Hitstop 6f on every hit, 8f on a throw (both fighters freeze; this is what makes hard cuts feel good). It's excluded from frame advantage, and buffered presses don't expire during it, so its length is feel only.

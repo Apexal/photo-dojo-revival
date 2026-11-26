@@ -1,6 +1,7 @@
 import { ARCHETYPES, type ArchetypeId } from "../shared/archetypes";
 import {
   ATTACKS,
+  DASH,
   GRABS,
   GUARD_BREAK,
   JUMP_SQUAT_FRAMES,
@@ -88,6 +89,8 @@ export interface StepContext {
    * instead of walking away. Out of range, backing off just walks.
    */
   threatened: boolean;
+  /** A buffered double tap (DASH): the way it goes on screen (1 right, -1 left), or 0. */
+  dash?: -1 | 0 | 1;
 }
 
 export function createFighterState(x: number, facing: Facing, health: number): FighterState {
@@ -116,6 +119,8 @@ export const isGrounded = (s: FighterState) => s.position.y >= FLOOR_Y && s.velo
 export const isAttack = isAttackId;
 /** Moves the fighter can't interrupt: attacks, grabs, the parry and taunts. */
 export const isCommitted = (a: FighterAction) => isAttack(a) || isGrab(a) || a === "parry" || a === "taunt";
+/** A forward or back dash (DASH): committed too, but presses made during it are kept for when it ends. */
+export const isDash = (a: FighterAction): a is "dash" | "backdash" => a === "dash" || a === "backdash";
 /** Not able to guard: the guard was broken a moment ago (GUARD_BREAK.lockout). */
 export const isGuardBroken = (s: FighterState) => s.guardBrokenFrames > 0;
 /** Holding a guard: free block or locked blockstun. */
@@ -206,11 +211,12 @@ function startAttack(s: FighterState, action: FighterAction): FighterState {
 
 /**
  * Punch + kick: with down held, the archetype's signature; otherwise a throw
- * (or a taunt from far away, on a device without a taunt button).
+ * (or a taunt from far away, on a device without a taunt button, unless it
+ * came from a throw button: that always throws).
  */
 function bothButtons(s: FighterState, ctx: StepContext): FighterAction {
   if (ctx.input.down) return ARCHETYPES[ctx.archetype].move;
-  if (ctx.input.hasTauntButton) return "throw";
+  if (ctx.input.hasTauntButton || ctx.input.throw) return "throw";
   return Math.abs(ctx.opponent.position.x - s.position.x) >= TAUNT.minDistance ? "taunt" : "throw";
 }
 
@@ -231,7 +237,10 @@ function chooseFreeAction(s: FighterState, ctx: StepContext): FighterState {
   // Kicking while backing off keeps your distance: no lunge.
   if (pressed.kick) return { ...startAttack(s, input.down ? "lowKick" : "kick"), retreating: backHeld };
   if (pressed.taunt) return startMove(s, "taunt");
-  if (input.block && canGuard) return { ...setAction(s, "block"), crouching: false, velocity: { x: 0, y: 0 } };
+  // Up wins: forward again into a jump is a jump, not a dash.
+  if (ctx.dash && !input.down && !input.up) return startDash(s, ctx.dash === s.facing ? "dash" : "backdash");
+  // The block button guards without walking; with down held it guards low.
+  if (input.block && canGuard) return { ...setAction(s, "block"), crouching: input.down, velocity: { x: 0, y: 0 } };
   if (input.up) return { ...startMove(s, "jumpSquat"), crouching: false };
   // A broken guard: down just stands there, back walks away even with an attack coming.
   if (canGuard && (input.down || (backHeld && ctx.threatened))) return { ...setAction(s, "block"), crouching: input.down, velocity: { x: 0, y: 0 } };
@@ -240,6 +249,22 @@ function chooseFreeAction(s: FighterState, ctx: StepContext): FighterState {
   }
   return { ...setAction(s, "idle"), crouching: false, velocity: { x: 0, y: 0 } };
 }
+
+/** A dash's speed on frame `f`: fast off the mark, slowing to a stop, `distance` in all (DASH). */
+export function dashSpeed(action: "dash" | "backdash", f: number): number {
+  const { frames, distance } = action === "dash" ? DASH.forward : DASH.back;
+  return f >= frames ? 0 : (distance * 2 * (frames - f)) / (frames * (frames + 1));
+}
+
+const dashVelocity = (s: FighterState, action: "dash" | "backdash", f: number) =>
+  ({ x: (action === "dash" ? s.facing : -s.facing) * dashSpeed(action, f), y: 0 });
+
+function startDash(s: FighterState, action: "dash" | "backdash"): FighterState {
+  return { ...startMove(s, action), crouching: false, velocity: dashVelocity(s, action, 0) };
+}
+
+/** A back dash that strikes can't hit yet (DASH.back.invulnerable). Throws still catch it. */
+export const isStrikeInvulnerable = (s: FighterState) => s.action === "backdash" && s.actionFrame < DASH.back.invulnerable;
 
 /** Free to act (idle / walk / block): face the opponent and pick an action from input. */
 function actFree(s: FighterState, ctx: StepContext): FighterState {
@@ -295,7 +320,7 @@ export function stepFighter(s: FighterState, ctx: StepContext): FighterState {
       // The wind-up can still turn into a block.
       const backHeld = s.facing === 1 ? ctx.input.left : ctx.input.right;
       if (ctx.controllable && !isGuardBroken(s) && (ctx.input.block || ctx.input.down || (backHeld && ctx.threatened))) {
-        next = { ...s, action: "block", actionFrame: 0, crouching: ctx.input.down && !ctx.input.block, velocity: { x: 0, y: 0 } };
+        next = { ...s, action: "block", actionFrame: 0, crouching: ctx.input.down, velocity: { x: 0, y: 0 } };
       } else if (s.actionFrame + 1 >= JUMP_SQUAT_FRAMES) {
         const dir = ctx.input.right === ctx.input.left ? 0 : ctx.input.right ? 1 : -1;
         next = { ...s, action: "jump", actionFrame: 0, airAttackUsed: false, velocity: { x: dir * JUMP_SPEED_X, y: JUMP_IMPULSE } };
@@ -307,6 +332,14 @@ export function stepFighter(s: FighterState, ctx: StepContext): FighterState {
     case "taunt":
       next = s.actionFrame + 1 >= TAUNT.frames ? recover(s, ctx) : { ...s, actionFrame: s.actionFrame + 1 };
       break;
+    case "dash":
+    case "backdash": {
+      const frames = s.action === "dash" ? DASH.forward.frames : DASH.back.frames;
+      next = s.actionFrame + 1 >= frames
+        ? recover(s, ctx)
+        : { ...s, actionFrame: s.actionFrame + 1, velocity: dashVelocity(s, s.action, s.actionFrame + 1) };
+      break;
+    }
     case "jumpKick":
       // Recovery runs out in the air: keep falling (no second air attack); landing ends it early.
       next = s.actionFrame + 1 >= attackTotalFrames(ATTACKS.jumpKick)
@@ -372,7 +405,7 @@ export function stepFighter(s: FighterState, ctx: StepContext): FighterState {
 /** Guard-break bookkeeping for one stepped frame: the lockout and the blocked-hit window run down; taking a turn starts the count over. */
 function tickGuard(was: FighterState, next: FighterState): FighterState {
   const guardBrokenFrames = Math.max(0, next.guardBrokenFrames - 1);
-  const tookTurn = next.action !== was.action && (isCommitted(next.action) || next.action === "jumpSquat") && next.action !== "taunt";
+  const tookTurn = next.action !== was.action && (isCommitted(next.action) || isDash(next.action) || next.action === "jumpSquat") && next.action !== "taunt";
   const guardWindow = tookTurn ? 0 : Math.max(0, next.guardWindow - 1);
   const guardHits = guardWindow === 0 ? 0 : next.guardHits;
   return { ...next, guardBrokenFrames, guardWindow, guardHits };
@@ -405,5 +438,5 @@ export function applyHit(defender: FighterState, attack: AttackId, blocked: bool
 /** Can be grabbed: grounded and neutral (or parrying). Attacks beat grabs; no throwing someone in hit- or blockstun. */
 export function isThrowable(s: FighterState): boolean {
   if (!isGrounded(s)) return false;
-  return s.action === "idle" || s.action === "walk" || s.action === "block" || s.action === "taunt" || s.action === "jumpSquat" || s.action === "parry";
+  return s.action === "idle" || s.action === "walk" || s.action === "block" || s.action === "taunt" || s.action === "jumpSquat" || s.action === "parry" || isDash(s.action);
 }

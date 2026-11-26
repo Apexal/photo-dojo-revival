@@ -6,6 +6,7 @@ import {
   groundAnchorFor,
   hitboxFor,
   BLOCK_LENIENCY_FRAMES,
+  DASH,
   GRABS,
   guardBlocks,
   INPUT_BUFFER_FRAMES,
@@ -54,6 +55,8 @@ import {
   isDown,
   isGrounded,
   isUntouchable,
+  isDash,
+  isStrikeInvulnerable,
   airFrames,
   knockDown,
   stepFighter,
@@ -77,8 +80,17 @@ export type FightEvent =
   | { type: "roundStart"; round: number }
   | { type: "fight" }
   | { type: "attackActive"; player: PlayerIndex; attack: AttackId }
-  /** `at`: where it landed (world space), for the hit marker. */
-  | { type: "hit"; attacker: PlayerIndex; defender: PlayerIndex; attack: AttackId; blocked: boolean; damage: number; at: { x: number; y: number } }
+  /**
+   * `at`: where it landed (world space), for the hit marker. `timing` (clean hits
+   * only, hitTiming): the defender was starting a move ("counter") or stuck
+   * recovering from one ("punish"). `wrongGuard` (clean hits only): the defender
+   * was guarding the wrong way, a low that needed a crouch or an overhead that
+   * needed standing.
+   */
+  | {
+    type: "hit"; attacker: PlayerIndex; defender: PlayerIndex; attack: AttackId; blocked: boolean; damage: number; at: { x: number; y: number };
+    timing?: HitTiming; wrongGuard?: "low" | "overhead";
+  }
   | { type: "grab"; attacker: PlayerIndex; defender: PlayerIndex; grab: GrabId }
   | { type: "throw"; attacker: PlayerIndex; defender: PlayerIndex; grab: GrabId; damage: number }
   | { type: "throwTech"; attacker: PlayerIndex; defender: PlayerIndex }
@@ -105,6 +117,34 @@ export interface FightState {
   /** Events produced by the most recent step only. */
   events: FightEvent[];
 }
+
+export type HitTiming = "counter" | "punish";
+
+/**
+ * What a clean hit caught the defender doing: in the startup of an attack, grab
+ * or parry ("counter"), or in the recovery of one, a whiffed parry, a parried
+ * stagger, a taunt or the open end of a back dash ("punish"). A trade (both in
+ * their active frames) is neither.
+ */
+export function hitTiming(defender: FighterState): HitTiming | null {
+  const a = defender.action;
+  if (isAttack(a)) {
+    const phase = currentAttackPhase(defender);
+    return phase === "startup" ? "counter" : phase === "recovery" ? "punish" : null;
+  }
+  if (isGrab(a)) {
+    const g = GRABS[a];
+    return defender.actionFrame < g.startup ? "counter" : defender.actionFrame >= g.startup + g.active ? "punish" : null;
+  }
+  if (a === "parry") return defender.actionFrame < PARRY.startup ? "counter" : parryActiveAt(defender.actionFrame) ? null : "punish";
+  if (a === "parried" || a === "taunt") return "punish";
+  if (a === "backdash") return isStrikeInvulnerable(defender) ? null : "punish";
+  return null;
+}
+
+/** A double tap waiting for its second press (DASH.tapWindow): which way the first went, on which frame, and whether it was let go since. */
+interface Tap { dir: -1 | 0 | 1; frame: number; released: boolean }
+const NO_TAP: Tap = { dir: 0, frame: -99, released: false };
 
 /** Practice mode refills health after this many frames back in neutral. */
 export const PRACTICE_REFILL_FRAMES = 60;
@@ -276,7 +316,7 @@ export function placementOf(geometry: FighterGeometry, state: FighterState): Pla
  * change whether the next attack connects.
  */
 export function hurtFrameOf(state: FighterState): FrameRef {
-  if (state.action === "walk") return { poseId: "idle", variant: 0 };
+  if (state.action === "walk" || isDash(state.action)) return { poseId: "idle", variant: 0 };
   const frame = frameOf(state);
   return variantPoseFor(state.action) === null ? frame : { ...frame, variant: 0 };
 }
@@ -405,10 +445,16 @@ export class FightSimulation {
   private previousInputs: [InputFrame, InputFrame] = [EMPTY_INPUT, EMPTY_INPUT];
   /** Whether each player's throw button was down last step (a fresh press buffers punch and kick both). */
   private previousThrow: [boolean, boolean] = [false, false];
+  /** Frames left on each player's buffered throw-button press, so it still throws (never taunts) once let go. */
+  private throwBuffers: [number, number] = [0, 0];
   /** Frames since each fighter last held back / down (for block leniency). */
   private guardHistory = [{ back: 99, down: 99 }, { back: 99, down: 99 }];
   /** Frames left on each buffered press (0 = none). */
   private buffers: [Record<keyof Presses, number>, Record<keyof Presses, number>] = [noPresses(0), noPresses(0)];
+  /** Each player's last tap of a direction, for dashes. */
+  private taps: [Tap, Tap] = [NO_TAP, NO_TAP];
+  /** A buffered dash: which way, and frames left (like a buffered press). */
+  private dashBuffers: [{ dir: -1 | 0 | 1; frames: number }, { dir: -1 | 0 | 1; frames: number }] = [{ dir: 0, frames: 0 }, { dir: 0, frames: 0 }];
 
   private readonly startPositions: [number, number];
   private readonly random: () => number;
@@ -524,7 +570,10 @@ export class FightSimulation {
   private beginRound(round: RoundState): FightState {
     this.previousInputs = [EMPTY_INPUT, EMPTY_INPUT];
     this.previousThrow = [false, false];
+    this.throwBuffers = [0, 0];
     this.buffers = [noPresses(0), noPresses(0)];
+    this.taps = [NO_TAP, NO_TAP];
+    this.dashBuffers = [{ dir: 0, frames: 0 }, { dir: 0, frames: 0 }];
     this.guardHistory = [{ back: 99, down: 99 }, { back: 99, down: 99 }];
     this.calmFrames = [0, 0];
     this.snubbed = [false, false];
@@ -549,10 +598,12 @@ export class FightSimulation {
     // A fresh throw press is a fresh punch AND kick, even with one of them already held.
     for (const i of [0, 1] as const) {
       const throwPressed = rawInputs[i].throw && !this.previousThrow[i];
+      if (throwPressed) this.throwBuffers[i] = INPUT_BUFFER_FRAMES;
       for (const button of PRESS_BUTTONS) {
         const thrown = throwPressed && (button === "punch" || button === "kick");
         if (thrown || (inputs[i][button] && !this.previousInputs[i][button])) this.buffers[i][button] = INPUT_BUFFER_FRAMES;
       }
+      this.trackTaps(i, inputs[i], this.previousInputs[i], frame);
     }
     this.previousInputs = inputs;
     this.previousThrow = [rawInputs[0].throw, rawInputs[1].throw];
@@ -577,12 +628,13 @@ export class FightSimulation {
         : noPresses(false);
     let fighters = phase === "intro" ? this.introFighters(prev, inputs, events) : [0, 1].map((i) =>
       stepFighter(prev.fighters[i], {
-        input: controllable ? inputs[i] : EMPTY_INPUT,
+        input: controllable ? { ...inputs[i], throw: inputs[i].throw || this.throwBuffers[i] > 0 } : EMPTY_INPUT,
         pressed: pressed(i),
         opponent: prev.fighters[1 - i],
         controllable,
         archetype: this.geometry[i].archetype,
         threatened: threatReaches(this.geometry[1 - i], prev.fighters[1 - i], this.geometry[i], prev.fighters[i]),
+        dash: controllable && this.dashBuffers[i].frames > 0 ? this.dashBuffers[i].dir : 0,
       }),
     ) as [FighterState, FighterState];
     if (controllable) fighters = this.resolveGrabs(fighters, events);
@@ -593,6 +645,9 @@ export class FightSimulation {
       for (const button of PRESS_BUTTONS) {
         this.buffers[i][button] = started ? 0 : Math.max(0, this.buffers[i][button] - 1);
       }
+      this.throwBuffers[i] = started ? 0 : Math.max(0, this.throwBuffers[i] - 1);
+      const dashed = isDash(fighters[i].action) && fighters[i].actionFrame === 0;
+      this.dashBuffers[i] = dashed || this.dashBuffers[i].frames <= 1 ? { dir: 0, frames: 0 } : { ...this.dashBuffers[i], frames: this.dashBuffers[i].frames - 1 };
     }
     fighters = fighters.map((f, i) => (f.action !== prev.fighters[i].action ? this.withVariant(i as PlayerIndex, f) : f)) as [FighterState, FighterState];
 
@@ -661,6 +716,28 @@ export class FightSimulation {
         crouching: false,
       };
     }) as [FighterState, FighterState];
+  }
+
+  /**
+   * Double taps: a fresh press of left or right (down not held) within
+   * DASH.tapWindow frames of a press the same way, let go of in between, buffers
+   * a dash that way. The tap that makes a dash is used up, so a third tap starts over.
+   */
+  private trackTaps(i: PlayerIndex, now: InputFrame, before: InputFrame, frame: number): void {
+    const dirOf = (f: InputFrame): -1 | 0 | 1 => (f.right === f.left ? 0 : f.right ? 1 : -1);
+    const dir = dirOf(now);
+    const tap = this.taps[i];
+    // Let go only once that direction itself is up (holding both ways isn't letting go).
+    const tapHeld = tap.dir === 1 ? now.right : tap.dir === -1 ? now.left : false;
+    if (!tapHeld) this.taps[i] = { ...tap, released: true };
+    // A fresh press of that direction (not one still held from before, under the other way).
+    if (dir === 0 || (dir === 1 ? before.right : before.left)) return;
+    if (dir === tap.dir && this.taps[i].released && frame - tap.frame <= DASH.tapWindow && !now.down) {
+      this.dashBuffers[i] = { dir, frames: INPUT_BUFFER_FRAMES };
+      this.taps[i] = NO_TAP;
+    } else {
+      this.taps[i] = { dir, frame, released: false };
+    }
   }
 
   /** Practice: health (floored at 1 where damage is applied) refills after a second of neutral. */
@@ -756,7 +833,7 @@ export class FightSimulation {
       if (!isAttack(attacker.action) || attacker.hasHit || currentAttackPhase(attacker) !== "active") continue;
       const d = (1 - a) as PlayerIndex;
       const defender = fighters[d];
-      if (defender.action === "ko") continue;
+      if (defender.action === "ko" || isStrikeInvulnerable(defender)) continue;
       const atkGeo = this.geometry[a];
       const defGeo = this.geometry[d];
       const hitbox = hitboxFor(attacker.action, currentGeometry(atkGeo, attacker));
@@ -783,7 +860,10 @@ export class FightSimulation {
       const lenient = (defender.action === "idle" || defender.action === "walk" || defender.action === "jumpSquat") && isGrounded(defender)
         && (this.guardHistory[d].back < BLOCK_LENIENCY_FRAMES || this.guardHistory[d].down < BLOCK_LENIENCY_FRAMES);
       const crouching = isGuarding(defender) ? defender.crouching : this.guardHistory[d].down < BLOCK_LENIENCY_FRAMES;
-      const blocked = (isGuarding(defender) || lenient) && isGrounded(defender) && !isGuardBroken(defender) && guardBlocks(level, crouching);
+      const guarding = (isGuarding(defender) || lenient) && isGrounded(defender) && !isGuardBroken(defender);
+      const blocked = guarding && guardBlocks(level, crouching);
+      const wrongGuard = guarding && !blocked && (level === "low" || level === "overhead") && guardBlocks(level, !crouching) ? level : null;
+      const timing = blocked ? null : hitTiming(defender);
       const before = defender.health;
       let hitDefender = applyHit({ ...defender, crouching }, attack, blocked, this.practice ? 1 : 0);
       const guardBroke = blocked && hitDefender.action === "hurt";
@@ -804,7 +884,10 @@ export class FightSimulation {
         next[a] = { ...next[a], position: { ...next[a].position, x: clampToStage(next[a].position.x - remainder) } };
       }
       next[a] = { ...next[a], hasHit: true };
-      events.push({ type: "hit", attacker: a, defender: d, attack, blocked, damage: before - hitDefender.health, at });
+      events.push({
+        type: "hit", attacker: a, defender: d, attack, blocked, damage: before - hitDefender.health, at,
+        ...(timing ? { timing } : {}), ...(wrongGuard ? { wrongGuard } : {}),
+      });
       if (guardBroke) events.push({ type: "guardBreak", attacker: a, defender: d });
       if (hitDefender.action === "ko") events.push({ type: "ko", player: d });
     }

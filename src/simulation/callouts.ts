@@ -1,22 +1,35 @@
-import type { FightState } from "./fight-simulation";
+import type { FightState, HitTiming } from "./fight-simulation";
 import { HitStreak } from "./match-stats";
 import { MAX_HEALTH, type PlayerIndex, type RoundPhase } from "./round-rules";
 
-/** An announcer callout for one player: a refused handshake, a broken guard, the round's first hit, a hit streak as it grows, a round won untouched. */
+/**
+ * An announcer callout for one player: a refused handshake, a broken guard, the
+ * round's first hit, a hit streak as it grows, a round won untouched, a clean hit
+ * that caught the opponent starting a move (counter) or recovering from one (punish).
+ */
 export type Callout =
   | { type: "snub"; player: PlayerIndex }
   | { type: "firstBlood"; player: PlayerIndex }
   | { type: "streak"; player: PlayerIndex; hits: number }
   | { type: "perfect"; player: PlayerIndex }
-  | { type: "guardBreak"; player: PlayerIndex };
+  | { type: "guardBreak"; player: PlayerIndex }
+  | { type: "timing"; player: PlayerIndex; timing: HitTiming };
 
-export const calloutText = (c: Callout): string =>
-  c.type === "snub" ? "NO HANDSHAKE" : c.type === "guardBreak" ? "GUARD BREAK" : c.type === "firstBlood" ? "FIRST BLOOD" : c.type === "streak" ? `${c.hits} HIT STREAK` : "PERFECT";
+export function calloutText(c: Callout): string {
+  switch (c.type) {
+    case "snub": return "NO HANDSHAKE";
+    case "guardBreak": return "GUARD BREAK";
+    case "firstBlood": return "FIRST BLOOD";
+    case "streak": return `${c.hits} HIT STREAK`;
+    case "perfect": return "PERFECT";
+    case "timing": return c.timing === "counter" ? "COUNTER" : "PUNISH";
+  }
+}
 
 /**
  * Picks out callouts as the fight is played: feed it every state the
  * simulation steps to (not replays), in order. `firstBlood` and `perfect`
- * are for matches; practice only gets streaks and snubs.
+ * are for matches; practice only gets streaks, snubs, guard breaks and counters / punishes.
  */
 export class CalloutTracker {
   private readonly streak = new HitStreak();
@@ -35,6 +48,7 @@ export class CalloutTracker {
           break;
         case "hit":
           if (!ev.blocked) this.firstBlood(ev.attacker, out);
+          if (ev.timing) out.push({ type: "timing", player: ev.attacker, timing: ev.timing });
           break;
         case "throw":
           this.firstBlood(ev.attacker, out);

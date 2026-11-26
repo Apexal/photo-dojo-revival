@@ -1,6 +1,7 @@
 import { ARCHETYPES, type ArchetypeId } from "../../shared/archetypes";
 import {
   ATTACKS,
+  DASH,
   GRABS,
   KNOCKDOWN,
   PARRY,
@@ -92,6 +93,36 @@ function startupOf(move: Partial<InputFrame>): number {
 }
 
 /**
+ * Keeps a scripted player from dashing by accident: a direction pressed again
+ * within DASH.tapWindow frames of its last press (the simulation's double tap,
+ * timed from the first press) is held off until the window has passed; going
+ * back, the block button stands in meanwhile, so the guard holds without a back
+ * dash. With up or down held it's no dash (a jump, a crouch), so it goes through.
+ */
+export class NoDoubleTaps {
+  private held = { left: false, right: false };
+  private pressedAt = { left: -99, right: -99 };
+  private frame = 0;
+
+  filter(input: InputFrame, facing: 1 | -1): InputFrame {
+    this.frame++;
+    const out = { ...input };
+    const back = facing === 1 ? "left" : "right";
+    for (const d of ["left", "right"] as const) {
+      const fresh = out[d] && !this.held[d];
+      if (fresh && !out.up && !out.down && this.frame - this.pressedAt[d] <= DASH.tapWindow) {
+        out[d] = false;
+        if (d === back) out.block = true;
+      } else if (fresh) {
+        this.pressedAt[d] = this.frame;
+      }
+      this.held[d] = out[d];
+    }
+    return out;
+  }
+}
+
+/**
  * A computer opponent. It reads the fight like a player would: it sees the
  * opponent `reaction` frames late, and guesses (guards, anti-airs, punishes)
  * succeed with per-level odds. Output is plain InputFrames, so it plays by
@@ -110,6 +141,7 @@ export class CpuPlayer {
   /** Frames before another attack press, so it doesn't mash. */
   private cooldown = 0;
   private lastButtons = { punch: false, kick: false };
+  private readonly taps = new NoDoubleTaps();
   /** Guard / punish / anti-air rolls for recent opponent moves. */
   private rolls = new Map<string, boolean>();
   private frame = 0;
@@ -134,7 +166,7 @@ export class CpuPlayer {
     if (frame.punch && this.lastButtons.punch) frame.punch = false;
     if (frame.kick && this.lastButtons.kick) frame.kick = false;
     this.lastButtons = { punch: frame.punch, kick: frame.kick };
-    return frame;
+    return this.taps.filter(frame, self.facing);
   }
 
   private decide(self: FighterState, opp: FighterState): InputFrame {

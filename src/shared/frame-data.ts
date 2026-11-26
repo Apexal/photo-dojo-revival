@@ -212,7 +212,7 @@ export type GrabId = "throw" | "bearHug";
 export const GRABS: Record<GrabId, GrabData> = {
   /** Punch + kick up close: the shared throw. */
   throw: {
-    startup: 5, active: 1, recovery: 20, damage: 12, holdFrames: 8, techable: true, throwDistance: 90, range: 40,
+    startup: 5, active: 1, recovery: 20, damage: 12, holdFrames: 8, techable: true, throwDistance: 90, range: 60,
     sequence: [
       { fromPoseId: "idle", toPoseId: "punch", frames: 5, phase: "startup" },
       { poseId: "punch", frames: 1, phase: "active" },
@@ -221,7 +221,7 @@ export const GRABS: Record<GrabId, GrabData> = {
     ],
   },
   /**
-   * Grappler: reaches almost three times as far as a throw and can't be broken,
+   * Grappler: reaches almost twice as far as a throw and can't be broken,
    * but it's slower and a whiff is a long time stuck with arms out.
    */
   bearHug: {
@@ -292,6 +292,21 @@ export const KNOCKDOWN = {
 export const THROW_LENIENCY_FRAMES = 2;
 /** A punch/kick press is remembered this long, so pressing a little early still works. */
 export const INPUT_BUFFER_FRAMES = 5;
+
+/**
+ * Dashes: tap forward (or back) twice, the second press within `tapWindow`
+ * frames of the first, with the direction let go in between (and down not held).
+ * Committed for `frames`, covering `distance` px fast at first and slowing down
+ * (buffered presses come out as it ends). The forward dash closes in about twice
+ * as fast as walking but can be hit and thrown all the way; the back dash can't
+ * be hit by strikes for its first `invulnerable` frames (throws still catch it)
+ * and is open after that: the way out of pressure and the corner, with a cost.
+ */
+export const DASH = {
+  tapWindow: 10,
+  forward: { frames: 16, distance: 130 },
+  back: { frames: 20, distance: 110, invulnerable: 8 },
+} as const;
 
 export function attackTotalFrames(attack: AttackData): number {
   return attack.startup + attack.active + attack.recovery;
@@ -387,6 +402,8 @@ export function idleSwayAt(actionFrame: number): number {
 export type FighterAction =
   | "idle" | "walk" | "jump" | "block" | "blockstun"
   | "jumpSquat"
+  /** Double-tap forward / back (DASH). */
+  | "dash" | "backdash"
   | AttackId | GrabId | "taunt"
   /** The guardian's parry, and an attacker it caught (staggered). */
   | "parry" | "parried"
@@ -421,6 +438,9 @@ export function poseForAction(action: FighterAction, actionFrame: number): PoseI
       return gameplayPoseOf(poseAtFrame(sequenceFor(action)!, actionFrame));
     case "jumpSquat":
       return "block"; // the crouch before the jump
+    case "dash":
+    case "backdash":
+      return "walk"; // mid-stride, sliding
     case "taunt":
       return "win";
     case "grabbed":

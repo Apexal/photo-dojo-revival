@@ -2,7 +2,7 @@ import type Phaser from "phaser";
 import { CPU_LEVEL_NAMES, type CpuLevel } from "./cpu-player";
 import { GamepadInputSource, type PadBinding } from "./gamepad-input-source";
 import type { InputSource } from "./input-source";
-import { actionKeyLabel } from "./key-bindings";
+import { actionKeyLabel, keyBindings } from "./key-bindings";
 import { KeyboardInputSource, type KeyboardLayout } from "./keyboard-input-source";
 
 /** Serializable description of a player's controller, so each scene can bind its own input plugin. */
@@ -27,11 +27,11 @@ export const describeInput = (d: InputDescriptor) =>
   : d.kind === "cpu" ? `CPU · ${CPU_LEVEL_NAMES[d.level]}`
   : d.kind === "keyboard" ? `Keyboard ${keyboardKeys(d.layout)}` : `Gamepad ${d.index + 1}`;
 
-/** e.g. "WASD + J/K" for the current bindings. */
+/** e.g. "WASD + J/K/L" for the current bindings (punch / kick / throw). */
 export function keyboardKeys(layout: KeyboardLayout): string {
   const k = (a: Parameters<typeof actionKeyLabel>[1]) => actionKeyLabel(layout, a);
   const dirs = [k("up"), k("left"), k("down"), k("right")];
-  return `${dirs.every((d) => d.length === 1) ? dirs.join("") : dirs.join(" ")} + ${k("punch")}/${k("kick")}`;
+  return `${dirs.every((d) => d.length === 1) ? dirs.join("") : dirs.join(" ")} + ${k("punch")}/${k("kick")}${keyBindings()[layout].throw.length ? `/${k("throw")}` : ""}`;
 }
 
 /** Pads: the same slot and the same connection in it (a pad that woke up in someone's old slot isn't theirs). */

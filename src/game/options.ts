@@ -1,6 +1,6 @@
 import type Phaser from "phaser";
 import { getSetting, setSetting } from "../shared/fighter-storage";
-import { DEFAULT_KEY_BINDINGS, isKeyBindings, setKeyBindings, type KeyBindings } from "./input/key-bindings";
+import { DEFAULT_KEY_BINDINGS, migrateKeyBindings, setKeyBindings, type KeyBindings } from "./input/key-bindings";
 
 /** Player-facing settings; each is saved under its own key in the settings store. */
 export interface GameOptions {
@@ -32,8 +32,8 @@ export async function loadOptions(registry: Phaser.Data.DataManager): Promise<vo
     if (typeof value === typeof DEFAULT_OPTIONS[key]) (options as Record<string, unknown>)[key] = value;
   }
   registry.set(REGISTRY_KEY, options);
-  const bindings = await getSetting("keyBindings");
-  if (isKeyBindings(bindings)) setKeyBindings(bindings);
+  const bindings = migrateKeyBindings(await getSetting("keyBindings"));
+  if (bindings) setKeyBindings(bindings);
 }
 
 export function getOptions(registry: Phaser.Data.DataManager): GameOptions {

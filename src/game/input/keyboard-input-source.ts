@@ -26,7 +26,7 @@ export class KeyboardInputSource implements InputSource {
 
   get label(): string {
     const k = (a: BindableAction) => actionKeyLabel(this.layout, a);
-    return `Keyboard (${k("up")}${k("left")}${k("down")}${k("right")} + ${k("punch")}/${k("kick")})`;
+    return `Keyboard (${k("up")}${k("left")}${k("down")}${k("right")} + ${k("punch")}/${k("kick")}${keyBindings()[this.layout].throw.length ? `/${k("throw")}` : ""})`;
   }
 
   /** (Re)attach to the keys of the current bindings; called again after a remap. */
@@ -53,7 +53,7 @@ export class KeyboardInputSource implements InputSource {
 
   read(): InputFrame {
     if (this.boundVersion !== keyBindingsVersion()) this.bind();
-    return { ...this.taps.read(BINDABLE_ACTIONS, (a) => this.keys[a].some((k) => k.isDown)), block: false, throw: false, uppercut: false, taunt: false, hasTauntButton: false };
+    return { ...this.taps.read(BINDABLE_ACTIONS, (a) => this.keys[a].some((k) => k.isDown)), block: false, uppercut: false, taunt: false, hasTauntButton: false };
   }
 
   pausePressed(): boolean {

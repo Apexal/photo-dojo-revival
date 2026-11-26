@@ -6,6 +6,7 @@ import {
   RemapSession,
   isDefaultBindings,
   isKeyBindings,
+  migrateKeyBindings,
   keyBindings,
   keyLabel,
   layoutForKey,
@@ -22,10 +23,10 @@ describe("key remapping", () => {
   it("assigns one key per action, in order, and replaces only that keyboard half", () => {
     const s = new RemapSession("p1");
     expect(s.action).toBe("left");
-    expect(press(s, 70, 72, 84, 71, 85, 73)).toEqual([null, null, null, null, null, null]); // F H T G U I
+    expect(press(s, 70, 72, 84, 71, 85, 73, 79)).toEqual([null, null, null, null, null, null, null]); // F H T G U I O
     expect(s.done).toBe(true);
     const b = s.result();
-    expect(b.p1).toEqual({ left: [70], right: [72], up: [84], down: [71], punch: [85], kick: [73] });
+    expect(b.p1).toEqual({ left: [70], right: [72], up: [84], down: [71], punch: [85], kick: [73], throw: [79] });
     expect(b.p2).toEqual(DEFAULT_KEY_BINDINGS.p2);
   });
 
@@ -42,19 +43,19 @@ describe("key remapping", () => {
 
   it("can reuse its own old keys in a new order (swap punch and kick)", () => {
     const s = new RemapSession("p1");
-    press(s, KEY.A, KEY.D, KEY.W, KEY.S, KEY.K, KEY.J);
+    press(s, KEY.A, KEY.D, KEY.W, KEY.S, KEY.K, KEY.J, KEY.L);
     expect(s.result().p1).toMatchObject({ punch: [KEY.K], kick: [KEY.J] });
   });
 
   it("joining, labels and the move guide follow the current bindings", () => {
     const s = new RemapSession("p2");
-    press(s, 100, 102, 104, 101, 96, 110); // numpad 4 6 8 5 0 .
+    press(s, 100, 102, 104, 101, 96, 110, 107); // numpad 4 6 8 5 0 . +
     setKeyBindings(s.result());
     expect(layoutForKey(104)).toBe("p2");
     expect(layoutForKey(KEY.LEFT)).toBeNull();
     const l = controlLabels({ kind: "keyboard", layout: "p2" }, "right");
-    expect(MOVE_GUIDE.find((m) => m.name === "Throw")!.how(l)).toBe("Num0 + Num.");
-    expect(MOVE_GUIDE.find((m) => m.name === "Walk")!.how(l)).toBe("Num6 / Num4");
+    expect(MOVE_GUIDE.find((m) => m.name === "Throw")!.how(l)).toBe("Num+ or Num0 + Num.");
+    expect(MOVE_GUIDE.find((m) => m.name === "Walk · dash")!.how(l)).toBe("Num6 / Num4, tap twice to dash");
     expect(isDefaultBindings(keyBindings())).toBe(false);
   });
 
@@ -63,6 +64,21 @@ describe("key remapping", () => {
     expect(isKeyBindings(null)).toBe(false);
     expect(isKeyBindings({ p1: DEFAULT_KEY_BINDINGS.p1 })).toBe(false);
     expect(isKeyBindings({ ...DEFAULT_KEY_BINDINGS, p2: { ...DEFAULT_KEY_BINDINGS.p2, kick: [] } })).toBe(false);
+  });
+
+  it("gives bindings saved before the throw key a throw key, unless it's taken", () => {
+    const { throw: _p1, ...p1 } = DEFAULT_KEY_BINDINGS.p1;
+    const { throw: _p2, ...p2 } = DEFAULT_KEY_BINDINGS.p2;
+    expect(migrateKeyBindings({ p1, p2 })).toEqual(DEFAULT_KEY_BINDINGS);
+    // P1 put kick on L: no throw key for P1 (punch + kick still throws), P2 keeps its default.
+    const taken = migrateKeyBindings({ p1: { ...p1, kick: [KEY.L] }, p2 })!;
+    expect(taken.p1.throw).toEqual([]);
+    expect(taken.p2.throw).toEqual(DEFAULT_KEY_BINDINGS.p2.throw);
+    setKeyBindings(taken);
+    expect(controlLabels({ kind: "keyboard", layout: "p1" }, "left").throw).toBe("J + L");
+    expect(migrateKeyBindings(DEFAULT_KEY_BINDINGS)).toEqual(DEFAULT_KEY_BINDINGS);
+    expect(migrateKeyBindings({ p1 })).toBeNull();
+    expect(migrateKeyBindings("nope")).toBeNull();
   });
 
   it("names keys readably", () => {

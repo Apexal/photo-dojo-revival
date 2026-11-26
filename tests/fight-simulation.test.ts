@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { ATTACKS, GUARD_BREAK, KNOCKDOWN, THROW } from "../src/shared/frame-data";
+import { ATTACKS, DASH, GUARD_BREAK, KNOCKDOWN, THROW } from "../src/shared/frame-data";
 import { stickFigureGeometry } from "../src/shared/stick-figure";
 import { FightSimulation, antiAirImmune, frameOf, hurtboxesOf, headHitLineY, worldBoxesOf, type FightEvent, type FightState } from "../src/simulation/fight-simulation";
 import { createFighterState, currentAttackPhase } from "../src/simulation/fighter-state-machine";
@@ -148,7 +148,7 @@ describe("FightSimulation", () => {
     expect(hit).toMatchObject({ blocked: true, damage: 0 });
   });
 
-  describe("the block button (a pad's X or bumpers)", () => {
+  describe("the block button (a pad's triggers)", () => {
     it("guards standing with no attack coming, instead of walking or jumping", () => {
       const sim = fightingSim(300);
       const x = sim.current.fighters[1].position.x;
@@ -163,10 +163,19 @@ describe("FightSimulation", () => {
       expect(hit).toMatchObject({ blocked: true, damage: 0 });
     });
 
-    it("stays a standing guard with down held: a low kick gets through", () => {
+    it("guards low with down held: a low kick is blocked", () => {
       const sim = fightingSim(150);
       const hit = run(sim, 12, input({ kick: true, down: true }), input({ block: true, down: true })).find((e) => e.type === "hit");
-      expect(hit).toMatchObject({ attack: "lowKick", blocked: false });
+      expect(hit).toMatchObject({ attack: "lowKick", blocked: true });
+      expect(sim.current.fighters[1].crouching).toBe(true);
+    });
+
+    it("guards standing again once down is let go", () => {
+      const sim = fightingSim(300);
+      run(sim, 3, idle, input({ block: true, down: true }));
+      expect(sim.current.fighters[1]).toMatchObject({ action: "block", crouching: true });
+      run(sim, 2, idle, input({ block: true }));
+      expect(sim.current.fighters[1]).toMatchObject({ action: "block", crouching: false });
     });
 
     it("turns a jump's wind-up into a block", () => {
@@ -403,10 +412,23 @@ describe("moves from inputs", () => {
     expect(fightingSim(100).step([input({ punch: true, kick: true }), idle]).fighters[0].action).toBe("throw");
   });
 
-  it("the throw button (a pad's Y) is punch + kick: a throw, a taunt, or with down the signature", () => {
+  it("the throw button (a pad's Y, a keyboard's throw key) is punch + kick, but always throws: far away too", () => {
     expect(fightingSim(100).step([input({ throw: true }), idle]).fighters[0].action).toBe("throw");
-    expect(fightingSim(600).step([input({ throw: true }), idle]).fighters[0].action).toBe("taunt");
+    expect(fightingSim(600).step([input({ throw: true }), idle]).fighters[0].action).toBe("throw");
     expect(fightingSim(600).step([input({ throw: true, down: true }), idle]).fighters[0].action).toBe("charge");
+    // Punch + kick from far away is still the keyboard's taunt.
+    expect(fightingSim(600).step([input({ punch: true, kick: true }), idle]).fighters[0].action).toBe("taunt");
+  });
+
+  it("a throw key tapped during recovery still throws when it comes out, far away too", () => {
+    const sim = fightingSim(600);
+    sim.step([input({ kick: true }), idle]);
+    let f = 0;
+    while (sim.current.fighters[0].action === "kick" && f++ < 60) {
+      const left = ATTACKS.kick.startup + ATTACKS.kick.active + ATTACKS.kick.recovery - sim.current.fighters[0].actionFrame;
+      sim.step([input({ throw: left <= 3 && left > 1 }), idle]);
+    }
+    expect(sim.current.fighters[0].action).toBe("throw");
   });
 
   it("a pad (it has a taunt button) only taunts with that button: its throw button throws even from far away", () => {
@@ -1078,5 +1100,153 @@ describe("knockdowns stay rare", () => {
     expect(Object.entries(ATTACKS).filter(([, a]) => a.knockdown === "air").map(([id]) => id)).toEqual(["uppercut"]);
     // The jump kick and the brawler's charge knock anyone down.
     expect(Object.entries(ATTACKS).filter(([, a]) => a.knockdown === "always").map(([id]) => id)).toEqual(["jumpKick", "charge"]);
+  });
+});
+
+describe("dashes", () => {
+  const left = input({ left: true }), right = input({ right: true });
+  /** Taps then rests: `taps` frames of `dir` each, `gap` frames apart. */
+  const doubleTap = (sim: FightSimulation, dir: InputFrame, gap = 3, p2: InputFrame = idle) => {
+    run(sim, 2, dir, p2);
+    run(sim, gap, idle, p2);
+    return sim.step([dir, p2]);
+  };
+
+  it("tapping forward twice dashes forward its whole distance, then it's free", () => {
+    const sim = fightingSim(700);
+    run(sim, 2, right);
+    run(sim, 3);
+    const start = sim.current.fighters[0].position.x;
+    expect(sim.step([right, idle]).fighters[0]).toMatchObject({ action: "dash", actionFrame: 0 });
+    run(sim, DASH.forward.frames - 1);
+    expect(sim.current.fighters[0].position.x - start).toBeCloseTo(DASH.forward.distance, 5);
+    sim.step([idle, idle]);
+    expect(sim.current.fighters[0].action).toBe("idle");
+  });
+
+  it("tapping back twice back-dashes", () => {
+    const sim = fightingSim(400);
+    run(sim, 2, left);
+    run(sim, 3);
+    const start = sim.current.fighters[0].position.x;
+    expect(sim.step([left, idle]).fighters[0].action).toBe("backdash");
+    run(sim, DASH.back.frames - 1);
+    expect(start - sim.current.fighters[0].position.x).toBeCloseTo(DASH.back.distance, 5);
+  });
+
+  it("needs two quick taps: too slow, held, or with down, it just walks or crouches", () => {
+    const slow = fightingSim(700);
+    expect(doubleTap(slow, right, DASH.tapWindow + 2).fighters[0].action).toBe("walk");
+    const held = fightingSim(700);
+    run(held, 10, right);
+    expect(held.current.fighters[0].action).toBe("walk");
+    const low = fightingSim(700);
+    expect(doubleTap(low, input({ right: true, down: true })).fighters[0].action).not.toMatch(/dash/);
+  });
+
+  it("a tap then up-forward jumps rather than dashes", () => {
+    const sim = fightingSim(700);
+    run(sim, 2, right);
+    run(sim, 3);
+    expect(sim.step([input({ right: true, up: true }), idle]).fighters[0].action).toBe("jumpSquat");
+  });
+
+  it("holding forward and touching back isn't a double tap", () => {
+    const sim = fightingSim(700);
+    run(sim, 2, right);
+    run(sim, 2, input({ right: true, left: true }));
+    run(sim, 3, right);
+    expect(sim.current.fighters[0].action).toBe("walk");
+  });
+
+  it("a third tap doesn't dash again straight out of the first dash", () => {
+    const sim = fightingSim(700);
+    doubleTap(sim, right);
+    run(sim, 1);
+    sim.step([right, idle]);
+    run(sim, DASH.forward.frames);
+    expect(sim.current.fighters[0].action).not.toBe("dash");
+  });
+
+  it("is committed: a punch pressed during it comes out as it ends", () => {
+    const sim = fightingSim(700);
+    doubleTap(sim, right);
+    run(sim, DASH.forward.frames - 3);
+    sim.step([input({ punch: true }), idle]);
+    run(sim, 2);
+    expect(sim.current.fighters[0].action).toBe("punch");
+  });
+
+  /** P1 against the left wall (a back dash doesn't move them), P2 `gap` px away. */
+  const cornered = (gap: number) => {
+    const sim = new FightSimulation([geo, geo], { startPositions: [60, 60 + gap] });
+    for (let i = 0; i < ROUND_INTRO_FRAMES; i++) sim.step([idle, idle]);
+    return sim;
+  };
+
+  it("a back dash's first frames can't be hit by strikes", () => {
+    const sim = cornered(130);
+    run(sim, 2, left);
+    run(sim, 3);
+    // The back dash and the punch start together: the punch is active well inside the invulnerable frames.
+    const events = [sim.step([left, input({ punch: true })]), ...Array.from({ length: 12 }, () => sim.step([idle, idle]))].flatMap((s) => s.events);
+    expect(events.some((e) => e.type === "hit")).toBe(false);
+  });
+
+  it("the end of a back dash is open, and a hit there is a punish", () => {
+    const sim = cornered(130);
+    doubleTap(sim, left);
+    run(sim, DASH.back.invulnerable + 1 - ATTACKS.punch.startup);
+    const hit = run(sim, 8, idle, input({ punch: true })).find((e) => e.type === "hit");
+    expect(hit).toMatchObject({ attacker: 1, blocked: false, timing: "punish" });
+  });
+
+  it("throws catch a back dash", () => {
+    const sim = cornered(100);
+    doubleTap(sim, left, 3);
+    const grab = run(sim, 8, idle, input({ punch: true, kick: true })).find((e) => e.type === "grab");
+    expect(grab).toMatchObject({ attacker: 1, defender: 0 });
+  });
+});
+
+describe("what a clean hit caught", () => {
+  it("a hit in the startup of the opponent's move is a counter", () => {
+    const sim = fightingSim(150);
+    const hit = run(sim, 8, input({ punch: true }), input({ kick: true })).find((e) => e.type === "hit");
+    expect(hit).toMatchObject({ attacker: 0, blocked: false, timing: "counter" });
+  });
+
+  it("a hit on someone recovering from a blocked uppercut is a punish", () => {
+    const sim = fightingSim(120);
+    const events: FightEvent[] = [];
+    let blocked = false, punched = false;
+    for (let f = 0; f < 60; f++) {
+      const me = sim.current.fighters[0];
+      const free = me.action === "block" || me.action === "idle";
+      const press = blocked && free && !punched;
+      if (press) punched = true;
+      const s = sim.step([press ? input({ punch: true }) : input({ block: true }), f === 0 ? input({ uppercut: true }) : idle]);
+      if (s.events.some((e) => e.type === "hit" && e.attacker === 1 && e.blocked)) blocked = true;
+      events.push(...s.events);
+    }
+    expect(events.find((e) => e.type === "hit" && e.attacker === 0)).toMatchObject({ blocked: false, timing: "punish" });
+  });
+
+  it("a plain hit on someone standing there is neither, with no wrong guard", () => {
+    const hit = run(fightingSim(150), 8, input({ punch: true })).find((e) => e.type === "hit")!;
+    expect(hit).not.toHaveProperty("timing");
+    expect(hit).not.toHaveProperty("wrongGuard");
+  });
+
+  it("a low kick that gets past a standing guard says it needed a crouch", () => {
+    const hit = run(fightingSim(150), 12, input({ kick: true, down: true }), input({ block: true })).find((e) => e.type === "hit");
+    expect(hit).toMatchObject({ attack: "lowKick", blocked: false, wrongGuard: "low" });
+  });
+
+  it("an overhead that gets past a crouching guard says it needed standing", () => {
+    const sim = new FightSimulation([stickFigureGeometry("acrobat"), geo], { startPositions: [565, 715] });
+    for (let i = 0; i < ROUND_INTRO_FRAMES; i++) sim.step([idle, idle]);
+    const hit = run(sim, 30, input({ down: true, punch: true, kick: true }), input({ down: true })).find((e) => e.type === "hit");
+    expect(hit).toMatchObject({ attack: "flyingKnee", blocked: false, wrongGuard: "overhead" });
   });
 });

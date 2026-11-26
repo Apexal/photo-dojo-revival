@@ -5,7 +5,7 @@ import { STEP_GAP_FRAMES, TUTORIAL_STEPS, Tutorial, tutorialSteps, type Tutorial
 import { ARCHETYPE_IDS, type ArchetypeId } from "../src/shared/archetypes";
 import { stickFigureGeometry } from "../src/shared/stick-figure";
 import { FightSimulation, type FightEvent, type FightState } from "../src/simulation/fight-simulation";
-import { createFighterState, isGrounded, isThreatening, type FighterState } from "../src/simulation/fighter-state-machine";
+import { createFighterState, currentAttackPhase, isGrounded, isThreatening, type FighterState } from "../src/simulation/fighter-state-machine";
 import { input, type InputFrame } from "../src/simulation/input-frame";
 
 const geo = stickFigureGeometry();
@@ -30,7 +30,10 @@ function tutorialAt(index: number): Tutorial {
 
 describe("tutorial steps", () => {
   it("covers every move on the controls screen, ending with the fighter's signature", () => {
-    expect(TUTORIAL_STEPS.map((s) => s.title)).toEqual(["Walk up to the dummy", "Jump", "Punch the dummy", "Kick it", "Uppercut", "Low kick", "Now block", "Now throw"]);
+    expect(TUTORIAL_STEPS.map((s) => s.title)).toEqual([
+      "Walk up to the dummy", "Jump", "Punch the dummy", "Kick it", "Uppercut", "Low kick",
+      "Now block", "Block low", "Block the jump-in", "Knock it out of the air", "Punish", "Now throw", "Break its throw",
+    ]);
     for (const archetype of ARCHETYPE_IDS) {
       const steps = tutorialSteps(archetype);
       expect(steps.slice(0, -1)).toEqual(TUTORIAL_STEPS);
@@ -126,6 +129,7 @@ describe("tutorial drill in the simulation", () => {
       const distance = Math.abs(them.position.x - me.position.x);
       const forward = me.facing === 1 ? { right: true } : { left: true };
       const back = me.facing === 1 ? { left: true } : { right: true };
+      if (tutorial.current?.title === "Break its throw" && me.action === "grabbed") return input({ punch: true, kick: true });
       if (wait > 0) return wait--, input();
       if (!isGrounded(me) || me.action !== "idle" && me.action !== "walk" && me.action !== "block") return input();
       /** Walk to `reach`, then press `press` and wait for the move to finish. */
@@ -138,6 +142,13 @@ describe("tutorial drill in the simulation", () => {
         case "Uppercut": return attack(120, { down: true, punch: true });
         case "Low kick": return attack(150, { down: true, kick: true });
         case "Now block": return isThreatening(them) ? input(back) : input();
+        case "Block low": return input({ down: true });
+        case "Block the jump-in": return isThreatening(them) ? input(back) : input();
+        case "Knock it out of the air": return !isGrounded(them) && distance < ranges.attack.uppercut ? ((wait = 30), input({ down: true, punch: true })) : input();
+        case "Punish":
+          if (them.action === "uppercut" && currentAttackPhase(them) === "recovery") return (wait = 30), input({ punch: true });
+          return isThreatening(them) ? input(back) : input();
+        case "Break its throw": return input();
         case "Now throw": return attack(ranges.throw, { punch: true, kick: true });
         default:
           if (!tutorial.current?.title.startsWith("Your signature")) return input();

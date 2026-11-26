@@ -54,6 +54,8 @@ Minimal version:
 - **Escape (optional, nice for fairness):** pressing punch + kick within 8 frames of being grabbed breaks the throw for no damage.
 - **Pose:** reuse `punch` for the thrower and `hurt` for the victim, plus a sideways shove: the victim is pushed 80 px and the sides stay as they are. It stays silly with no new captures needed. A later bonus capture ("grab") could replace the pose.
 - **Now:** a throw that lands knocks down (section 2.4): the victim is flung `throwDistance` (90 px), lies down, then gets up, which leaves the thrower free well before them.
+- **Reach:** `range` 60 px between push boxes (it was 40). New players walking up to throw kept stopping just short and whiffing into the 20-frame recovery. The bear hug's 110 is still almost twice as far, so the grappler keeps its edge.
+- **Throw buttons:** a pad's Y / RB and each keyboard half's throw key (L, `/`) are punch + kick in one press, and they always throw: only punch + kick pressed by hand from far away taunts on a keyboard (`bothButtons`).
 
 ### 2.2b Guard break (implemented)
 
@@ -138,7 +140,7 @@ Everyone sharing one move set kept fights fair but samey. So each fighter picks 
 | Archetype | Move | Frame data | Beats | Loses to |
 |---|---|---|---|---|
 | Brawler | Shoulder Charge (`ATTACKS.charge`) | 14 startup, 10 active, 18 recovery; lunges 300 px over its active frames; mid; 14 dmg; knocks down on hit (`knockdown: "always"`); −16 on block | Backing off and zoning: it reaches ~80 px past a kick's range from a standing start | Blocking (a free punish), a jump, the parry; the 14-frame lean is the tell |
-| Grappler | Bear Hug (`GRABS.bearHug`) | 8 startup, 1 active, 32 recovery; range 110 (the throw's is 40); 20 dmg; held 14 frames and can't be teched | Blocking from outside throw range | Any attack (attacks beat grabs), jumping, stepping back; a whiff is a long time with arms out |
+| Grappler | Bear Hug (`GRABS.bearHug`) | 8 startup, 1 active, 32 recovery; range 110 (the throw's is 60); 20 dmg; held 14 frames and can't be teched | Blocking from outside throw range | Any attack (attacks beat grabs), jumping, stepping back; a whiff is a long time with arms out |
 | Guardian | Parry (`PARRY`) | 3 startup, catches strikes on frames 3–12, 18 recovery; the attacker staggers 24 frames (`parried`), the guardian is free at once | Any strike, every hit level, including the other signatures' strikes | Grabs (a parrying fighter is throwable), waiting it out: 31 frames open on a whiff |
 | Acrobat | Flying Knee (`ATTACKS.flyingKnee`) | 16 startup (a dip, then the knee), 4 active, 14 recovery; lunges 80 px; overhead; 9 dmg; +1 on hit, −4 on block | A crouching guard, without having to jump | Standing block, reacting to the 16-frame startup, any faster attack |
 
@@ -158,6 +160,22 @@ Playtesters found movement slow, and felt punished for walking in to attack and 
 - **Snappier jump.** Jumps fall with `JUMP_GRAVITY` 0.8 and launch at −16: about 40 frames in the air (was 46) at the same height. Sideways speed is `JUMP_SPEED_X` 4.5, so a jump covers about the same ground. Knockdowns, throws and the ragdoll keep `GRAVITY` 0.6.
 
 The spacing balance in 3.1c was measured before these changes and needs re-checking: walk-in attacks now reach a little further (about 11 px for a punch, 19 px for a kick) and backing off is quicker.
+
+### 3.6 Dashes (implemented)
+
+The one movement option the genre has that walking and jumping don't cover: getting in fast, and getting out of pressure or the corner without jumping.
+
+- **Input:** tap forward (or back) twice, the second press within `DASH.tapWindow` (10) frames of the first, with the direction let go of in between, and down not held (so down-forward taps don't dash). Detected in the simulation (`FightSimulation.trackTaps`), so it's deterministic and replays; the dash is buffered for `INPUT_BUFFER_FRAMES` like a press. The tap that makes a dash is used up, so a third tap starts over.
+- **Forward dash** (`dash`): 16 frames, 130 px, fast off the mark and slowing to a stop (`dashSpeed`). About twice walking speed. It can be hit and thrown all the way, so dashing in at someone ready is a risk.
+- **Back dash** (`backdash`): 20 frames, 110 px. Strikes can't hit it for the first `invulnerable` (8) frames; throws still catch it (`isThrowable`). A hit on its last 12 frames is a punish (3.7).
+- **Committed:** no blocking or attacking out of either; buttons pressed during one are buffered and come out as it ends. Shown with the walk capture, hurtboxes from the stance (like walking).
+- **Scripted players don't dash by accident:** the CPU and the dummies let go of a direction and press it again all the time, which read as double taps several times a minute. `NoDoubleTaps` (`cpu-player.ts`) holds such a press off until the window has passed, with the block button standing in for back meanwhile. The CPU doesn't dash on purpose (yet).
+
+### 3.7 Counters, punishes and the wrong guard (implemented)
+
+Hit events say what the clean hit caught (`hitTiming`): **counter** when the defender was in the startup of an attack, grab or parry, **punish** when they were stuck recovering (an attack's or grab's recovery, a whiffed parry, a parried stagger, a taunt, the open end of a back dash). Trades are neither. They change no numbers yet: they're the COUNTER / PUNISH callouts (`CalloutTracker`, with announcer lines) so players see when they've done the thing the frame data rewards. A bonus (extra hitstun on a counter) is possible later, but it would bring combos closer, which section 5 rules out.
+
+Hit events also carry `wrongGuard`: a low that got past a standing guard, or an overhead past a crouching one (the defender was guarding, just the wrong way). The fight scene turns that, and a breakable grab, into a tip for the caught player in their own buttons (`src/game/fight-tips.ts`): in practice, the tutorial, and a fighter's first three matches.
 
 ---
 

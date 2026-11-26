@@ -29,6 +29,18 @@ function punch(step: (p1?: InputFrame, p2?: InputFrame) => FightState, frames = 
 }
 
 describe("CalloutTracker", () => {
+  it("calls a counter-hit for the hitter, in practice too, and names it", () => {
+    for (const match of [true, false]) {
+      const { seen, step } = tracked({ match });
+      step(input({ punch: true }), input({ kick: true }));
+      for (let i = 0; i < 10; i++) step();
+      const timing = seen.filter((c) => c.type === "timing");
+      expect(timing).toEqual([{ type: "timing", player: 0, timing: "counter" }]);
+      expect(calloutText(timing[0])).toBe("COUNTER");
+    }
+    expect(calloutText({ type: "timing", player: 1, timing: "punish" })).toBe("PUNISH");
+  });
+
   it("calls a refused handshake, in practice too", () => {
     const sim = new FightSimulation([geo, geo], { practice: true });
     const callouts = new CalloutTracker({ match: false });

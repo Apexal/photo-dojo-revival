@@ -5,21 +5,25 @@
  */
 
 export type KeyboardLayout = "p1" | "p2";
-export type BindableAction = "left" | "right" | "up" | "down" | "punch" | "kick";
+/** `throw`: the same as punch + kick, but one key (some keyboards can't register two keys and a direction at once), and it never taunts. */
+export type BindableAction = "left" | "right" | "up" | "down" | "punch" | "kick" | "throw";
 export type KeyBindings = Record<KeyboardLayout, Record<BindableAction, number[]>>;
 
-export const BINDABLE_ACTIONS: readonly BindableAction[] = ["left", "right", "up", "down", "punch", "kick"];
+export const BINDABLE_ACTIONS: readonly BindableAction[] = ["left", "right", "up", "down", "punch", "kick", "throw"];
 export const KEYBOARD_LAYOUTS: readonly KeyboardLayout[] = ["p1", "p2"];
 
 export const KEY = {
   TAB: 9, ENTER: 13, ESC: 27, SPACE: 32, LEFT: 37, UP: 38, RIGHT: 39, DOWN: 40,
-  A: 65, D: 68, F: 70, J: 74, K: 75, N: 78, S: 83, T: 84, W: 87, NUMPAD_ONE: 97, NUMPAD_TWO: 98, F1: 112, COMMA: 188, PERIOD: 190,
+  A: 65, D: 68, F: 70, J: 74, K: 75, L: 76, N: 78, S: 83, T: 84, W: 87, NUMPAD_ONE: 97, NUMPAD_TWO: 98, NUMPAD_THREE: 99, F1: 112, COMMA: 188, PERIOD: 190, SLASH: 191,
 } as const;
 
-/** P1: WASD + J/K. P2: arrows + , (punch) and . (kick); numpad 1/2 also work if present. */
+/** P1: WASD + J/K, L throws. P2: arrows + , (punch), . (kick) and / (throw); numpad 1/2/3 also work if present. */
 export const DEFAULT_KEY_BINDINGS: KeyBindings = {
-  p1: { left: [KEY.A], right: [KEY.D], up: [KEY.W], down: [KEY.S], punch: [KEY.J], kick: [KEY.K] },
-  p2: { left: [KEY.LEFT], right: [KEY.RIGHT], up: [KEY.UP], down: [KEY.DOWN], punch: [KEY.COMMA, KEY.NUMPAD_ONE], kick: [KEY.PERIOD, KEY.NUMPAD_TWO] },
+  p1: { left: [KEY.A], right: [KEY.D], up: [KEY.W], down: [KEY.S], punch: [KEY.J], kick: [KEY.K], throw: [KEY.L] },
+  p2: {
+    left: [KEY.LEFT], right: [KEY.RIGHT], up: [KEY.UP], down: [KEY.DOWN],
+    punch: [KEY.COMMA, KEY.NUMPAD_ONE], kick: [KEY.PERIOD, KEY.NUMPAD_TWO], throw: [KEY.SLASH, KEY.NUMPAD_THREE],
+  },
 };
 
 /** Pause, the hitbox overlay, and practice's dummy picker (Tab, 1–9) can't be bound to moves. */
@@ -45,14 +49,31 @@ export function setKeyBindings(b: KeyBindings): void {
   version++;
 }
 
-/** Stored bindings, if they're well-formed (anything else falls back to the defaults). */
-export function isKeyBindings(value: unknown): value is KeyBindings {
+/**
+ * Stored bindings brought up to date: ones saved before the throw key existed
+ * get each half's default throw key, unless it's already taken (then the throw
+ * stays unbound, and punch + kick still throws). Null if they're malformed (the
+ * defaults apply).
+ */
+export function migrateKeyBindings(value: unknown): KeyBindings | null {
+  if (!value || typeof value !== "object") return null;
+  const v = value as Partial<Record<KeyboardLayout, Record<string, unknown>>>;
+  if (!KEYBOARD_LAYOUTS.every((l) => v[l] && typeof v[l] === "object")) return null;
+  const used = new Set(KEYBOARD_LAYOUTS.flatMap((l) => Object.values(v[l]!).flat()));
+  const filled = Object.fromEntries(KEYBOARD_LAYOUTS.map((l) => [
+    l, v[l]!.throw !== undefined ? v[l] : { ...v[l], throw: DEFAULT_KEY_BINDINGS[l].throw.filter((c) => !used.has(c)) },
+  ]));
+  return isKeyBindings(filled, { optional: ["throw"] }) ? filled : null;
+}
+
+/** Stored bindings, if they're well-formed (anything else falls back to the defaults). `optional` actions may have no key. */
+export function isKeyBindings(value: unknown, { optional = [] as readonly BindableAction[] } = {}): value is KeyBindings {
   if (!value || typeof value !== "object") return false;
   return KEYBOARD_LAYOUTS.every((layout) => {
     const map = (value as Record<string, unknown>)[layout];
     return Boolean(map) && BINDABLE_ACTIONS.every((a) => {
       const codes = (map as Record<string, unknown>)[a];
-      return Array.isArray(codes) && codes.length > 0 && codes.every((c) => Number.isInteger(c) && c > 0);
+      return Array.isArray(codes) && (codes.length > 0 || optional.includes(a)) && codes.every((c) => Number.isInteger(c) && c > 0);
     });
   });
 }
@@ -64,7 +85,7 @@ export function layoutForKey(keyCode: number, b: KeyBindings = current): Keyboar
   return KEYBOARD_LAYOUTS.find((layout) => BINDABLE_ACTIONS.some((a) => b[layout][a].includes(keyCode))) ?? null;
 }
 
-const ACTION_NAMES: Record<BindableAction, string> = { left: "left", right: "right", up: "up / jump", down: "down / crouch", punch: "punch", kick: "kick" };
+const ACTION_NAMES: Record<BindableAction, string> = { left: "left", right: "right", up: "up / jump", down: "down / crouch", punch: "punch", kick: "kick", throw: "throw" };
 export const actionName = (a: BindableAction) => ACTION_NAMES[a];
 
 /**
@@ -125,4 +146,7 @@ export function keyLabel(code: number): string {
 }
 
 /** The first (main) key of an action, as a label. */
-export const actionKeyLabel = (layout: KeyboardLayout, action: BindableAction, b: KeyBindings = current) => keyLabel(b[layout][action][0]);
+export const actionKeyLabel = (layout: KeyboardLayout, action: BindableAction, b: KeyBindings = current) => {
+  const code = b[layout][action][0];
+  return code === undefined ? "—" : keyLabel(code);
+};

@@ -27,6 +27,10 @@ const landed = (attack: AttackId) => (state: FightState) =>
 
 const count = (state: FightState, match: (ev: FightEvent) => boolean) => state.events.filter(match).length;
 
+/** The dummy's attacks of this kind the player blocked this frame. */
+const blocked = (attack: AttackId) => (state: FightState) =>
+  count(state, (ev) => ev.type === "hit" && ev.defender === 0 && ev.attack === attack && ev.blocked);
+
 /** Walking in from the start: done once the player is this close to the dummy. */
 export const WALK_GOAL_DISTANCE = 450;
 
@@ -61,12 +65,49 @@ export const TUTORIAL_STEPS: readonly TutorialStep[] = [
     progress: (s) => count(s, (ev) => ev.type === "hit" && ev.defender === 0 && ev.blocked),
   },
   {
+    title: "Block low",
+    how: (b) => `Hold ${b.down} when it kicks low${b.block ? ` (or ${b.block} + ${b.down})` : ""}: standing won't stop it`,
+    dummy: "pressureLow",
+    goal: 2,
+    progress: blocked("lowKick"),
+  },
+  {
+    title: "Block the jump-in",
+    how: (b) => `Hold ${b.back} when it jumps at you: stand up, a crouch won't stop it`,
+    dummy: "jumpInClose",
+    goal: 2,
+    progress: blocked("jumpKick"),
+  },
+  {
+    title: "Knock it out of the air",
+    how: (b) => `As it jumps in, ${b.uppercut ? `press ${b.uppercut} (or ${b.down} + ${b.punch})` : `${b.down} + ${b.punch}`}`,
+    dummy: "jumpInClose",
+    goal: 2,
+    // The uppercut's anti-air hit: it knocks a jumper down.
+    progress: (s) => s.events.filter((ev) => ev.type === "hit" && ev.attacker === 0 && ev.attack === "uppercut" && !ev.blocked
+      && s.events.some((k) => k.type === "knockdown" && k.player === 1)).length,
+  },
+  {
+    title: "Punish",
+    how: (b) => `Block its uppercut (hold ${b.back}), then hit it with ${b.punch} while it's stuck`,
+    dummy: "pressureUppercut",
+    goal: 2,
+    progress: (s) => count(s, (ev) => ev.type === "hit" && ev.attacker === 0 && ev.timing === "punish"),
+  },
+  {
     title: "Now throw",
-    how: (b) => `Walk right up to it, then press ${b.throw}`,
+    how: (b) => `Walk right up to it, then press ${b.throw}: throws beat blocking`,
     dummy: "stand",
     goal: 2,
     progress: (s) => count(s, (ev) => ev.type === "throw" && ev.attacker === 0 && ev.grab === "throw"),
     move: "throw",
+  },
+  {
+    title: "Break its throw",
+    how: (b) => `The moment it grabs you, press ${b.throw}`,
+    dummy: "grab",
+    goal: 2,
+    progress: (s) => count(s, (ev) => ev.type === "throwTech" && ev.defender === 0),
   },
 ];
 

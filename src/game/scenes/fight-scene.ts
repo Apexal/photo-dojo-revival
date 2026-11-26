@@ -2,7 +2,7 @@ import Phaser from "phaser";
 import { ATTACKS, frameGeometry, groundAnchorFor, type FighterGeometry } from "../../shared/frame-data";
 import { LANDMARK, type Fighter, type PoseId, type SoundId } from "../../shared/fighter-model";
 import { setSetting } from "../../shared/fighter-storage";
-import { FightSimulation, frameOf, type FightState } from "../../simulation/fight-simulation";
+import { FightSimulation, frameOf, type FightEvent, type FightState } from "../../simulation/fight-simulation";
 import { currentAttackPhase, isAttack, type FighterState } from "../../simulation/fighter-state-machine";
 import type { InputFrame } from "../../simulation/input-frame";
 import { FRAMES_PER_SECOND, MAX_HEALTH, secondsRemaining, type PlayerIndex } from "../../simulation/round-rules";
@@ -39,7 +39,8 @@ import { MatchStatsTracker } from "../../simulation/match-stats";
 import { CalloutTracker, calloutText, type Callout } from "../../simulation/callouts";
 import { stopMenuMusic } from "../menu-music";
 import { controlLabels } from "../input/control-labels";
-import { recordMatch } from "../fighter-records";
+import { recordMatch, recordOf } from "../fighter-records";
+import { showsTips, tipFor } from "../fight-tips";
 import { markPlayed } from "../played-fighters";
 import { NUDGES, Tutorial, type TutorialEvent } from "../tutorial";
 import type { SeriesKind, SeriesSession } from "../series";
@@ -101,6 +102,12 @@ export class FightScene extends Phaser.Scene {
   private callouts = new CalloutTracker({ match: true });
   /** Per player, under their health bar: first blood and hit streaks. */
   private calloutTexts: Phaser.GameObjects.Text[] = [];
+  /** COUNTER / PUNISH, under each side's callout so a streak or first blood doesn't hide it. */
+  private timingTexts: Phaser.GameObjects.Text[] = [];
+  /** Why that got through ("LOW! Block it crouching"), under the callouts on the caught player's side (fight-tips.ts). */
+  private tipTexts: Phaser.GameObjects.Text[] = [];
+  /** Who gets those tips: practice, or a fighter's first few matches. */
+  private tipsFor: [boolean, boolean] = [false, false];
   /** Under the center banner, after the K.O. */
   private perfectText!: Phaser.GameObjects.Text;
   private stage!: StageDefinition;
@@ -223,6 +230,14 @@ export class FightScene extends Phaser.Scene {
     this.calloutTexts = [0, 1].map((i) => {
       return this.add.text(i === 0 ? 40 : GAME_WIDTH - 40, 150, "", displayText(40, COLOR.party)).setOrigin(i === 0 ? 0 : 1, 0.5).setDepth(200).setVisible(false);
     });
+    this.timingTexts = [0, 1].map((i) =>
+      this.add.text(i === 0 ? 40 : GAME_WIDTH - 40, 196, "", displayText(30, COLOR.accent)).setOrigin(i === 0 ? 0 : 1, 0.5).setDepth(200).setVisible(false));
+    this.tipTexts = [0, 1].map((i) =>
+      this.add.text(i === 0 ? 40 : GAME_WIDTH - 40, 236, "", displayText(24, COLOR.bad)).setOrigin(i === 0 ? 0 : 1, 0.5).setDepth(200).setVisible(false));
+    this.tipsFor = [0, 1].map((i) => showsTips({
+      practice: Boolean(this.setup.practice), player: i as PlayerIndex, isPerson: isPlayerInput(this.setup.inputs[i]),
+      matchesPlayed: recordOf(this.registry, this.setup.entries[i].fighter.fighterId)?.matches ?? 0,
+    })) as [boolean, boolean];
     this.perfectText = this.add.text(GAME_WIDTH / 2, GAME_HEIGHT / 2 + 20, "", displayText(64, COLOR.accent)).setOrigin(0.5).setDepth(200).setVisible(false);
 
     // Pause-menu shortcut (also in Settings).
@@ -465,7 +480,7 @@ export class FightScene extends Phaser.Scene {
       this.add.text(GAME_WIDTH - 40, GAME_HEIGHT - 40, "Press any button to skip", bodyText(18, COLOR.muted, 600)).setOrigin(1, 0).setDepth(401),
     ];
     this.bannerText.setVisible(false);
-    [...this.calloutTexts, this.perfectText].forEach((t) => { this.tweens.killTweensOf(t); t.setVisible(false); });
+    [...this.calloutTexts, ...this.timingTexts, ...this.tipTexts, this.perfectText].forEach((t) => { this.tweens.killTweensOf(t); t.setVisible(false); });
     // Players are often still mashing from the knockout: ignore input for the first second.
     this.replaySkipArmedAt = performance.now() + 1000;
     this.replayPrevious = this.players.map((src) => src.read());
@@ -749,14 +764,29 @@ export class FightScene extends Phaser.Scene {
     this.bannerUntil = performance.now() + ms;
   }
 
+  /** A tip for the player who just got caught out, if they get tips (tipsFor), in their own buttons. */
+  private showTip(ev: FightEvent, state: FightState): void {
+    const tip = tipFor(ev, (p) => {
+      const input = this.setup.inputs[p];
+      return controlLabels(isPlayerInput(input) ? input : { kind: "pad", index: 0 }, state.fighters[p].facing === 1 ? "left" : "right");
+    });
+    if (!tip || !this.tipsFor[tip.player]) return;
+    const text = this.tipTexts[tip.player];
+    this.tweens.killTweensOf(text);
+    text.setText(tip.text).setAlpha(1).setVisible(true);
+    this.tweens.add({ targets: text, alpha: 0, duration: 400, delay: 1800, onComplete: () => text.setVisible(false) });
+  }
+
   /** Pops the text in, holds it, fades it. A longer streak replaces the shorter one in place. */
   private showCallouts(callouts: Callout[]): void {
     for (const c of callouts) {
       const perfect = c.type === "perfect";
-      const text = perfect ? this.perfectText : this.calloutTexts[c.player];
+      const text = perfect ? this.perfectText : c.type === "timing" ? this.timingTexts[c.player] : this.calloutTexts[c.player];
       this.tweens.killTweensOf(text);
       text.setText(calloutText(c)).setAlpha(perfect ? 0 : 1).setScale(1.4).setVisible(true);
-      const line = calloutLine(c);
+      // COUNTER / PUNISH is only said when nothing bigger is called on the same hit (one voice: it would cut that off).
+      const quiet = c.type === "timing" && callouts.some((o) => o !== c && o.type !== "timing" && calloutLine(o));
+      const line = quiet ? null : calloutLine(c);
       // PERFECT comes after the K.O.
       if (line) announce(this, line, { queue: perfect });
       this.tweens.chain({
@@ -791,6 +821,7 @@ export class FightScene extends Phaser.Scene {
         });
       }
       this.markers.addFor(ev, state);
+      if (!options.replay) this.showTip(ev, state);
       // In a replay only the sounds and shakes come back, not the announcer banners.
       if (options.replay && (ev.type === "roundStart" || ev.type === "fight" || ev.type === "roundEnd" || ev.type === "matchEnd" || ev.type === "throwTech")) continue;
       switch (ev.type) {

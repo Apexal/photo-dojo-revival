@@ -7,6 +7,21 @@ import { playRumble, type Rumble } from "./rumble";
 /** Standard mapping button indices. */
 export const PAD_BUTTON = { A: 0, B: 1, X: 2, Y: 3, LB: 4, RB: 5, LT: 6, RT: 7, SELECT: 8, START: 9, L3: 10, R3: 11, UP: 12, DOWN: 13, LEFT: 14, RIGHT: 15 } as const;
 export const STICK_DEADZONE = 0.4;
+/** Left or right counts once the stick is more than 22.5° off vertical: eight even-ish sectors. */
+const STICK_SIDE = Math.sin((22.5 * Math.PI) / 180);
+/** Up or down counts once it's more than 35° off horizontal, so walking with the stick a little high doesn't jump. */
+const STICK_VERTICAL = Math.sin((35 * Math.PI) / 180);
+
+/**
+ * The left stick as directions, by angle once it's past a round deadzone, so how
+ * far it's pushed doesn't matter: a half-pushed down-back is down-back, not just back.
+ */
+export function stickDirections(x: number, y: number): { left: boolean; right: boolean; up: boolean; down: boolean } {
+  const r = Math.hypot(x, y);
+  if (r < STICK_DEADZONE) return { left: false, right: false, up: false, down: false };
+  const sx = x / r, sy = y / r;
+  return { left: sx < -STICK_SIDE, right: sx > STICK_SIDE, up: sy < -STICK_VERTICAL, down: sy > STICK_VERTICAL };
+}
 
 /**
  * A player's controller: a slot and the connection in it when they picked it
@@ -25,6 +40,9 @@ export interface PadBinding {
 
 const livePads = (): (Gamepad | null)[] | undefined =>
   typeof navigator !== "undefined" && navigator.getGamepads ? Array.from(navigator.getGamepads()) : undefined;
+
+/** The model (`Gamepad.id`) of the pad in a slot now, if there is one. */
+export const livePadId = (index: number): string | undefined => livePads()?.[index]?.id;
 
 /** The player's binding to whatever pad is in a slot now (fighter select, a reconnect). */
 export function padBinding(index: number): PadBinding {
@@ -62,10 +80,11 @@ interface PadState {
 }
 
 /**
- * A/Cross = punch, B/Circle = kick, X/Square = uppercut, Y/Triangle = throw (down + Y
- * the signature move; never a taunt), either trigger (or bumper) = standing block,
- * a stick click (L3 / R3) = taunt, the only way to taunt on a pad,
- * d-pad or left stick to move, Start = pause.
+ * A/Cross = punch, B/Circle = kick, X/Square = uppercut, Y/Triangle or RB/R1 = throw
+ * (down + it the signature move; never a taunt), either trigger = block (low with
+ * down held), LB/L1 or a right stick click = taunt, the only ways to taunt on a pad
+ * (not the left stick: it's pressed hard while moving), d-pad or left stick to move,
+ * Start = pause. Labels for each make of pad: control-labels.ts.
  * A player's source (given a PadBinding) reads only the connection it was bound
  * to: once that pad sleeps or unplugs it's disconnected and reads nothing, even
  * when another pad lands in its slot, until a button on a pad nobody else holds
@@ -168,21 +187,20 @@ export class GamepadInputSource implements InputSource {
   read(): InputFrame {
     const pad = this.state();
     if (!pad) return { ...EMPTY_INPUT };
-    const x = pad.axis(0);
-    const y = pad.axis(1);
+    const stick = stickDirections(pad.axis(0), pad.axis(1));
     for (const i of this.held) if (!pad.button(i)) this.held.delete(i);
     const b = (i: number) => pad.button(i) && !this.held.has(i);
     return {
-      left: b(PAD_BUTTON.LEFT) || x < -STICK_DEADZONE,
-      right: b(PAD_BUTTON.RIGHT) || x > STICK_DEADZONE,
-      up: b(PAD_BUTTON.UP) || y < -STICK_DEADZONE * 1.5,
-      down: b(PAD_BUTTON.DOWN) || y > STICK_DEADZONE * 1.5,
+      left: b(PAD_BUTTON.LEFT) || stick.left,
+      right: b(PAD_BUTTON.RIGHT) || stick.right,
+      up: b(PAD_BUTTON.UP) || stick.up,
+      down: b(PAD_BUTTON.DOWN) || stick.down,
       punch: b(PAD_BUTTON.A),
       kick: b(PAD_BUTTON.B),
-      block: b(PAD_BUTTON.LT) || b(PAD_BUTTON.RT) || b(PAD_BUTTON.LB) || b(PAD_BUTTON.RB),
-      throw: b(PAD_BUTTON.Y),
+      block: b(PAD_BUTTON.LT) || b(PAD_BUTTON.RT),
+      throw: b(PAD_BUTTON.Y) || b(PAD_BUTTON.RB),
       uppercut: b(PAD_BUTTON.X),
-      taunt: b(PAD_BUTTON.L3) || b(PAD_BUTTON.R3),
+      taunt: b(PAD_BUTTON.LB) || b(PAD_BUTTON.R3),
       hasTauntButton: true,
     };
   }

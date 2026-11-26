@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { GamepadInputSource, PAD_BUTTON, padBinding } from "../src/game/input/gamepad-input-source";
+import { GamepadInputSource, PAD_BUTTON, padBinding, stickDirections } from "../src/game/input/gamepad-input-source";
 import { sameInput } from "../src/game/input/input-descriptor";
 import { padConnections } from "../src/game/input/pad-connections";
 import { signalingBaseUrl, signalingHttpBase, signalingUrl } from "../src/transfer/signaling-client";
@@ -27,17 +27,20 @@ describe("GamepadInputSource", () => {
     expect(source(fakePad([PAD_BUTTON.Y])).read()).toMatchObject({ throw: true, punch: false, kick: false, block: false });
   });
 
-  it("X is the uppercut button, a stick click the taunt button", () => {
-    expect(source(fakePad([PAD_BUTTON.X])).read()).toMatchObject({ uppercut: true, punch: false, block: false });
-    expect(source(fakePad([PAD_BUTTON.L3])).read()).toMatchObject({ taunt: true, down: false });
-    expect(source(fakePad([PAD_BUTTON.R3])).read().taunt).toBe(true);
+  it("RB is a second throw button", () => {
+    expect(source(fakePad([PAD_BUTTON.RB])).read()).toMatchObject({ throw: true, block: false, taunt: false });
   });
 
-  it("either trigger or bumper is the block button", () => {
+  it("X is the uppercut button; LB or a right stick click taunts, a left stick click does nothing", () => {
+    expect(source(fakePad([PAD_BUTTON.X])).read()).toMatchObject({ uppercut: true, punch: false, block: false });
+    expect(source(fakePad([PAD_BUTTON.LB])).read()).toMatchObject({ taunt: true, block: false });
+    expect(source(fakePad([PAD_BUTTON.R3])).read().taunt).toBe(true);
+    expect(source(fakePad([PAD_BUTTON.L3])).read()).toMatchObject({ taunt: false, down: false });
+  });
+
+  it("either trigger is the block button", () => {
     expect(source(fakePad([PAD_BUTTON.LT])).read()).toMatchObject({ block: true, punch: false });
     expect(source(fakePad([PAD_BUTTON.RT])).read().block).toBe(true);
-    expect(source(fakePad([PAD_BUTTON.LB])).read().block).toBe(true);
-    expect(source(fakePad([PAD_BUTTON.RB])).read().block).toBe(true);
     expect(source(fakePad([PAD_BUTTON.A])).read().block).toBe(false);
   });
 
@@ -45,6 +48,21 @@ describe("GamepadInputSource", () => {
     expect(source(fakePad([], [0.2, 0])).read().right).toBe(false);
     expect(source(fakePad([], [0.8, 0])).read().right).toBe(true);
     expect(source(fakePad([], [0, 0.9])).read().down).toBe(true);
+  });
+
+  it("reads the stick by angle, however far it's pushed", () => {
+    const at = (deg: number, r: number) => stickDirections(r * Math.cos((deg * Math.PI) / 180), -r * Math.sin((deg * Math.PI) / 180));
+    // A half-pushed down-back is still down-back (it used to read as back only).
+    expect(at(-135, 0.6)).toEqual({ left: true, right: false, up: false, down: true });
+    expect(at(-135, 1)).toEqual({ left: true, right: false, up: false, down: true });
+    expect(at(-135, 0.3)).toEqual({ left: false, right: false, up: false, down: false });
+    // Walking with the stick a little high or low isn't a jump or a crouch.
+    expect(at(30, 1)).toEqual({ left: false, right: true, up: false, down: false });
+    expect(at(-30, 1)).toEqual({ left: false, right: true, up: false, down: false });
+    expect(at(40, 1)).toMatchObject({ right: true, up: true });
+    // Near vertical is straight up or down.
+    expect(at(80, 1)).toEqual({ left: false, right: false, up: true, down: false });
+    expect(at(-100, 0.5)).toEqual({ left: false, right: false, up: false, down: true });
   });
 
   it("Start is edge-triggered", () => {
@@ -117,36 +135,45 @@ describe("voice take choice", () => {
   });
 });
 
-import { MOVE_GUIDE, controlLabels, moveGuide } from "../src/game/input/control-labels";
+import { MOVE_GUIDE, controlLabels, moveGuide, padFamily } from "../src/game/input/control-labels";
 
 describe("pre-match control labels", () => {
   const how = (name: string, labels: ReturnType<typeof controlLabels>) => MOVE_GUIDE.find((m) => m.name === name)!.how(labels);
 
   it("P1 keyboard on the left: back is A, forward is D", () => {
     const l = controlLabels({ kind: "keyboard", layout: "p1" }, "left");
-    expect(how("Walk", l)).toBe("A / D");
+    expect(how("Walk · dash", l)).toBe("A / D, tap twice to dash");
     expect(how("Block", l)).toBe("hold A or S");
     expect(how("Uppercut", l)).toBe("S + J");
-    expect(how("Throw", l)).toBe("J + K");
+    expect(how("Throw", l)).toBe("L or J + K");
   });
 
   it("P2 keyboard on the right: back is →, buttons are , and . (no numpad needed)", () => {
     const l = controlLabels({ kind: "keyboard", layout: "p2" }, "right");
-    expect(how("Walk", l)).toBe("→ / ←");
+    expect(how("Walk · dash", l)).toBe("→ / ←, tap twice to dash");
     expect(how("Block", l)).toBe("hold → or ↓");
     expect(how("Low kick", l)).toBe("↓ + .");
-    expect(how("Throw", l)).toBe(", + .");
+    expect(how("Throw", l)).toBe("/ or , + .");
   });
 
   it("gamepads use A/B and the d-pad, mirrored by side", () => {
     const right = controlLabels({ kind: "pad", index: 0 }, "right");
     expect(how("Punch", right)).toBe("Ⓐ");
-    expect(how("Walk", right)).toBe("▶ / ◀");
-    expect(how("Walk", controlLabels({ kind: "pad", index: 0 }, "left"))).toBe("◀ / ▶");
-    expect(how("Throw", right)).toBe("Ⓨ");
-    expect(how("Block", right)).toBe("LT / RT, or hold ▶ / ▼");
+    expect(how("Walk · dash", right)).toBe("▶ / ◀, tap twice to dash");
+    expect(how("Walk · dash", controlLabels({ kind: "pad", index: 0 }, "left"))).toBe("◀ / ▶, tap twice to dash");
+    expect(how("Throw", right)).toBe("Ⓨ or RB");
+    expect(how("Block", right)).toBe("LT / RT (+ ▼ low), or hold ▶ / ▼");
     expect(how("Uppercut", right)).toBe("Ⓧ, or ▼ + Ⓐ");
     expect(moveGuide("brawler").at(-1)!.how(right)).toBe("▼ + Ⓨ");
+  });
+
+  it("names the buttons for the make of pad", () => {
+    const ps = controlLabels({ kind: "pad", index: 0, connection: 1, id: "DualSense Wireless Controller (STANDARD GAMEPAD Vendor: 054c Product: 0ce6)" }, "left");
+    expect(ps).toMatchObject({ punch: "✕", kick: "○", uppercut: "□", throw: "△", throwAlt: "R1", block: "L2 / R2" });
+    const sw = controlLabels({ kind: "pad", index: 0, connection: 1, id: "057e-2009-Pro Controller" }, "left");
+    expect(sw).toMatchObject({ punch: "Ⓑ", kick: "Ⓐ", block: "ZL / ZR" });
+    expect(padFamily("Xbox Wireless Controller (STANDARD GAMEPAD Vendor: 045e Product: 0b13)")).toBe("xbox");
+    expect(padFamily(undefined)).toBe("xbox");
   });
 
   it("lists every move a player can do", () => {
@@ -177,11 +204,11 @@ function fakeFight() {
 describe("practice dummy", () => {
   const frames = (d: DummyInputSource, n: number) => Array.from({ length: n }, () => d.read());
 
-  it("blocks by holding away from the player, whichever way it faces", () => {
+  it("blocks by holding away from the player, whichever way it faces, and the block button so it stands its ground", () => {
     const fight = fakeFight();
     const d = new DummyInputSource(fight);
     d.setBehavior("block");
-    expect(d.read()).toMatchObject({ right: true, left: false });
+    expect(d.read()).toMatchObject({ right: true, left: false, block: true });
     fight.face(1);
     expect(d.read()).toMatchObject({ left: true, right: false });
   });

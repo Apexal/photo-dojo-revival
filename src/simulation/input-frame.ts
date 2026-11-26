@@ -5,13 +5,13 @@ export interface InputFrame {
   down: boolean;
   punch: boolean;
   kick: boolean;
-  /** Dedicated standing block (a controller's triggers or bumpers): guards without walking, whatever the opponent is doing. */
+  /** Dedicated block (a controller's triggers): guards without walking, whatever the opponent is doing; with down held, a crouching guard. */
   block: boolean;
-  /** Dedicated throw button (a controller's Y): the same as punch + kick together, so down + it is the signature move. */
+  /** Dedicated throw button (a controller's Y or right bumper): the same as punch + kick together, so down + it is the signature move. */
   throw: boolean;
   /** Dedicated uppercut button (a controller's X): the same as down + punch, without crouching first. */
   uppercut: boolean;
-  /** Dedicated taunt button (a controller's stick click). */
+  /** Dedicated taunt button (a controller's left bumper or right stick click). */
   taunt: boolean;
   /**
    * The device has a taunt button (a controller): it's the only way to taunt,

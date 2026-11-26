@@ -77,7 +77,7 @@ export class SettingsScene extends Phaser.Scene {
     this.promptText = this.add.text(GAME_WIDTH / 2, 552, "", displayText(26, COLOR.accent, { align: "center" })).setOrigin(0.5, 0);
     this.messageText = this.add.text(GAME_WIDTH / 2, 592, "", bodyText(19, COLOR.bad, 600)).setOrigin(0.5, 0);
     this.add.text(GAME_WIDTH / 2, GAME_HEIGHT - 70,
-      "Throws need punch + kick pressed together. Some keyboards can't register that while a direction is held;\nif throws don't come out, remap to keys that are further apart.", bodyText(16, COLOR.muted, 600, { align: "center" })).setOrigin(0.5, 0);
+      "Each half has a throw key (L, and / for P2, by default): punch + kick together throws too, but some keyboards\ncan't register two keys while a direction is held. The throw key also breaks throws and, with down, is the signature move.", bodyText(16, COLOR.muted, 600, { align: "center" })).setOrigin(0.5, 0);
     this.add.text(GAME_WIDTH / 2, 552, "▲ ▼ choose  ·  ◀ ▶ change  ·  punch / Enter: select  ·  kick / Esc: back", bodyText(17, COLOR.muted, 600))
       .setOrigin(0.5, 0).setName("hint");
 
