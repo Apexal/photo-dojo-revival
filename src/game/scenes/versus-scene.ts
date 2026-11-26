@@ -15,6 +15,8 @@ import { playVoice } from "../render/talking-mouth-view";
 import { GAME_HEIGHT, GAME_WIDTH, PLAYER_COLORS } from "../render/stage";
 import { bodyText, COLOR, displayText, HEX, popBox, RADIUS, SHADOW, stamp } from "../render/theme";
 import { stageFor } from "../stages/stages";
+import { adornmentOf, reputationOf, REPUTATION_TIERS, type Reputation } from "../reputation";
+import { haloOutline, hornTriangles } from "../render/reputation-mark";
 import { pickTake } from "../sound-choice";
 import { formatTape, measureFighter, TAPE_LABELS, TAPE_STATS, tapeEdges, tapeVerdict } from "../tale-of-the-tape";
 import { cycleLength, routineAt, routineLength, showOffRoutine, signatureStartFrame, type RoutineStep } from "../versus-intro";
@@ -41,6 +43,8 @@ const INTRO_FRAMES = 15 * 60;
 const TAPE_W = 470;
 const TAPE_TOP = 140;
 const ROW_H = 64;
+/** The manners meter: Rude on the left to Respectful on the right, one segment per tier. */
+const METER = { w: 132, h: 9, gap: 3 } as const;
 /** A press carried over from stage select doesn't count as a skip. */
 const INPUT_DELAY_MS = 300;
 const DEPTH = { stage: 0, dim: 1, slabs: 2, fighters: 5, tape: 10, banner: 20, flash: 30 } as const;
@@ -63,6 +67,9 @@ export class VersusScene extends Phaser.Scene {
   private skips: [boolean, boolean] = [false, false];
   private skipTexts: Phaser.GameObjects.Text[] = [];
   private progress!: Phaser.GameObjects.Graphics;
+  /** Halo or horns over each fighter's head (null: neither), and where they're drawn. */
+  private adornments: ("halo" | "horns" | null)[] = [];
+  private marks!: Phaser.GameObjects.Graphics;
   private objectUrls: string[] = [];
   private openedAt = 0;
   private frame = -1;
@@ -110,6 +117,9 @@ export class VersusScene extends Phaser.Scene {
       return view;
     });
 
+    this.adornments = fighters.map((f) => adornmentOf(reputationOf(recordOf(this.registry, f.fighterId))));
+    this.marks = this.add.graphics().setDepth(DEPTH.fighters + 1);
+
     const lastPose = Math.max(...this.routines.map((r, i) => T.routine + i * P2_DELAY_FRAMES + routineLength(r)));
     this.timeline = { edge: lastPose + EDGE_AFTER_POSE, end: INTRO_FRAMES };
     this.buildTape(fighters, geometry);
@@ -146,6 +156,7 @@ export class VersusScene extends Phaser.Scene {
     const tweening = getOptions(this.registry).poseTweening;
     const states = [0, 1].map((i) => this.fighterAt(i, this.frame));
     this.views.forEach((v, i) => v.render(states[i], this.frame, tweening));
+    this.drawMarks();
     const t = Math.min(1, this.frame / this.timeline.end);
     this.progress.clear().fillStyle(HEX.accent, 0.8).fillRect(0, GAME_HEIGHT - 4, GAME_WIDTH * t, 4);
     if (this.frame >= this.timeline.end) this.leave();
@@ -181,6 +192,28 @@ export class VersusScene extends Phaser.Scene {
       if (start < 0) return;
       for (let at = T.routine + i * P2_DELAY_FRAMES + start; at < INTRO_FRAMES; at += cycleLength(this.routines[i])) {
         this.cue(at, () => this.playVoice(i, "attack"));
+      }
+    });
+  }
+
+  /** The halo (gold, bobbing) or horns (dark, rimmed red: they read on any photo) over a fighter at either end of the reputation scale. */
+  private drawMarks(): void {
+    this.marks.clear();
+    this.views.forEach((view, i) => {
+      const kind = this.adornments[i];
+      const drawn = kind && view.drawnSkeleton();
+      if (!drawn) return;
+      if (kind === "halo") {
+        const ring = haloOutline(drawn.landmarks, (Math.sin(this.frame / 14 + i) + 1) / 2)?.map(drawn.toScreen);
+        if (!ring) return;
+        this.marks.lineStyle(9, HEX.accent, 0.3).strokePoints(ring, true, true);
+        this.marks.lineStyle(4, HEX.accent, 1).strokePoints(ring, true, true);
+      } else {
+        for (const tri of hornTriangles(drawn.landmarks) ?? []) {
+          const [a, b, c] = tri.map(drawn.toScreen);
+          this.marks.fillStyle(HEX.ink, 1).fillTriangle(a.x, a.y, b.x, b.y, c.x, c.y);
+          this.marks.lineStyle(3, HEX.bad, 1).strokeTriangle(a.x, a.y, b.x, b.y, c.x, c.y);
+        }
       }
     });
   }
@@ -244,7 +277,8 @@ export class VersusScene extends Phaser.Scene {
     const tape = geometry.map(measureFighter);
     const edges = tapeEdges(tape[0], tape[1]);
     const records = fighters.map((f) => recordOf(this.registry, f.fighterId));
-    const rows: { label: string; values: [string, string]; notes: [string, string]; edge: 0 | 1 | null }[] = [
+    const reputations = records.map(reputationOf);
+    const rows: { label: string; values: [string, string]; notes: [string, string]; edge: 0 | 1 | null; meters?: Reputation[] }[] = [
       ...TAPE_STATS.map((stat) => ({
         label: TAPE_LABELS[stat],
         values: [formatTape(tape[0][stat]), formatTape(tape[1][stat])] as [string, string],
@@ -263,6 +297,13 @@ export class VersusScene extends Phaser.Scene {
         notes: records.map((r) => (r?.matches ? `best streak ${r.longestStreak}` : "first fight")) as [string, string],
         edge: null,
       },
+      {
+        label: "Manners",
+        values: reputations.map((r) => (r.known ? r.label : "Clean slate")) as [string, string],
+        notes: ["", ""],
+        edge: null,
+        meters: reputations,
+      },
     ];
 
     const height = rows.length * ROW_H + 60;
@@ -279,20 +320,23 @@ export class VersusScene extends Phaser.Scene {
       const sides = ([0, 1] as const).map((i) => {
         const x = i === 0 ? cx - 62 : cx + 62;
         const origin = i === 0 ? 1 : 0;
-        const color = row.edge === i ? PLAYER_CSS[i] : COLOR.fg;
+        const meter = row.meters?.[i];
+        const color = row.edge === i ? PLAYER_CSS[i] : meter ? mannersColor(meter) : COLOR.fg;
         const value = this.add.text(x, y, row.values[i], displayText(26, color, { outline: false })).setOrigin(origin, 0);
-        const note = this.add.text(x, y + 34, row.notes[i], bodyText(15, row.edge === i ? COLOR.accent : COLOR.muted, 800)).setOrigin(origin, 0);
         fit(value, TAPE_W / 2 - 80);
+        if (meter) return [value, this.drawMeter(i === 0 ? x - METER.w : x, y + 38, meter)];
+        const note = this.add.text(x, y + 34, row.notes[i], bodyText(15, row.edge === i ? COLOR.accent : COLOR.muted, 800)).setOrigin(origin, 0);
         fit(note, TAPE_W / 2 - 80);
         return [value, note];
       });
-      const all = [label, ...sides.flat()].map((o) => o.setDepth(DEPTH.tape).setAlpha(0));
+      [label, ...sides.flat()].forEach((o) => o.setDepth(DEPTH.tape).setAlpha(0));
       const at = T.rows + r * T.rowGap;
       // Each side slides in from its own fighter.
       sides.forEach((objects, i) => objects.forEach((o) => { o.x += i === 0 ? -40 : 40; }));
       this.cue(at, () => {
         playGameSound(this, "tick", 0.7);
-        all.forEach((o) => this.tweens.add({ targets: o, alpha: 1, x: o === label ? o.x : o.x + (o.originX === 1 ? 40 : -40), duration: 180, ease: "Cubic.easeOut" }));
+        this.tweens.add({ targets: label, alpha: 1, duration: 180, ease: "Cubic.easeOut" });
+        sides.forEach((objects, i) => objects.forEach((o) => this.tweens.add({ targets: o, alpha: 1, x: o.x + (i === 0 ? 40 : -40), duration: 180, ease: "Cubic.easeOut" })));
         // The edge pulses once.
         if (row.edge !== null) {
           const [value] = sides[row.edge];
@@ -310,6 +354,30 @@ export class VersusScene extends Phaser.Scene {
       this.tweens.add({ targets: edgeStamp, alpha: 1, scale: 1, duration: 180, ease: "Cubic.easeIn" });
       this.time.delayedCall(180, () => { playGameSound(this, "thud", 1); this.shake(160, 5); });
     });
+  }
+
+  /**
+   * The manners meter at (left, top): a segment per tier, red (Rude) to green
+   * (Respectful), the fighter's own lit with a pip at their score. A clean
+   * slate lights none.
+   */
+  private drawMeter(left: number, top: number, r: Reputation): Phaser.GameObjects.Graphics {
+    const g = this.add.graphics();
+    const n = REPUTATION_TIERS.length;
+    const seg = (METER.w - (n - 1) * METER.gap) / n;
+    for (let t = 0; t < n; t++) {
+      const c = Phaser.Display.Color.Interpolate.ColorWithColor(
+        Phaser.Display.Color.IntegerToColor(HEX.bad), Phaser.Display.Color.IntegerToColor(HEX.ok), n - 1, t);
+      g.fillStyle(Phaser.Display.Color.GetColor(c.r, c.g, c.b), r.known && t === r.tier ? 1 : 0.3)
+        .fillRoundedRect(left + t * (seg + METER.gap), top, seg, METER.h, 3);
+    }
+    if (r.known) {
+      const px = left + r.score * METER.w;
+      g.fillStyle(HEX.fg, 1).lineStyle(2, HEX.ink, 1)
+        .fillTriangle(px - 6, top - 7, px + 6, top - 7, px, top + 1)
+        .strokeTriangle(px - 6, top - 7, px + 6, top - 7, px, top + 1);
+    }
+    return g;
   }
 
   // --- skipping and moving on ----------------------------------------------------------
@@ -346,6 +414,12 @@ export class VersusScene extends Phaser.Scene {
   private shake(ms: number, pixels: number): void {
     if (getOptions(this.registry).screenShake) this.cameras.main.shake(ms, pixels / GAME_WIDTH);
   }
+}
+
+/** The ends of the scale stand out; everything between reads plainly. */
+function mannersColor(r: Reputation): string {
+  if (!r.known) return COLOR.muted;
+  return r.tier === 0 ? COLOR.bad : r.tier === REPUTATION_TIERS.length - 1 ? COLOR.ok : COLOR.fg;
 }
 
 /** Shrink a text wider than `width`. */

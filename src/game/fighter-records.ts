@@ -2,6 +2,7 @@ import type Phaser from "phaser";
 import { getSetting, setSetting } from "../shared/fighter-storage";
 import { isAttackId, type AttackId } from "../shared/frame-data";
 import { mostLanded, type PlayerStats } from "../simulation/match-stats";
+import { addManners, seedManners, type Manners } from "./reputation";
 import type { PlayerIndex, RoundOutcome } from "../simulation/round-rules";
 
 /**
@@ -22,8 +23,14 @@ export interface FighterRecord {
   blocks: number;
   throws: number;
   knockdowns: number;
+  /** Round intros played through: handshakes on offer (reputation.ts). Records older than it have 0. */
+  handshakes: number;
   /** Round-intro handshakes refused. Not shown until there's one. */
   snubs: number;
+  /** Taunts over a floored opponent. Not shown until there's one. */
+  gloats: number;
+  /** Good and bad manners, recent matches weighing most: what their reputation is read from (reputation.ts). */
+  manners: Manners;
   /** Best over all matches. */
   longestStreak: number;
   /** Clean hits by attack, over all matches. */
@@ -45,11 +52,12 @@ const REGISTRY_KEY = "fighterRecords";
 
 export const emptyRecord = (): FighterRecord => ({
   matches: 0, wins: 0, losses: 0, draws: 0, roundsWon: 0, perfectRounds: 0, damageDealt: 0,
-  attacks: 0, hits: 0, blocks: 0, throws: 0, knockdowns: 0, snubs: 0, longestStreak: 0, movesLanded: {}, versus: {},
+  attacks: 0, hits: 0, blocks: 0, throws: 0, knockdowns: 0, handshakes: 0, snubs: 0, gloats: 0, longestStreak: 0, movesLanded: {}, versus: {},
+  manners: { good: 0, bad: 0 },
 });
 
-type CountField = Exclude<keyof FighterRecord, "movesLanded" | "versus">;
-const FIELDS = (Object.keys(emptyRecord()) as (keyof FighterRecord)[]).filter((k): k is CountField => k !== "movesLanded" && k !== "versus");
+type CountField = Exclude<keyof FighterRecord, "movesLanded" | "versus" | "manners">;
+const FIELDS = (Object.keys(emptyRecord()) as (keyof FighterRecord)[]).filter((k): k is CountField => k !== "movesLanded" && k !== "versus" && k !== "manners");
 const isCount = (n: unknown): n is number => typeof n === "number" && Number.isFinite(n) && n >= 0;
 
 /** A saved record, with anything missing or malformed as 0 (so new fields don't break old saves). */
@@ -72,6 +80,10 @@ export function parseRecord(value: unknown): FighterRecord {
       record.versus[id] = { wins: isCount(wins) ? wins : 0, losses: isCount(losses) ? losses : 0, draws: isCount(draws) ? draws : 0 };
     }
   }
+  const manners = (value as Record<string, unknown>).manners;
+  const { good, bad } = (typeof manners === "object" && manners !== null ? manners : {}) as Record<string, unknown>;
+  // Saved before manners were kept: start them from the career counts.
+  record.manners = isCount(good) && isCount(bad) ? { good, bad } : seedManners(record);
   return record;
 }
 
@@ -103,7 +115,10 @@ export function addMatch(record: FighterRecord, stats: PlayerStats, side: Player
     blocks: record.blocks + stats.blocks,
     throws: record.throws + stats.throws,
     knockdowns: record.knockdowns + stats.knockdowns,
+    handshakes: record.handshakes + stats.handshakes,
     snubs: record.snubs + stats.snubs,
+    gloats: record.gloats + stats.gloats,
+    manners: addManners(record.manners, stats),
     longestStreak: Math.max(record.longestStreak, stats.longestStreak),
     movesLanded: addCounts(record.movesLanded, stats.movesLanded),
     versus,

@@ -9,6 +9,7 @@ import { MOVE_NAMES } from "../move-names";
 import { GAME_HEIGHT, GAME_WIDTH } from "../render/stage";
 import { REGISTRY } from "./boot-scene";
 import { bodyText, COLOR, displayText, drawBackdrop, HEX, popBox, RADIUS, SHADOW } from "../render/theme";
+import { reputationOf } from "../reputation";
 
 export interface FighterStatsSceneData {
   fighterId: string;
@@ -94,6 +95,8 @@ export class FighterStatsScene extends Phaser.Scene {
       ["Best hit streak", String(r.longestStreak)],
       ["Favorite move", favorite ? MOVE_NAMES[favorite] : "–"],
       ...(r.snubs ? [["Handshakes refused", String(r.snubs)] as [string, string]] : []),
+      ...(r.gloats ? [["Gloats", String(r.gloats)] as [string, string]] : []),
+      ...(r.snubs || r.gloats ? [["Reputation", reputationOf(r).label] as [string, string]] : []),
     ];
     const rowH = 31;
     popBox(this, x - 22, top - 16, 404, rows.length * rowH + 26, { fill: HEX.panel, radius: RADIUS.lg, shadow: SHADOW.lg }).setDepth(-2);
